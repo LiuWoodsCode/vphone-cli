@@ -122,7 +122,7 @@ brew install aria2 wget gnu-tar openssl@3 ldid-procursus sshpass keystone libusb
 **Submodules** — this repo uses git submodules for resources, vendored Swift deps, and toolchain sources under `scripts/repos/`. Clone with:
 
 ```bash
-git clone --recurse-submodules https://github.com/Lakr233/vphone-cli.git
+git clone --recurse-submodules https://github.com/LiuWoodsCode/vphone-cli.git
 ```
 
 ## Quick Start
