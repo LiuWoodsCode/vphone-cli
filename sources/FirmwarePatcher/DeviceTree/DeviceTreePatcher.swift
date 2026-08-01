@@ -110,9 +110,9 @@ public final class DeviceTreePatcher: Patcher {
             property: "serial-number",
             length: 12,
             flags: 0,
-            value: .string("vphone-1337"),
+            value: .string("FLVRF0LEY01"),
             patchID: "devicetree.serial_number",
-            description: "Set serial number to vphone-1337"
+            description: "Set serial number to FLVRF0LEY01"
         ),
         PropertyPatch(
             nodePath: ["device-tree", "buttons"],
@@ -125,6 +125,24 @@ public final class DeviceTreePatcher: Patcher {
         ),
         PropertyPatch(
             nodePath: ["device-tree", "product"],
+            property: "watch-companion",
+            length: 4,
+            flags: 0,
+            value: .integer(1),
+            patchID: "devicetree.watch_companion",
+            description: "Enable Apple Watch companion support"
+        ),
+        PropertyPatch(
+            nodePath: ["device-tree", "product"],
+            property: "assistant",
+            length: 4,
+            flags: 0,
+            value: .integer(1),
+            patchID: "devicetree.assistant",
+            description: "Enable Siri assistant support"
+        ),
+        PropertyPatch(
+            nodePath: ["device-tree", "product"],
             property: "artwork-device-subtype",
             length: 4,
             flags: 0,
@@ -132,6 +150,35 @@ public final class DeviceTreePatcher: Patcher {
             patchID: "devicetree.artwork_device_subtype",
             description: "Set artwork device subtype to 2556"
         ),
+        PropertyPatch(
+          nodePath: ["device-tree", "product"],
+          property: "product-name",
+          length: 16, // "Butcher Vanity" + NUL
+          flags: 0,
+          value: .string("Butcher Vanity"),
+          patchID: "devicetree.product_name",
+          description: "Set product name to Butcher Vanity"
+      ),
+
+      PropertyPatch(
+          nodePath: ["device-tree", "product"],
+          property: "product-description",
+          length: 16, // "Butcher Vanity" + NUL
+          flags: 0,
+          value: .string("Butcher Vanity"),
+          patchID: "devicetree.product_description",
+          description: "Set product description to Butcher Vanity"
+      ),
+
+      PropertyPatch(
+          nodePath: ["device-tree"],
+          property: "model-number",
+          length: 7, // if this property exists
+          flags: 0,
+          value: .string("YIXI<3"),
+          patchID: "devicetree.model",
+          description: "Set model name to Butcher Vanity"
+      ),
         PropertyPatch(
             nodePath: ["device-tree", "product"],
             property: "island-notch-location",
