@@ -79,6 +79,15 @@ class VPhoneKeyHelper {
         control.sendHIDPress(page: 0x0C, usage: 0xEA)
     }
 
+    func sendSiri() {
+        guard requireConnection() else { return }
+        control.sendHIDPress(page: 0x0C, usage: 0xCF)
+    }
+
+    func sendSleep() {
+        guard requireConnection() else { return }
+        control.sendHIDPress(page: 0x0C, usage: 0x32)
+    }
     // MARK: - Combos
 
     func sendSpotlight() {

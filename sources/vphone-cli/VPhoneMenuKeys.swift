@@ -9,8 +9,10 @@ extension VPhoneMenuController {
         let menu = NSMenu(title: "Keys")
         menu.addItem(makeItem("Home Screen", action: #selector(sendHome)))
         menu.addItem(makeItem("Power", action: #selector(sendPower)))
+        menu.addItem(makeItem("Sleep", action: #selector(sendSleep)))
         menu.addItem(makeItem("Volume Up", action: #selector(sendVolumeUp)))
         menu.addItem(makeItem("Volume Down", action: #selector(sendVolumeDown)))
+        menu.addItem(makeItem("Siri", action: #selector(sendSiri)))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(makeItem("Spotlight (Cmd+Space)", action: #selector(sendSpotlight)))
         menu.addItem(NSMenuItem.separator())
@@ -44,6 +46,14 @@ extension VPhoneMenuController {
 
     @objc func sendVolumeDown() {
         keyHelper.sendVolumeDown()
+    }
+
+    @objc func sendSiri() {
+        keyHelper.sendSiri()
+    }
+
+    @objc func sendSleep() {
+        keyHelper.sendSleep()
     }
 
     @objc func sendSpotlight() {

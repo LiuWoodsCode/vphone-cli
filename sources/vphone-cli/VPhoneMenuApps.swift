@@ -23,6 +23,31 @@ extension VPhoneMenuController {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Special Bookmarks
+        let bookmarksItem = NSMenuItem(title: "Go to site", action: nil, keyEquivalent: "")
+        let bookmarksMenu = NSMenu(title: "Go to site")
+
+        bookmarksMenu.addItem(makeItem("butcher vanity yt",
+                                    action: #selector(goToButcherVanityYouTube)))
+        bookmarksMenu.addItem(makeItem("butcher vanity google",
+                                    action: #selector(goToButcherVanityGoogle)))
+        bookmarksMenu.addItem(.separator())
+        bookmarksMenu.addItem(makeItem("ddlc",
+                                    action: #selector(goToDdlc)))
+        bookmarksMenu.addItem(makeItem("dan salvato",
+                                    action: #selector(goToDan)))
+        bookmarksMenu.addItem(.separator())
+        bookmarksMenu.addItem(makeItem("creator github",
+                                    action: #selector(goToLwcGithub)))
+        bookmarksMenu.addItem(makeItem("http on local mac",
+                                    action: #selector(goToLocalMac)))
+
+        bookmarksItem.submenu = bookmarksMenu
+        menu.addItem(bookmarksItem)
+
+        menu.addItem(.separator())
+
+
         let install = makeItem("Install IPA/TIPA...", action: #selector(installIPAFromDisk))
         install.isEnabled = false
         installPackageItem = install
@@ -133,6 +158,44 @@ extension VPhoneMenuController {
             }
         }
     }
+
+    private func openBookmark(_ url: String) {
+        Task {
+            do {
+                try await control.openURL(url)
+            } catch {
+                showAlert(
+                    title: "Open URL",
+                    message: "Fuck you! \(error)",
+                    style: .warning
+                )
+            }
+        }
+    }
+
+@objc func goToButcherVanityYouTube() {
+    openBookmark("https://www.youtube.com/watch?v=vjBFftpQxxM")
+}
+
+@objc func goToButcherVanityGoogle() {
+    openBookmark("https://www.google.com/search?q=butcher+vanity")
+}
+
+@objc func goToDdlc() {
+    openBookmark("https://ddlc.moe")
+}
+
+@objc func goToDan() {
+    openBookmark("https://dansalva.to")
+}
+
+@objc func goToLwcGithub() {
+    openBookmark("https://github.com/LiuWoodsCode")
+}
+
+@objc func goToLocalMac() {
+    openBookmark("http://192.168.64.1")
+}
 
     @objc func confirmModal() {
         NSApp.stopModal(withCode: .OK)
