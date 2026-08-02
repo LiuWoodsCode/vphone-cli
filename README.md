@@ -126,6 +126,9 @@ git clone --recurse-submodules https://github.com/LiuWoodsCode/vphone-cli.git
 
 ## Quick Start
 
+> [!WARNING]
+> The current behavior of this command currently assigns the VM to use 8 CPU cores and 8GB of memory. If you have a Mac with less than 8 usable cores and/or 8GB of unified memory (e.g MacBook Neo) it is best you manually setup your VM.
+
 ```bash
 make setup_machine            # full automation through "First Boot" (includes restore/CFW)
 # options: NON_INTERACTIVE=1 SUDO_PASSWORD=...
@@ -169,6 +172,9 @@ Default clean never removes `vm/` or `ipsws/`.
 ### VM Configuration
 
 Starting from v1.0, VM configuration is stored in `vm/config.plist`. Set CPU, memory, and disk size during VM creation:
+
+> [!TIP]
+> The minimum amount of RAM needed to boot iOS 26 is 4GB.
 
 ```bash
 # Create VM with custom configuration
