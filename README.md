@@ -1,8 +1,6 @@
-<div align="right"><strong><a href="./docs/README_ko.md">🇰🇷한국어</a></strong> | <strong><a href="./docs/README_ja.md">🇯🇵日本語</a></strong> | <strong><a href="./docs/README_zh.md">🇨🇳中文</a></strong> | <strong>🇬🇧English</strong></div>
-
 # vphone-cli
 
-Boot a virtual iPhone via Apple's Virtualization.framework using PCC research VM infrastructure.
+Virtualize an iPhone via Apple's Virtualization.framework using components from Apple's PCC (Private Cloud Compute) research VM infrastructure.
 
 ![poc](./docs/demo.jpeg)
 
