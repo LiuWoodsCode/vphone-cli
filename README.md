@@ -365,7 +365,7 @@ python3 -m pymobiledevice3 profile supervise vphone
 
 ## Automation
 
-vphone-cli exposes a host control socket (`vm/vphone.sock`) for programmatic VM interaction — screenshots, touch injection, swipe gestures, hardware keys, and clipboard. Every action returns a compact grayscale screenshot inline, enabling AI-driven E2E testing workflows.
+vphone-cli exposes a host control socket (`vm/vphone.sock`) for programmatic VM interaction and control (such as taking screenshots, touch injection, swipe gestures, emulating hardware keys, location and battery simulation, and setting/getting pasteboard contents). For more details, please read [the host control API documentation.](docs/host-control-api.md)
 
 ## Acknowledgements
 
