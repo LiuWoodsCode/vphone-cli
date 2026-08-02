@@ -26,7 +26,8 @@ iOS <= 26.0.1 use the 26.1 PCC vphone600 stack plus the CFW-time `IOMobileFrameb
 
 iOS 27.0 uses the 26.4 PCC vphone600 stack plus the CFW-time force-kern `IOMobileFramebuffer` present-path patch and the dyld shared-cache `maxSlide` fit.
 
-**Note:** GPU/Metal acceleration does not work on iOS 18.x — the 18.x Metal/IOGPU framework has no paravirtualized GPU implementation, so Metal-rendered content (web pages, images, wallpaper) does not render. Touch, networking, and apps work normally.
+> [!TIP]
+> GPU/Metal acceleration does not work on iOS 18.x, as the 18.x Metal/IOGPU framework has no paravirtualized GPU implementation. Metal-rendered content (web pages, images, wallpaper) does not render. Touch, networking, and apps work normally.
 
 ## Firmware Variants
 
