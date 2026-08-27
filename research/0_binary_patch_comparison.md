@@ -924,3 +924,24 @@ cache rebuild.
     rows (chained auth-rebase `sy_call` into __TEXT_EXEC + sane
     `sy_return_type/sy_narg/sy_arg_bytes`). Base @ foff `0x7693B0` (558 rows);
     `sysent[439]` (`SYS_kas_info`) @ foff `0x76BCD8`; cave + 3 entry writes emit.
+
+## 2026-08-26 — Variant-independent failed-hardware DeviceTree facade
+
+`DeviceTreePatcher` now upserts product and `/chosen` properties and adds
+idempotent synthetic nodes for Mav25 cellular, a PCIe-shaped modem transport,
+Bluetooth, Pearl/Face ID, and BCM4773 GNSS. The nodes advertise convincing
+identity and capability data but deliberately omit MMIO, interrupts, IOMMU,
+HCI, SEP, calibration, and transport semantics. This steers userland toward
+“hardware expected but unavailable” paths without claiming functional devices.
+
+The facade applies to regular, development, jailbreak, and experimental
+variants. The pre-existing D47 camera/audio/facetime/iopm node additions remain
+EXP-only; in particular, `/product/iopm` and `aot-mode = 13` must not leak into
+other variants because that path can leave the VM framebuffer black.
+
+Runtime and restore DeviceTrees are now separate artifacts. Before patching,
+`FirmwarePipeline` preserves the source as
+`RestoreDeviceTree.vphone600ap.im4p`, rewrites each BuildManifest restore entry
+to that path, and mutates only `DeviceTree.vphone600ap.im4p`. This prevents
+restore-time BBUpdater from probing the synthetic modem and aborting during
+`store_baseband_migration`.

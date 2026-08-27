@@ -38,6 +38,31 @@ public final class DeviceTreePatcher: Patcher {
         let description: String
     }
 
+    /// Adds a property when absent, or replaces it (including its size) when present.
+    struct UpsertPropertyPatch {
+        let nodePath: [String]
+        let property: String
+        let length: Int
+        let flags: UInt16
+        let value: PropertyValue
+        let required: Bool
+        let patchID: String
+        let description: String
+
+        init(nodePath: [String], property: String, length: Int, flags: UInt16 = 0,
+             value: PropertyValue, required: Bool = true, patchID: String,
+             description: String) {
+            self.nodePath = nodePath
+            self.property = property
+            self.length = length
+            self.flags = flags
+            self.value = value
+            self.required = required
+            self.patchID = patchID
+            self.description = description
+        }
+    }
+
     /// A patch that adds a brand-new child node under an existing parent.
     /// Used when iPhone17,3 carries a node that vphone600 does not — e.g.
     /// `/device-tree/product/camera`, which `libMobileGestalt` requires to
@@ -68,6 +93,84 @@ public final class DeviceTreePatcher: Patcher {
         /// where Swift String escaping of embedded NULs is awkward.
         case bytes(Data)
     }
+
+    // MARK: - Synthetic hardware facade
+
+    static let fakeIMEI = "636363636363636"
+    static let fakeBluetoothMAC = Data([0xB4, 0x1E, 0x52, 0x63, 0xA7, 0x19])
+    static let fakeWiFiMAC = Data([0xB4, 0x1E, 0x52, 0x63, 0x4D, 0xE2])
+    static let fakeEthernetMAC = Data([0xB4, 0x1E, 0x52, 0x63, 0xC8, 0x31])
+
+    static let hardwareCapabilityUpserts: [UpsertPropertyPatch] = [
+        .init(nodePath: ["device-tree", "product"], property: "baseband-chipset", length: 6, value: .string("mav25"), patchID: "devicetree.product.baseband_chipset", description: "Advertise Mav25 baseband"),
+        .init(nodePath: ["device-tree", "product"], property: "personal-hotspot", length: 4, value: .integer(1), patchID: "devicetree.product.personal_hotspot", description: "Advertise Personal Hotspot"),
+        .init(nodePath: ["device-tree", "product"], property: "gps-capable", length: 4, value: .integer(1), patchID: "devicetree.product.gps_capable", description: "Advertise GPS/GNSS"),
+        .init(nodePath: ["device-tree", "product"], property: "location-reminders", length: 4, value: .integer(1), patchID: "devicetree.product.location_reminders", description: "Advertise location capability"),
+        .init(nodePath: ["device-tree", "product"], property: "RF-exposure-separation-distance", length: 4, value: .integer(5), patchID: "devicetree.product.rf_exposure_distance", description: "Add phone RF exposure metadata"),
+        .init(nodePath: ["device-tree", "product"], property: "bluetooth-le", length: 4, value: .integer(1), patchID: "devicetree.product.bluetooth_le", description: "Advertise Bluetooth LE"),
+        .init(nodePath: ["device-tree", "product"], property: "bluetooth-lea2", length: 4, value: .integer(1), patchID: "devicetree.product.bluetooth_lea2", description: "Advertise Bluetooth LE audio"),
+        .init(nodePath: ["device-tree", "product"], property: "hearingaid-low-energy-audio", length: 4, value: .integer(1), patchID: "devicetree.product.hearingaid_le", description: "Advertise hearing-aid LE audio"),
+        .init(nodePath: ["device-tree", "product"], property: "watch-companion", length: 4, value: .integer(1), patchID: "devicetree.product.watch_companion", description: "Advertise Watch companion support"),
+        .init(nodePath: ["device-tree", "product"], property: "iap2-protocol-supported", length: 4, value: .integer(1), patchID: "devicetree.product.iap2", description: "Advertise iAP2 support"),
+        .init(nodePath: ["device-tree", "chosen"], property: "mac-address-bluetooth0", length: 6, value: .bytes(fakeBluetoothMAC), patchID: "devicetree.chosen.bluetooth_mac", description: "Set deterministic Bluetooth MAC"),
+        .init(nodePath: ["device-tree", "chosen"], property: "mac-address-wifi0", length: 6, value: .bytes(fakeWiFiMAC), patchID: "devicetree.chosen.wifi_mac", description: "Set deterministic Wi-Fi MAC"),
+        .init(nodePath: ["device-tree", "chosen"], property: "mac-address-ethernet0", length: 6, value: .bytes(fakeEthernetMAC), patchID: "devicetree.chosen.ethernet_mac", description: "Set deterministic Ethernet MAC"),
+    ]
+
+    static let hardwareNodeAdditions: [AddChildNodePatch] = [
+        .init(parentPath: ["device-tree"], nodeName: "baseband", properties: [
+            .init(name: "class", length: 4, flags: 0, value: .integer(3)),
+            .init(name: "device_type", length: 9, flags: 0, value: .string("baseband")),
+            .init(name: "compatible", length: 15, flags: 0, value: .string("baseband,mav25")),
+            .init(name: "device-imei", length: 32, flags: 0, value: .string(fakeIMEI)),
+            .init(name: "imeisv", length: 4, flags: 0, value: .integer(2)),
+            .init(name: "region-sku", length: 29, flags: 0, value: .string("syscfg/RSKU/0x40,zeroes/0x40")),
+            .init(name: "default-options", length: 4, flags: 0, value: .integer(4)),
+            .init(name: "config", length: 40, flags: 0, value: .bytes(Data([0xFA,0,0,0, 0xF4,1,0,0, 0,0,0,0, 0xE8,3,0,0, 0x64,0,0,0, 0x64,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0, 0x64,0,0,0]))),
+        ], patchID: "devicetree.baseband.mav25", description: "Add deliberately nonfunctional Mav25 baseband"),
+        .init(parentPath: ["device-tree", "arm-io"], nodeName: "baseband-pcie", properties: [
+            .init(name: "device_type", length: 12, flags: 0, value: .string("pcie-device")),
+            .init(name: "AAPL,unit-string", length: 9, flags: 0, value: .string("00000000")),
+            .init(name: "#address-cells", length: 4, flags: 0, value: .integer(1)),
+            .init(name: "#size-cells", length: 4, flags: 0, value: .integer(0)),
+            .init(name: "pci-aspm-default", length: 4, flags: 0, value: .integer(2)),
+            .init(name: "pci-l1pm-control", length: 8, flags: 0, value: .bytes(Data([0x0F,0,0x55,0x40,0,0,0,0]))),
+            .init(name: "pci-max-latency", length: 4, flags: 0, value: .bytes(Data([8,0x10,8,0x10]))),
+        ], patchID: "devicetree.arm_io.baseband_pcie", description: "Add incomplete baseband PCIe transport"),
+        .init(parentPath: ["device-tree", "arm-io"], nodeName: "bluetooth", properties: [
+            .init(name: "compatible", length: 14, flags: 0, value: .string("bluetooth,n88")),
+            .init(name: "device_type", length: 10, flags: 0, value: .string("bluetooth")),
+            .init(name: "vendor-id", length: 4, flags: 0, value: .integer(0x05AC)),
+            .init(name: "product-id", length: 4, flags: 0, value: .integer(0x12A0)),
+            .init(name: "supported-profiles", length: 4, flags: 0, value: .integer(0x2FFB)),
+            .init(name: "coex", length: 4, flags: 0, value: .integer(2)),
+            .init(name: "transport-encoding", length: 4, flags: 0, value: .integer(7)),
+            .init(name: "local-mac-address", length: 6, flags: 0, value: .bytes(fakeBluetoothMAC)),
+            .init(name: "bluetooth-rx-calibration", length: 17, flags: 0, value: .string("syscfg/BTRx/0xce")),
+            .init(name: "bluetooth-tx-calibration", length: 16, flags: 0, value: .string("syscfg/BTTx/320")),
+            .init(name: "bluetooth-taurus-calibration", length: 12, flags: 0, value: .string("syscfg/BCAL")),
+            .init(name: "voice-record", length: 0, flags: 0, value: .bytes(Data())),
+        ], patchID: "devicetree.arm_io.bluetooth_fake", description: "Add present-but-nonfunctional Bluetooth controller"),
+        .init(parentPath: ["device-tree", "arm-io"], nodeName: "pearl-sep", properties: [
+            .init(name: "compatible", length: 16, flags: 0, value: .string("biosensor,pearl")),
+            .init(name: "device_type", length: 10, flags: 0, value: .string("pearl-sep")),
+        ], patchID: "devicetree.arm_io.pearl_sep", description: "Advertise Pearl/Face ID SEP endpoint"),
+        .init(parentPath: ["device-tree", "arm-io"], nodeName: "gps", properties: [
+            .init(name: "compatible", length: 12, flags: 0, value: .string("gps,bcm4773")),
+            .init(name: "device_type", length: 5, flags: 0, value: .string("gnss")),
+        ], patchID: "devicetree.arm_io.gps_fake", description: "Advertise unwired BCM4773 GNSS"),
+    ]
+
+    static let postNodeHardwareUpserts: [UpsertPropertyPatch] = [
+        .init(nodePath: ["device-tree", "arm-io", "aop", "iop-aop-nub"], property: "has-baseband", length: 0, value: .bytes(Data()), required: false, patchID: "devicetree.aop.has_baseband", description: "Advertise baseband through AOP"),
+        .init(nodePath: ["device-tree", "product", "camera"], property: "pearl-camera", length: 4, value: .integer(1), required: false, patchID: "devicetree.camera.pearl", description: "Advertise Pearl camera"),
+        .init(nodePath: ["device-tree", "product", "camera"], property: "flash", length: 4, value: .integer(1), required: false, patchID: "devicetree.camera.flash", description: "Advertise rear flash"),
+        .init(nodePath: ["device-tree", "product", "camera"], property: "front-flash-capability", length: 4, value: .integer(1), required: false, patchID: "devicetree.camera.front_flash", description: "Advertise front flash"),
+        .init(nodePath: ["device-tree", "arm-io", "isp"], property: "face-detection-support", length: 4, value: .integer(1), required: false, patchID: "devicetree.isp.face_detection", description: "Advertise ISP face detection"),
+        .init(nodePath: ["device-tree", "arm-io", "isp"], property: "has-sphere", length: 4, value: .integer(1), required: false, patchID: "devicetree.isp.has_sphere", description: "Advertise Sphere hardware"),
+        .init(nodePath: ["device-tree", "arm-io", "isp"], property: "pearl-calibration-data", length: 12, value: .string("syscfg/PrCl"), required: false, patchID: "devicetree.isp.pearl_calibration", description: "Advertise Pearl calibration reference"),
+        .init(nodePath: ["device-tree", "product", "audio"], property: "supports-mic-modes-telephony", length: 4, value: .integer(1), required: false, patchID: "devicetree.audio.telephony_mic_modes", description: "Advertise telephony audio path"),
+    ]
 
     /// Multi-string `compatible` blob used by patch #3 (root `compatible`).
     ///
@@ -962,6 +1065,14 @@ public final class DeviceTreePatcher: Patcher {
         return data
     }
 
+    private func encodePropertyValue(_ value: PropertyValue, length: Int) throws -> Data {
+        switch value {
+        case let .string(text): Self.encodeFixedString(text, length: length)
+        case let .integer(integer): try Self.encodeInteger(integer, length: length)
+        case let .bytes(data): Self.encodeFixedBytes(data, length: length)
+        }
+    }
+
     // MARK: - Patch Application
 
     /// Apply all property patches and record each change.
@@ -1014,10 +1125,52 @@ public final class DeviceTreePatcher: Patcher {
             }
         }
 
-        if includeIdentityPatches {
-            for nodeAdd in Self.experimentalNodeAdditions {
-                try applyNodeAddition(root: root, patch: nodeAdd)
+        // The intentionally nonfunctional hardware facade applies to every
+        // variant. Older D47 camera/audio/AOT additions remain EXP-only.
+        for patch in Self.hardwareCapabilityUpserts {
+            try applyPropertyUpsert(root: root, patch: patch)
+        }
+        for nodeAdd in Self.experimentalNodeAdditions {
+            try applyNodeAddition(root: root, patch: nodeAdd)
+        }
+        for nodeAdd in Self.hardwareNodeAdditions {
+            try applyNodeAddition(root: root, patch: nodeAdd)
+        }
+        for patch in Self.postNodeHardwareUpserts {
+            try applyPropertyUpsert(root: root, patch: patch)
+        }
+    }
+
+    private func applyPropertyUpsert(root: DTNode, patch: UpsertPropertyPatch) throws {
+        let node: DTNode
+        do {
+            node = try resolveNode(root, path: patch.nodePath)
+        } catch {
+            if patch.required { throw error }
+            if verbose {
+                print("  ?prop  : /\(patch.nodePath.joined(separator: "/"))/\(patch.property) parent missing, skipping  [\(patch.patchID)]")
             }
+            return
+        }
+
+        let newValue = try encodePropertyValue(patch.value, length: patch.length)
+        if let property = node.properties.first(where: { $0.name == patch.property }) {
+            let original = property.value
+            property.length = patch.length
+            property.flags = patch.flags
+            property.value = newValue
+            patches.append(PatchRecord(patchID: patch.patchID, component: component,
+                                       fileOffset: property.valueOffset, virtualAddress: nil,
+                                       originalBytes: original, patchedBytes: newValue,
+                                       description: patch.description))
+            if verbose { print("  ~prop  : /\(patch.nodePath.joined(separator: "/"))/\(patch.property)  [\(patch.patchID)]") }
+        } else {
+            node.properties.append(DTProperty(name: patch.property, length: patch.length,
+                                              flags: patch.flags, value: newValue, valueOffset: 0))
+            patches.append(PatchRecord(patchID: patch.patchID, component: component,
+                                       fileOffset: 0, virtualAddress: nil, originalBytes: Data(),
+                                       patchedBytes: newValue, description: patch.description))
+            if verbose { print("  +prop  : /\(patch.nodePath.joined(separator: "/"))/\(patch.property)  [\(patch.patchID)]") }
         }
     }
 

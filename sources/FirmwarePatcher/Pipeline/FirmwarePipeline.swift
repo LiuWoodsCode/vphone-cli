@@ -125,6 +125,11 @@ public final class FirmwarePipeline {
         log("[*] VM directory:      \(vmDirectory.path)")
         log("[*] Restore directory: \(restoreDir.path)")
 
+        // Restore and normal boot originally shared one DeviceTree artifact.
+        // Preserve a pristine restore copy before the runtime facade is applied;
+        // otherwise restore's BBUpdater sees the synthetic baseband and aborts.
+        try prepareRestoreDeviceTree(in: restoreDir)
+
         // Detect the iPhone base iOS version (from the pre-hybrid manifest that
         // fw_prepare preserves — the live BuildManifest.plist reads the cloudOS
         // version, not the base). iOS 18 bases need the skywalk-netagent boot-arg.
@@ -169,6 +174,56 @@ public final class FirmwarePipeline {
         log(String(repeating: "=", count: 60))
 
         return allRecords
+    }
+
+    /// Split the shared runtime/restore DeviceTree and point every build
+    /// identity's RestoreDeviceTree manifest entry at the pristine copy.
+    func prepareRestoreDeviceTree(in restoreDir: URL) throws {
+        let flashDir = restoreDir.appendingPathComponent("Firmware/all_flash", isDirectory: true)
+        let runtimeURL = flashDir.appendingPathComponent("DeviceTree.vphone600ap.im4p")
+        let restoreURL = flashDir.appendingPathComponent("RestoreDeviceTree.vphone600ap.im4p")
+        let manifestURL = restoreDir.appendingPathComponent("BuildManifest.plist")
+        let fm = FileManager.default
+
+        guard fm.fileExists(atPath: runtimeURL.path) else {
+            throw PatcherError.fileNotFound(runtimeURL.path)
+        }
+        if !fm.fileExists(atPath: restoreURL.path) {
+            try fm.copyItem(at: runtimeURL, to: restoreURL)
+            log("[*] Preserved pristine RestoreDeviceTree.vphone600ap.im4p")
+        }
+
+        let data = try Data(contentsOf: manifestURL)
+        var format = PropertyListSerialization.PropertyListFormat.xml
+        guard var manifest = try PropertyListSerialization.propertyList(
+            from: data, options: [], format: &format
+        ) as? [String: Any], var identities = manifest["BuildIdentities"] as? [[String: Any]] else {
+            throw PatcherError.invalidFormat("BuildManifest.plist: missing BuildIdentities")
+        }
+
+        let relativePath = "Firmware/all_flash/RestoreDeviceTree.vphone600ap.im4p"
+        var changed = false
+        for index in identities.indices {
+            guard var identityManifest = identities[index]["Manifest"] as? [String: Any],
+                  var restoreEntry = identityManifest["RestoreDeviceTree"] as? [String: Any],
+                  var info = restoreEntry["Info"] as? [String: Any]
+            else { continue }
+            if info["Path"] as? String != relativePath {
+                info["Path"] = relativePath
+                restoreEntry["Info"] = info
+                identityManifest["RestoreDeviceTree"] = restoreEntry
+                identities[index]["Manifest"] = identityManifest
+                changed = true
+            }
+        }
+        if changed {
+            manifest["BuildIdentities"] = identities
+            let updated = try PropertyListSerialization.data(
+                fromPropertyList: manifest, format: format, options: 0
+            )
+            try updated.write(to: manifestURL, options: .atomic)
+            log("[*] RestoreDeviceTree manifest path separated from runtime DeviceTree")
+        }
     }
 
     func patchData(
