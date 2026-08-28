@@ -928,8 +928,8 @@ cache rebuild.
 ## 2026-08-26 — Variant-independent failed-hardware DeviceTree facade
 
 `DeviceTreePatcher` now upserts product and `/chosen` properties and adds
-idempotent synthetic nodes for Mav25 cellular, a PCIe-shaped modem transport,
-Bluetooth, Pearl/Face ID, and BCM4773 GNSS. The nodes advertise convincing
+idempotent synthetic nodes for cellular, Bluetooth, and Pearl/Face ID. The
+nodes advertise convincing
 identity and capability data but deliberately omit MMIO, interrupts, IOMMU,
 HCI, SEP, calibration, and transport semantics. This steers userland toward
 “hardware expected but unavailable” paths without claiming functional devices.
@@ -945,3 +945,19 @@ Runtime and restore DeviceTrees are now separate artifacts. Before patching,
 to that path, and mutates only `DeviceTree.vphone600ap.im4p`. This prevents
 restore-time BBUpdater from probing the synthetic modem and aborting during
 `store_baseband_migration`.
+
+### 2026-08-27 iPhone17,3 reference-tree correction
+
+Comparison against the supplied 23B85 D47AP DeviceTree found that the initial
+cellular recipe mixed an unsupported synthetic identity into an iPhone17,3
+facade. The real product property is `baseband-chipset = "mav24"`, its baseband
+matcher is `baseband,n41`, `imeisv` is 10, and its 32-byte `device-imei` slot is
+unresolved/zero-filled at this stage. The patcher now uses those exact values
+instead of `mav25`, `baseband,mav25`, IMEISV 2, and a fabricated IMEI.
+
+The product node also gains the source-backed
+`activation-protocol-version = 2` and `high-bandwidth-radio = 1` flags. The
+real PCIe, AOP-SPMI, HEB/IDC, GPIO, interrupt, IOMMU, and platform-function
+properties are deliberately not copied: their phandles target D47AP hardware
+nodes absent from vphone600, and reproducing those values would create invalid
+cross-references rather than a controlled baseband failure.

@@ -96,13 +96,17 @@ public final class DeviceTreePatcher: Patcher {
 
     // MARK: - Synthetic hardware facade
 
-    static let fakeIMEI = "636363636363636"
     static let fakeBluetoothMAC = Data([0xB4, 0x1E, 0x52, 0x63, 0xA7, 0x19])
     static let fakeWiFiMAC = Data([0xB4, 0x1E, 0x52, 0x63, 0x4D, 0xE2])
     static let fakeEthernetMAC = Data([0xB4, 0x1E, 0x52, 0x63, 0xC8, 0x31])
 
     static let hardwareCapabilityUpserts: [UpsertPropertyPatch] = [
-        .init(nodePath: ["device-tree", "product"], property: "baseband-chipset", length: 6, value: .string("mav25"), patchID: "devicetree.product.baseband_chipset", description: "Advertise Mav25 baseband"),
+        // Match the iPhone17,3 reference tree shipped with this OS. An unknown
+        // Mav25 identity makes CoreTelephony treat the partial facade as a
+        // valid-but-unsupported modem instead of taking its normal failure path.
+        .init(nodePath: ["device-tree", "product"], property: "baseband-chipset", length: 6, value: .string("mav24"), patchID: "devicetree.product.baseband_chipset", description: "Advertise the iPhone17,3 Mav24 baseband family"),
+        .init(nodePath: ["device-tree", "product"], property: "activation-protocol-version", length: 4, value: .integer(2), patchID: "devicetree.product.activation_protocol_version", description: "Match iPhone17,3 cellular activation protocol"),
+        .init(nodePath: ["device-tree", "product"], property: "high-bandwidth-radio", length: 4, value: .integer(1), patchID: "devicetree.product.high_bandwidth_radio", description: "Advertise high-bandwidth cellular radio"),
         .init(nodePath: ["device-tree", "product"], property: "personal-hotspot", length: 4, value: .integer(1), patchID: "devicetree.product.personal_hotspot", description: "Advertise Personal Hotspot"),
         .init(nodePath: ["device-tree", "product"], property: "gps-capable", length: 4, value: .integer(1), patchID: "devicetree.product.gps_capable", description: "Advertise GPS/GNSS"),
         .init(nodePath: ["device-tree", "product"], property: "location-reminders", length: 4, value: .integer(1), patchID: "devicetree.product.location_reminders", description: "Advertise location capability"),
@@ -121,22 +125,18 @@ public final class DeviceTreePatcher: Patcher {
         .init(parentPath: ["device-tree"], nodeName: "baseband", properties: [
             .init(name: "class", length: 4, flags: 0, value: .integer(3)),
             .init(name: "device_type", length: 9, flags: 0, value: .string("baseband")),
-            .init(name: "compatible", length: 15, flags: 0, value: .string("baseband,mav25")),
-            .init(name: "device-imei", length: 32, flags: 0, value: .string(fakeIMEI)),
-            .init(name: "imeisv", length: 4, flags: 0, value: .integer(2)),
+            // This is the exact iPhone17,3 matcher. The former synthetic
+            // "baseband,mav25" value has no counterpart in the reference DT.
+            .init(name: "compatible", length: 13, flags: 0, value: .string("baseband,n41")),
+            // The reference image leaves the 32-byte IMEI slot unresolved.
+            // Supplying a plausible string makes About assume that identity
+            // services are available even though CommCenter has no modem.
+            .init(name: "device-imei", length: 32, flags: 0, value: .bytes(Data())),
+            .init(name: "imeisv", length: 4, flags: 0, value: .integer(10)),
             .init(name: "region-sku", length: 29, flags: 0, value: .string("syscfg/RSKU/0x40,zeroes/0x40")),
             .init(name: "default-options", length: 4, flags: 0, value: .integer(4)),
             .init(name: "config", length: 40, flags: 0, value: .bytes(Data([0xFA,0,0,0, 0xF4,1,0,0, 0,0,0,0, 0xE8,3,0,0, 0x64,0,0,0, 0x64,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0, 0x64,0,0,0]))),
-        ], patchID: "devicetree.baseband.mav25", description: "Add deliberately nonfunctional Mav25 baseband"),
-        .init(parentPath: ["device-tree", "arm-io"], nodeName: "baseband-pcie", properties: [
-            .init(name: "device_type", length: 12, flags: 0, value: .string("pcie-device")),
-            .init(name: "AAPL,unit-string", length: 9, flags: 0, value: .string("00000000")),
-            .init(name: "#address-cells", length: 4, flags: 0, value: .integer(1)),
-            .init(name: "#size-cells", length: 4, flags: 0, value: .integer(0)),
-            .init(name: "pci-aspm-default", length: 4, flags: 0, value: .integer(2)),
-            .init(name: "pci-l1pm-control", length: 8, flags: 0, value: .bytes(Data([0x0F,0,0x55,0x40,0,0,0,0]))),
-            .init(name: "pci-max-latency", length: 4, flags: 0, value: .bytes(Data([8,0x10,8,0x10]))),
-        ], patchID: "devicetree.arm_io.baseband_pcie", description: "Add incomplete baseband PCIe transport"),
+        ], patchID: "devicetree.baseband.mav24", description: "Add metadata-only iPhone17,3 Mav24 baseband"),
         .init(parentPath: ["device-tree", "arm-io"], nodeName: "bluetooth", properties: [
             .init(name: "compatible", length: 14, flags: 0, value: .string("bluetooth,n88")),
             .init(name: "device_type", length: 10, flags: 0, value: .string("bluetooth")),
@@ -155,10 +155,6 @@ public final class DeviceTreePatcher: Patcher {
             .init(name: "compatible", length: 16, flags: 0, value: .string("biosensor,pearl")),
             .init(name: "device_type", length: 10, flags: 0, value: .string("pearl-sep")),
         ], patchID: "devicetree.arm_io.pearl_sep", description: "Advertise Pearl/Face ID SEP endpoint"),
-        .init(parentPath: ["device-tree", "arm-io"], nodeName: "gps", properties: [
-            .init(name: "compatible", length: 12, flags: 0, value: .string("gps,bcm4773")),
-            .init(name: "device_type", length: 5, flags: 0, value: .string("gnss")),
-        ], patchID: "devicetree.arm_io.gps_fake", description: "Advertise unwired BCM4773 GNSS"),
     ]
 
     static let postNodeHardwareUpserts: [UpsertPropertyPatch] = [
