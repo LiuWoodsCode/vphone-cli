@@ -1,6 +1,6 @@
-# vphone-cli
+# vphone-cli ipad
 
-Virtualize an iPhone via Apple's Virtualization.framework using components from Apple's PCC (Private Cloud Compute) research VM infrastructure.
+Virtualize an iPad via Apple's Virtualization.framework using components from Apple's PCC (Private Cloud Compute) research VM infrastructure.
 
 ![poc](./docs/demo_Mac17,5.png)
 
