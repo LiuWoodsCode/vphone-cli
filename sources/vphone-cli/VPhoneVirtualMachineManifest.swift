@@ -69,8 +69,8 @@ struct VPhoneVirtualMachineManifest: Codable {
         let scale: Double
 
         static let `default` = ScreenConfig(
-            width: 1640,
-            height: 2360,
+            width: 1908,
+            height: 2746,
             pixelsPerInch: 264,
             scale: 2.0
         )
