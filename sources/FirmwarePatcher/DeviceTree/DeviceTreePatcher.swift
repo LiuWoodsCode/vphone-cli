@@ -68,6 +68,15 @@ public final class DeviceTreePatcher: Patcher {
         PropertyPatch(nodePath: ["device-tree"], property: "compatible", length: 48, flags: 0, value: .bytes(compatibleRewrite), patchID: "devicetree.ipad.compatible", description: "Set compatible secondary model to iPad15,3"),
         PropertyPatch(nodePath: ["device-tree", "arm-io"], property: "soc-generation", length: 11, flags: 0, value: .string("H15"), patchID: "devicetree.ipad.soc_generation", description: "Set iPad SoC generation"),
         PropertyPatch(nodePath: ["device-tree", "arm-io"], property: "device_type", length: 14, flags: 0, value: .string("t8122-io"), patchID: "devicetree.ipad.device_type", description: "Set iPad SoC device type"),
+        PropertyPatch(
+            nodePath: ["device-tree", "buttons"],
+            property: "home-button-type",
+            length: 4,
+            flags: 0,
+            value: .integer(2),
+            patchID: "devicetree.home_button_type",
+            description: "Tell iOS that we are a homebutton-less device"
+        ),
     ]
 
     /// Literal /product property snapshot from the supplied J607AP IORegistry dump.
