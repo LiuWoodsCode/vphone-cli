@@ -15,8 +15,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 DEFAULT_IPHONE_DEVICE="iPhone17,3"
-DEFAULT_IPHONE_SOURCE="https://updates.cdn-apple.com/2025FallFCS/fullrestores/089-13864/668EFC0E-5911-454C-96C6-E1063CB80042/iPhone17,3_26.1_23B85_Restore.ipsw"
-DEFAULT_CLOUDOS_SOURCE="https://updates.cdn-apple.com/private-cloud-compute/399b664dd623358c3de118ffc114e42dcd51c9309e751d43bc949b98f4e31349"
+DEFAULT_IPHONE_SOURCE="https://updates.cdn-apple.com/2026SpringFCS/fullrestores/122-70574/10C3FA3A-E70C-4A46-82AE-34C2320F8023/iPad15,3,iPad15,4,iPad15,5,iPad15,6_26.5_23F77_Restore.ipsw"
+DEFAULT_CLOUDOS_SOURCE="https://updates.cdn-apple.com/private-cloud-compute/c0ecdb4b310cf5239ab2b248dd3098eec297dc5aa3bbe6ada27273262b0b8b64"
 README_PATH="${SCRIPT_DIR}/../README.md"
 
 usage() {
