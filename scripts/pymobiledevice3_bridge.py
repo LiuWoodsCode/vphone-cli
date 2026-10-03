@@ -41,13 +41,24 @@ def normalize_udid(value: Optional[str]) -> Optional[str]:
 
 
 def find_restore_dir(vm_dir: Path) -> Path:
-    candidates = sorted(p for p in vm_dir.glob("iPhone*_Restore") if p.is_dir())
+    candidates = sorted(
+        p
+        for pattern in ("iPhone*_Restore", "iPad*_Restore")
+        for p in vm_dir.glob(pattern)
+        if p.is_dir()
+    )
+
     if not candidates:
-        raise FileNotFoundError(f"No iPhone*_Restore directory found in {vm_dir}")
+        raise FileNotFoundError(
+            f"No iPhone*_Restore or iPad*_Restore directory found in {vm_dir}"
+        )
+
     if len(candidates) > 1:
         raise RuntimeError(
-            "Multiple iPhone*_Restore directories found; keep only one active restore tree"
+            "Multiple iPhone/iPad *_Restore directories found; "
+            "keep only one active restore tree"
         )
+
     return candidates[0]
 
 
