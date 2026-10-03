@@ -30,10 +30,10 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         var memorySize: UInt64 = 8 * 1024 * 1024 * 1024
         var sepStorageURL: URL
         var sepRomURL: URL?
-        var screenWidth: Int = 1290
-        var screenHeight: Int = 2796
-        var screenPPI: Int = 460
-        var screenScale: Double = 3.0
+        var screenWidth: Int = 1640
+        var screenHeight: Int = 2360
+        var screenPPI: Int = 264
+        var screenScale: Double = 2.0
         var kernelDebugPort: Int?
         var variant: Variant
         var noVphoned: Bool

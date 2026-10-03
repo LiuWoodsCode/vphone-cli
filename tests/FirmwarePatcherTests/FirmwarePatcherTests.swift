@@ -476,3 +476,66 @@ struct FirmwarePipelineTests {
         #expect(found == target)
     }
 }
+
+struct DeviceTreeIPadTests {
+    private func le<T: FixedWidthInteger>(_ value: T) -> Data {
+        withUnsafeBytes(of: value.littleEndian) { Data($0) }
+    }
+
+    private func property(_ name: String, _ value: Data) -> Data {
+        var result = Data(name.utf8)
+        result.append(Data(repeating: 0, count: 32 - result.count))
+        result.append(le(UInt16(value.count)))
+        result.append(le(UInt16(0)))
+        result.append(value)
+        result.append(Data(repeating: 0, count: (4 - value.count % 4) % 4))
+        return result
+    }
+
+    private func node(_ properties: [(String, Data)], _ children: [Data] = []) -> Data {
+        var result = le(UInt32(properties.count))
+        result.append(le(UInt32(children.count)))
+        for (name, value) in properties { result.append(property(name, value)) }
+        for child in children { result.append(child) }
+        return result
+    }
+
+    private func cstring(_ value: String) -> Data { Data((value + "\0").utf8) }
+
+    @Test func replacesExistingIPhoneCameraForEveryVariant() throws {
+        let oldCamera = node([("name", cstring("camera")), ("pearl-camera", le(UInt32(1)))])
+        let product = node([("name", cstring("product")),
+                            ("island-notch-location", le(UInt32(144)))], [oldCamera])
+        let armIO = node([("name", cstring("arm-io"))])
+        let buttons = node([("name", cstring("buttons")),
+                            ("home-button-type", le(UInt32(2)))])
+        let root = node([("name", cstring("device-tree")),
+                         ("serial-number", cstring("OLD")),
+                         ("compatible", cstring("VPHONE600AP"))], [product, armIO, buttons])
+        let patcher = DeviceTreePatcher(data: root, verbose: false)
+        let records = try patcher.findAll()
+        try patcher.apply()
+        let output = patcher.patchedData
+        func productValue(_ name: String) -> Data? {
+            records.first { $0.patchID == "devicetree.ipad.product.\(name)" }?.patchedBytes
+        }
+
+        #expect(records.contains { $0.patchID == "devicetree.ipad.camera_node" })
+        #expect(records.filter { $0.patchID.hasPrefix("devicetree.ipad.product.") }.count == 82)
+        #expect(output.range(of: Data("iPad15,3".utf8)) != nil)
+        #expect(output.range(of: Data("J607AP".utf8)) != nil)
+        #expect(output.range(of: Data("MC9X4".utf8)) != nil)
+        #expect(output.range(of: Data("FLVRF0LEY01".utf8)) != nil)
+        #expect(output.range(of: Data("Butcher Vanity".utf8)) != nil)
+        #expect(productValue("product-name") == cstring("Butcher Vanity"))
+        #expect(productValue("product-description") == cstring("iPad Air 11-inch (M3)"))
+        #expect(productValue("assistant") == le(UInt32(1)))
+        #expect(productValue("has-virtualization") == le(UInt32(1)))
+        #expect(productValue("graphics-featureset-class") == cstring("APPLE9"))
+        #expect(productValue("ui-pip") == Data())
+        #expect(output.range(of: Data("front-max-burst-length".utf8)) != nil)
+        #expect(output.range(of: Data("pearl-camera".utf8)) == nil)
+        #expect(output.range(of: Data("island-notch-location".utf8)) == nil)
+        #expect(output.range(of: Data("home-button-type".utf8)) == nil)
+    }
+}

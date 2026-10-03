@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """cfw_patch_post_restore_dt.py — post-restore DT identity rewrite.
 
-Applies the three restore-unsafe DT property edits that broke earlier
-attempts when applied at fw_patch time:
+Applies restore-sensitive iPad identity fields after restore:
 
-    root/model        "iPhone99,11"            -> "iPhone17,3"
-    root/target-type  "VPHONE600"              -> "D47"
+    root/model        "iPhone99,11"            -> "iPad15,3"
+    root/target-type  "VPHONE600"              -> "J607"
+    root/target-sub-type "VPHONE600AP"         -> "J607AP"
+    product/fdr-product-type "iPhone99,11"      -> "iPad15,3"
     root/compatible   ["VPHONE600AP", "*", "AppleVirtualPlatformARM"]
-                                               -> ["D47AP", "VPHONE600AP",
+                                               -> ["J607AP", "VPHONE600AP",
                                                    "AppleVirtualPlatformARM"]
 
-These edits are restore-time-fatal — `restored_external` / iBoot's restore
-mode cross-checks DT root `model` / `target-type` against the
+Root model/target-type edits were restore-time-fatal in prior tests —
+`restored_external` / iBoot's restore mode cross-checks them against the
 BuildManifest's signed identity and rejects the device on mismatch — but
 they are NOT boot-time-fatal. After restore completes, the existing iBSS /
 iBEC / LLB image4_validate_property_callback bypass patches accept any
@@ -21,14 +22,14 @@ filesystem) before the device boots into the rootfs is safe.
 The `compatible` rewrite is a reorder, not a replacement: VPHONE600AP
 stays in the list (now as the second entry) so IOKit's platform-expert
 binding to AppleVMApple1IO still works. The first entry, which userland
-queries for `hw.model`, becomes D47AP — flipping the visible board
+queries for `hw.model`, becomes J607AP — flipping the visible board
 identifier without breaking kernel kext binding.
 
 Layout summary:
 
-  before:  "VPHONE600AP\\0iPhone99,11\\0AppleVirtualPlatformARM\\0"        (48B)
-        OR "VPHONE600AP\\0iPhone17,3\\0AppleVirtualPlatformARM\\0\\0"      (48B, post-Tier1b)
-  after:   "D47AP\\0VPHONE600AP\\0AppleVirtualPlatformARM\\0" + 6 NUL pad  (48B)
+  before:  "VPHONE600AP\\0iPhone99,11\\0AppleVirtualPlatformARM\\0" (48B)
+        OR "VPHONE600AP\\0iPad15,3\\0AppleVirtualPlatformARM\\0" (48B, post-patch)
+  after:   "J607AP\\0VPHONE600AP\\0AppleVirtualPlatformARM\\0" + NUL padding
 
 This script runs on the host. The install pipeline copies the
 devicetree.img4 out of the host-mounted `/mnt5/<boot-hash>/usr/standalone/firmware/`,
@@ -159,7 +160,7 @@ def _encode_fixed_string(s: str, length: int) -> bytes:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# The three patches
+# The post-restore identity patches
 # ──────────────────────────────────────────────────────────────────────
 
 
@@ -179,26 +180,40 @@ def _patch_dt_blob(dt_blob: bytes) -> bytes:
 
     changed = []
 
-    # 1. root/model → iPhone17,3
-    p = _find_property(root, "model")
-    new_val = _encode_fixed_string("iPhone17,3", p.length)
+    # Restore may validate these identity/FDR fields against the signed manifest.
+    p = _find_property(root, "target-sub-type")
+    new_val = _encode_fixed_string("J607AP", p.length)
     if p.value != new_val:
-        before = p.value.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
         p.value = new_val
-        changed.append(f"model: '{before}' -> 'iPhone17,3'")
+        changed.append("target-sub-type -> J607AP")
 
-    # 2. root/target-type → D47
-    p = _find_property(root, "target-type")
-    new_val = _encode_fixed_string("D47", p.length)
+    product = next(child for child in root.children if _get_node_name(child) == "product")
+    p = _find_property(product, "fdr-product-type")
+    new_val = _encode_fixed_string("iPad15,3", p.length)
+    if p.value != new_val:
+        p.value = new_val
+        changed.append("product/fdr-product-type -> iPad15,3")
+
+    # 1. root/model → iPad15,3
+    p = _find_property(root, "model")
+    new_val = _encode_fixed_string("iPad15,3", p.length)
     if p.value != new_val:
         before = p.value.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
         p.value = new_val
-        changed.append(f"target-type: '{before}' -> 'D47'")
+        changed.append(f"model: '{before}' -> 'iPad15,3'")
+
+    # 2. root/target-type → J607
+    p = _find_property(root, "target-type")
+    new_val = _encode_fixed_string("J607", p.length)
+    if p.value != new_val:
+        before = p.value.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+        p.value = new_val
+        changed.append(f"target-type: '{before}' -> 'J607'")
 
     # 3. root/compatible reorder
     p = _find_property(root, "compatible")
     new_compat_body = (
-        b"D47AP\x00"
+        b"J607AP\x00"
         + b"VPHONE600AP\x00"
         + b"AppleVirtualPlatformARM\x00"
     )
@@ -215,7 +230,7 @@ def _patch_dt_blob(dt_blob: bytes) -> bytes:
         ]
         p.value = new_compat
         changed.append(
-            f"compatible: {before_parts} -> ['D47AP', 'VPHONE600AP', "
+            f"compatible: {before_parts} -> ['J607AP', 'VPHONE600AP', "
             f"'AppleVirtualPlatformARM']"
         )
 

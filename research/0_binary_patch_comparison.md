@@ -1,5 +1,51 @@
 # Patch Comparison: Regular / Development / Jailbreak / Experimental
 
+## Current DeviceTree profile: iPad Air 11-inch (M3)
+
+The DeviceTree patcher now applies the `iPad15,3` / `J607AP` product profile to
+every firmware variant. It preserves only the existing fake `Butcher Vanity`
+product name and `FLVRF0LEY01` root serial. The root model number is `MC9X4`.
+At firmware-patch time it rewrites the secondary `compatible` entry,
+`H15` / `t8122-io`, and the full 82-property `/product` snapshot from the
+supplied J607AP registry dump. That includes Siri (`assistant`),
+`has-virtualization`, camera geometry, tablet artwork, graphics, panel, and
+display properties; `product-description` is the real iPad description.
+The replacement removes old iPhone properties such as notch/watch fields and
+the old home-button field, and replaces any prior
+iPhone `/product/camera`, `facetime`, `audio`, and `iopm` nodes with the iPad
+camera, FaceTime, and audio capability properties. The first `compatible`
+entry remains `VPHONE600AP` for virtual platform driver matching.
+
+`fw_manifest.py` now copies the original vphone600 tree to a dedicated
+`RestoreDeviceTree.vphone600ap.im4p` before `fw_patch` changes the runtime
+`DeviceTree.vphone600ap.im4p`. The BuildManifest points `RestoreDeviceTree`
+at that copy and `DeviceTree` at the iPad-profiled image; the final manifest
+hash pass updates both digests. This split is required for restore: the
+original `/product` contains `single-stage-boot=1` and
+`dual-iboot-support=1`. In a 2026-10-02 attempted restore with the runtime
+product profile also used as `RestoreDeviceTree`, ramrod reported both fields
+absent, selected `SPIiBootUpdater`, and `VirtIOFlasherDriver` rejected the
+firmware write at address zero (`RamrodErrorDomain` 1014). Reproduce by
+examining the two decompressed DT payloads, then validate a new restore log
+shows both flags during `update_iBoot` and proceeds past firmware update and
+ASR verification. This restore retry has not yet been run.
+
+The restore-only tree retains the original root and product values. The
+runtime tree defers root `model`, `target-type`, `target-sub-type`, and primary
+`compatible` until after restore. Earlier experiments showed that restore
+rejects root model and target type changes. The
+host CFW installer runs `cfw_patch_post_restore_dt.py` for every variant on
+the restored `devicetree.img4`, setting `iPad15,3`, `J607`, and `J607AP`
+in those fields. Validation: inspect those fields in the post-install IMG4 and
+confirm `hw.machine`/`hw.model` plus IORegistry product and camera properties
+after boot. Guest boot and restore remain to be validated with a real VM.
+
+The new VM manifest default is portrait 1640 × 2360 at 264 ppi and 2× scale
+(820 × 1180 logical points). The initial host window fits that aspect ratio
+inside the available desktop area. Existing VM manifests retain any explicit
+screen configuration; regenerate or edit them to pick up the new default.
+The older EXP-only D47AP sections below document the superseded experiment.
+
 > **EXP is a JB superset.** Everything in the baseline tables below that is `Y`
 > for JB is also `Y` for EXP. The columns are kept at three variants to avoid
 > noise — the only place EXP and JB diverge is the **Experimental additions**
@@ -924,3 +970,11 @@ cache rebuild.
     rows (chained auth-rebase `sy_call` into __TEXT_EXEC + sane
     `sy_return_type/sy_narg/sy_arg_bytes`). Base @ foff `0x7693B0` (558 rows);
     `sysent[439]` (`SYS_kas_info`) @ foff `0x76BCD8`; cave + 3 entry writes emit.
+
+## Setup recovery (non-binary change)
+
+`make strip_setup` removes `/Applications/Setup.app` from the live System
+volume and adds a first-boot launchd helper to mark PurpleBuddy setup complete
+on the encrypted Data volume. It changes `launchd.plist` and guest preference
+plists, but applies no Mach-O or kernel patch. See [strip_setup.md](strip_setup.md)
+for the mount, launch, and validation procedure.

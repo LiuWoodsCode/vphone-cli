@@ -43,10 +43,10 @@ def create_manifest(
         "cpuCount": cpu_count,
         "memorySize": memory_bytes,
         "screenConfig": {
-            "width": 1290,
-            "height": 2796,
-            "pixelsPerInch": 460,
-            "scale": 3.0,
+            "width": 1640,
+            "height": 2360,
+            "pixelsPerInch": 264,
+            "scale": 2.0,
         },
         "networkConfig": {
             "mode": "nat",

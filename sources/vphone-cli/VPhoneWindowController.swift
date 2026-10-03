@@ -33,9 +33,14 @@ class VPhoneWindowController: NSObject, NSToolbarDelegate {
         let vmView: NSView = view
 
         let scale = CGFloat(screenScale)
-        let windowSize = NSSize(
+        let nativeWindowSize = NSSize(
             width: CGFloat(screenWidth) / scale, height: CGFloat(screenHeight) / scale
         )
+        let available = NSScreen.main?.visibleFrame.size ?? nativeWindowSize
+        let fit = min(1, available.width / nativeWindowSize.width,
+                      available.height / nativeWindowSize.height)
+        let windowSize = NSSize(width: nativeWindowSize.width * fit,
+                                height: nativeWindowSize.height * fit)
 
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: windowSize),
@@ -50,7 +55,7 @@ class VPhoneWindowController: NSObject, NSToolbarDelegate {
         window.subtitle = makeSubtitle(ip: nil)
         window.contentView = vmView
         if let ecid {
-            if !window.setFrameAutosaveName("vphone-\(ecid)") {
+            if !window.setFrameAutosaveName("vphone-ipad-\(ecid)") {
                 window.center()
             }
         } else {

@@ -76,6 +76,23 @@ echo "[*] running $INSTALLER (files placed on host mounts)..."
     ${FORCE_DSC_MAXSLIDE:+FORCE_DSC_MAXSLIDE="$FORCE_DSC_MAXSLIDE"} \
     zsh "$SCRIPT_DIR/$INSTALLER" . )
 
+# Root model and target-type cannot change during restore. Rewrite the live
+# firmware copy after restore for every variant, including regular and dev.
+DT_MNT=/private/tmp/cfwhost/mnt5
+mkdir -p "$DT_MNT"
+if ! mount | /usr/bin/grep -q " on $DT_MNT "; then
+  /sbin/mount_apfs -o rw "/dev/${CONT}s5" "$DT_MNT"
+fi
+DT_FILES=("$DT_MNT"/*/usr/standalone/firmware/devicetree.img4(N))
+(( ${#DT_FILES} == 1 )) || { echo "[-] expected one restored devicetree.img4, found ${#DT_FILES}" >&2; exit 1; }
+DT_COPY="$VM_DIR/.cfw_temp/devicetree.ipad.img4"
+cp "$DT_FILES[1]" "$DT_COPY"
+"$PY" "$SCRIPT_DIR/patchers/cfw_patch_post_restore_dt.py" "$DT_COPY"
+cp "$DT_COPY" "$DT_FILES[1]"
+chown 0:0 "$DT_FILES[1]"
+chmod 0644 "$DT_FILES[1]"
+echo "[+] restored DeviceTree identity set to iPad15,3 / J607AP"
+
 cleanup
 trap - EXIT
 

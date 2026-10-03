@@ -131,6 +131,7 @@ help:
 	@echo "  make cfw_install_jb          Install CFW + JB extensions (jetsam/procursus/basebin)"
 	@echo "  make cfw_install_exp         Install CFW + JB + EXP experimental (hv_vmm rename, post-restore DT, build spoof)"
 	@echo "  make cfw_install_host        Select variant: VARIANT=regular|dev|jb|exp (default exp)  SPOOF_BUILD=<id> (exp)"
+	@echo "  make strip_setup            Remove Setup.app and mark PurpleBuddy setup complete on next boot (VM off)"
 	@echo ""
 	@echo "Variables: VM_DIR=$(VM_DIR) CPU=$(CPU) MEMORY=$(MEMORY) DISK_SIZE=$(DISK_SIZE)"
 
@@ -469,7 +470,7 @@ restore_offline:
 # CFW
 # ═══════════════════════════════════════════════════════════════════
 
-.PHONY: cfw_install cfw_install_dev cfw_install_jb cfw_install_exp cfw_install_host
+.PHONY: cfw_install cfw_install_dev cfw_install_jb cfw_install_exp cfw_install_host strip_setup
 
 cfw_install:
 	$(MAKE) cfw_install_host VARIANT=regular
@@ -488,3 +489,8 @@ cfw_install_exp:
 #   Options: VARIANT=regular|dev|jb|exp (default exp)  SPOOF_BUILD=<id> (exp)
 cfw_install_host:
 	$(if $(SPOOF_BUILD),SPOOF_BUILD="$(SPOOF_BUILD)") zsh "$(CURDIR)/$(SCRIPTS)/cfw_install_host.sh" --variant $(if $(VARIANT),$(VARIANT),exp) "$(VM_DIR_ABS)"
+
+# Remove Setup.app from the live System volume after CFW has flipped the boot snapshot.
+# VM must be off; re-execs under sudo.
+strip_setup:
+	zsh "$(CURDIR)/$(SCRIPTS)/strip_setup.sh" "$(VM_DIR_ABS)"

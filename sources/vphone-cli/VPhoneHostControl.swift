@@ -52,8 +52,8 @@ class VPhoneHostControl {
         }
     }
 
-    private var screenWidth = 1290
-    private var screenHeight = 2796
+    private var screenWidth = 1640
+    private var screenHeight = 2360
     private static let compactScale = 3
 
     init(socketPath: String) {

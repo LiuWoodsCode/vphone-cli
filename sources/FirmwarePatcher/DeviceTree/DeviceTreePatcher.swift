@@ -4,8 +4,7 @@
 //
 // Strategy:
 //   1. Parse the flat device tree binary into a node/property tree.
-//   2. Apply a fixed set of property patches (serial-number, home-button-type,
-//      artwork-device-subtype, island-notch-location).
+//   2. Apply the iPad15,3 identity and capability profile.
 //   3. Serialize the modified tree back to flat binary.
 
 import Foundation
@@ -14,12 +13,6 @@ import Foundation
 public final class DeviceTreePatcher: Patcher {
     public let component = "devicetree"
     public let verbose: Bool
-
-    /// Whether to apply the 8 identity-rewrite property patches (Tier 1b + 1c)
-    /// that flip device identity towards iPhone17,3 / D47AP. Enabled only for
-    /// the `.exp` variant; all other variants run the base 4 patches only so
-    /// they remain unaffected by the experimental identity rewrites.
-    let includeIdentityPatches: Bool
 
     let buffer: BinaryBuffer
     var patches: [PatchRecord] = []
@@ -38,10 +31,7 @@ public final class DeviceTreePatcher: Patcher {
         let description: String
     }
 
-    /// A patch that adds a brand-new child node under an existing parent.
-    /// Used when iPhone17,3 carries a node that vphone600 does not — e.g.
-    /// `/device-tree/product/camera`, which `libMobileGestalt` requires to
-    /// answer `MGGetBoolAnswer("still-camera")` truthfully.
+    /// A patch that adds a child capability node under an existing parent.
     struct AddChildNodePatch {
         let parentPath: [String]
         let nodeName: String
@@ -69,634 +59,173 @@ public final class DeviceTreePatcher: Patcher {
         case bytes(Data)
     }
 
-    /// Multi-string `compatible` blob used by patch #3 (root `compatible`).
-    ///
-    /// Original layout (48 bytes):
-    ///   "VPHONE600AP\0" "iPhone99,11\0" "AppleVirtualPlatformARM\0"
-    ///        11 + 1         11 + 1            23 + 1            = 48
-    ///
-    /// Patched layout (48 bytes, surgical change of the middle string only):
-    ///   "VPHONE600AP\0" "iPhone17,3\0" "AppleVirtualPlatformARM\0\0"
-    ///        11 + 1         10 + 1            23 + 2            = 48
-    ///
-    /// `VPHONE600AP` stays as the FIRST entry so IOKit's platform-expert
-    /// matching at boot still binds against the kext that claims it. The
-    /// SECOND entry, which userland walks of the compatible list see when
-    /// iterating to enumerate alternate identifiers, is flipped to
-    /// `iPhone17,3`. The trailing `AppleVirtualPlatformARM` shifts one byte
-    /// earlier (now starts at byte 23 instead of 24), but every consumer of
-    /// `compatible` walks by NUL-terminator — none depend on a fixed byte
-    /// offset within the blob — so the shift is harmless.
-    static let compatibleRewrite: Data = {
-        var d = Data()
-        d.append(contentsOf: Array("VPHONE600AP".utf8))
-        d.append(0)
-        d.append(contentsOf: Array("iPhone17,3".utf8))
-        d.append(0)
-        d.append(contentsOf: Array("AppleVirtualPlatformARM".utf8))
-        d.append(0)
-        // 11+1 + 10+1 + 23+1 = 47 bytes so far; pad with one NUL to 48.
-        d.append(0)
-        return d
-    }()
+    // Keep the virtual platform matcher first so the guest boot driver still binds.
+    static let compatibleRewrite = Data("VPHONE600AP\0iPad15,3\0AppleVirtualPlatformARM\0\0".utf8)
 
-    /// Base device-tree property patches, applied for every variant.
-    /// Matches the pre-experimental set (serial-number, home-button-type,
-    /// artwork-device-subtype, island-notch-location) inherited from
-    /// scripts/dtree.py PATCHES.
     static let basePropertyPatches: [PropertyPatch] = [
-        PropertyPatch(
-            nodePath: ["device-tree"],
-            property: "serial-number",
-            length: 12,
-            flags: 0,
-            value: .string("FLVRF0LEY01"),
-            patchID: "devicetree.serial_number",
-            description: "Set serial number to FLVRF0LEY01"
-        ),
-        PropertyPatch(
-            nodePath: ["device-tree", "buttons"],
-            property: "home-button-type",
-            length: 4,
-            flags: 0,
-            value: .integer(2),
-            patchID: "devicetree.home_button_type",
-            description: "Set home button type to 2"
-        ),
-        PropertyPatch(
-            nodePath: ["device-tree", "product"],
-            property: "watch-companion",
-            length: 4,
-            flags: 0,
-            value: .integer(1),
-            patchID: "devicetree.watch_companion",
-            description: "Enable Apple Watch companion support"
-        ),
-        PropertyPatch(
-            nodePath: ["device-tree", "product"],
-            property: "assistant",
-            length: 4,
-            flags: 0,
-            value: .integer(1),
-            patchID: "devicetree.assistant",
-            description: "Enable Siri assistant support"
-        ),
-        PropertyPatch(
-            nodePath: ["device-tree", "product"],
-            property: "artwork-device-subtype",
-            length: 4,
-            flags: 0,
-            value: .integer(2556),
-            patchID: "devicetree.artwork_device_subtype",
-            description: "Set artwork device subtype to 2556"
-        ),
-        PropertyPatch(
-          nodePath: ["device-tree", "product"],
-          property: "product-name",
-          length: 16, // "Butcher Vanity" + NUL
-          flags: 0,
-          value: .string("Butcher Vanity"),
-          patchID: "devicetree.product_name",
-          description: "Set product name to Butcher Vanity"
-      ),
-
-      PropertyPatch(
-          nodePath: ["device-tree", "product"],
-          property: "product-description",
-          length: 16, // "Butcher Vanity" + NUL
-          flags: 0,
-          value: .string("Butcher Vanity"),
-          patchID: "devicetree.product_description",
-          description: "Set product description to Butcher Vanity"
-      ),
-
-      PropertyPatch(
-          nodePath: ["device-tree"],
-          property: "model-number",
-          length: 7, // if this property exists
-          flags: 0,
-          value: .string("YIXI<3"),
-          patchID: "devicetree.model",
-          description: "Set model name to Butcher Vanity"
-      ),
-        PropertyPatch(
-            nodePath: ["device-tree", "product"],
-            property: "island-notch-location",
-            length: 4,
-            flags: 0,
-            value: .integer(144),
-            patchID: "devicetree.island_notch_location",
-            description: "Set island notch location to 144"
-        ),
+        PropertyPatch(nodePath: ["device-tree"], property: "serial-number", length: 12, flags: 0, value: .string("FLVRF0LEY01"), patchID: "devicetree.ipad.serial_number", description: "Preserve fake Flavor Foley serial number"),
+        PropertyPatch(nodePath: ["device-tree"], property: "model-number", length: 32, flags: 0, value: .string("MC9X4"), patchID: "devicetree.ipad.model_number", description: "Set iPad model number MC9X4"),
+        PropertyPatch(nodePath: ["device-tree"], property: "compatible", length: 48, flags: 0, value: .bytes(compatibleRewrite), patchID: "devicetree.ipad.compatible", description: "Set compatible secondary model to iPad15,3"),
+        PropertyPatch(nodePath: ["device-tree", "arm-io"], property: "soc-generation", length: 11, flags: 0, value: .string("H15"), patchID: "devicetree.ipad.soc_generation", description: "Set iPad SoC generation"),
+        PropertyPatch(nodePath: ["device-tree", "arm-io"], property: "device_type", length: 14, flags: 0, value: .string("t8122-io"), patchID: "devicetree.ipad.device_type", description: "Set iPad SoC device type"),
     ]
 
-    /// Experimental identity-rewrite property patches. Applied only when
-    /// `includeIdentityPatches` is true — currently set only by the `.exp`
-    /// firmware variant. Other variants (regular, dev, jb, less) skip these.
-    ///
-    /// Risk categories:
-    ///   - LOW   (#3 compatible[1], #11 sub-product-type, #12 unique-model):
-    ///     read by userland identity APIs; not in the restore-signed path.
-    ///   - HIGHER (#2 target-sub-type, #10 fdr-product-type):
-    ///     same family as `target-type` (which broke restore in a prior
-    ///     attempt) and FDR-related. If restore fails after a build that
-    ///     enables these, remove just those two and retry.
-    ///   - MEDIUM (#6 arm-io device_type, #7 arm-io soc-generation):
-    ///     IOKit secondary matchers; the real iPhone17,3 DT carries these
-    ///     exact values so they match the genuine D47AP.
-    ///   - LOW-MEDIUM (#13 gestalt-variants rename): some MG-equivalent
-    ///     code may look up the subtree by literal node name.
-    /// Patches for root `model` and root `target-type` are deliberately
-    /// NOT included here — both were tried, both broke restore. They are
-    /// applied post-restore by EXP-JB-6 (`cfw_patch_post_restore_dt.py`)
-    /// in the EXP install pipeline.
-    static let identityPropertyPatches: [PropertyPatch] = [
-        // ── Identity rewrite (Tier 1b) ────────────────────────────────
-        // 5 properties from the 13-entry DT inventory chosen as
-        // userland-facing identity surfaces. NONE of root `model` or root
-        // `target-type` are included — both already proven to break restore.
+    /// Literal /product property snapshot from the supplied J607AP IORegistry dump.
+    /// Only product-name keeps the project's fake value.
+    private static func hexBytes(_ text: String) -> Data {
+        let chars = Array(text.utf8)
+        precondition(chars.count.isMultiple(of: 2))
+        return Data(stride(from: 0, to: chars.count, by: 2).map { i in
+            UInt8(String(decoding: chars[i ... i + 1], as: UTF8.self), radix: 16)!
+        })
+    }
 
-        // #2 — root `target-sub-type` "VPHONE600AP" -> "D47AP".
-        // RISK: HIGHER. Same family as `target-type`; if restore fails
-        // after enabling this, remove this entry first.
-        PropertyPatch(
-            nodePath: ["device-tree"],
-            property: "target-sub-type",
-            length: 12,
-            flags: 0,
-            value: .string("D47AP"),
-            patchID: "devicetree.target_sub_type",
-            description: "Set target-sub-type to D47AP (was VPHONE600AP)"
-        ),
-
-        // #3 — root `compatible` surgical mangle. Keep VPHONE600AP as first
-        // entry (platform-expert binding intact), rewrite iPhone99,11 (the
-        // secondary entry) to iPhone17,3, keep AppleVirtualPlatformARM as
-        // third entry. See `compatibleRewrite` above for byte layout.
-        // RISK: LOW. Iterators of compatible[] read by userland will pick
-        // up the new identity; the kernel's platform-expert bind still
-        // matches the first entry, so boot is unaffected.
-        PropertyPatch(
-            nodePath: ["device-tree"],
-            property: "compatible",
-            length: 48,
-            flags: 0,
-            value: .bytes(compatibleRewrite),
-            patchID: "devicetree.compatible_secondary",
-            description: "Surgical rewrite of compatible[1]: iPhone99,11 -> iPhone17,3"
-        ),
-
-        // #10 — device-tree/product/fdr-product-type "iPhone99,11" -> "iPhone17,3".
-        // RISK: HIGHER. FDR = Factory Data Restore; some restore-time code
-        // reads this field. If restore breaks, remove this entry.
-        PropertyPatch(
-            nodePath: ["device-tree", "product"],
-            property: "fdr-product-type",
-            length: 12,
-            flags: 0,
-            value: .string("iPhone17,3"),
-            patchID: "devicetree.product.fdr_product_type",
-            description: "Set product/fdr-product-type to iPhone17,3 (was iPhone99,11)"
-        ),
-
-        // #11 — device-tree/product/sub-product-type "iPhone99,11" -> "iPhone17,3".
-        // RISK: LOW. Read by userland classification code; not in
-        // restore-signed path.
-        PropertyPatch(
-            nodePath: ["device-tree", "product"],
-            property: "sub-product-type",
-            length: 12,
-            flags: 0,
-            value: .string("iPhone17,3"),
-            patchID: "devicetree.product.sub_product_type",
-            description: "Set product/sub-product-type to iPhone17,3 (was iPhone99,11)"
-        ),
-
-        // #12 — device-tree/product/unique-model "VPHONE600AP" -> "D47AP".
-        // RISK: LOW. Read by libMobileGestalt and "unique device class"
-        // queries; not in restore-signed path.
-        PropertyPatch(
-            nodePath: ["device-tree", "product"],
-            property: "unique-model",
-            length: 12,
-            flags: 0,
-            value: .string("D47AP"),
-            patchID: "devicetree.product.unique_model",
-            description: "Set product/unique-model to D47AP (was VPHONE600AP)"
-        ),
-
-        // ── Identity rewrite (Tier 1c) ────────────────────────────────
-        // Three more candidates from the inventory that haven't been
-        // empirically shown to break restore. Each may still affect kernel
-        // boot if a kext relies on the specific value.
-
-        // #6 — device-tree/arm-io/device_type "vresearch1-io" -> "t8140-io".
-        // RISK: MEDIUM. device_type is a secondary IOKit matcher; many
-        // kexts only use compatible[] for binding, but some require both.
-        // The actual d47ap DT carries "t8140-io" here, so this is the
-        // genuine iPhone17,3 value (not a fabricated one).
-        PropertyPatch(
-            nodePath: ["device-tree", "arm-io"],
-            property: "device_type",
-            length: 14,
-            flags: 0,
-            value: .string("t8140-io"),
-            patchID: "devicetree.arm_io.device_type",
-            description: "Set arm-io/device_type to t8140-io (was vresearch1-io)"
-        ),
-
-        // #7 — device-tree/arm-io/soc-generation "VResearch1" -> "H17".
-        // RISK: MEDIUM-LOW. soc-generation is typically a capability /
-        // SoC-family descriptor read by kexts to select code paths.
-        // d47ap (iPhone17,3) uses "H17" so we match that exactly.
-        PropertyPatch(
-            nodePath: ["device-tree", "arm-io"],
-            property: "soc-generation",
-            length: 11,
-            flags: 0,
-            value: .string("H17"),
-            patchID: "devicetree.arm_io.soc_generation",
-            description: "Set arm-io/soc-generation to H17 (was VResearch1)"
-        ),
-
-        // #13 — rename node device-tree/product/vphone600-gestalt-variants
-        // to "d47-gestalt-variants" by rewriting its `name` property.
-        // RISK: LOW-MEDIUM. Some libMobileGestalt-equivalent code may look
-        // up the subtree by literal node name. d47 doesn't have a
-        // `*-gestalt-variants` node at all (its product children are
-        // camera/facetime/maps/haptics/audio), so iOS handles missing
-        // gestalt-variants gracefully on real iPhone 17,3 devices anyway.
-        // Renaming should be at-worst-equivalent to that "missing node"
-        // path. The DTNode patcher walks by current name, so the nodePath
-        // here uses the OLD name; the patch rewrites the `name` property
-        // inside that node to the new value.
-        PropertyPatch(
-            nodePath: ["device-tree", "product", "vphone600-gestalt-variants"],
-            property: "name",
-            length: 27,
-            flags: 0,
-            value: .string("d47-gestalt-variants"),
-            patchID: "devicetree.product.gestalt_variants_rename",
-            description: "Rename node vphone600-gestalt-variants -> d47-gestalt-variants"
-        ),
-
-        // ── Camera physical-offset rewrites (Tier B) ──────────────────
-        // vphone600 ships these as 12-byte `'syscfg/fcof'` / `'syscfg/rcof'`
-        // cstring placeholders. d47ap carries 20-byte little-endian
-        // blobs describing the physical mm offset from screen center
-        // for each camera. Consumed by Camera.app / ARKit / FaceTime
-        // for image-centering math. Replacing the placeholder with the
-        // real d47ap blob (length 12 → 20) keeps the consuming code on
-        // a real number rather than reading the literal `'syscfg/...'`
-        // cstring as junk geometry.
-        PropertyPatch(
-            nodePath: ["device-tree", "product"],
-            property: "front-cam-offset-from-center",
-            length: 20,
-            flags: 0,
-            value: .bytes(Data([
-                0x61, 0x00, 0x01, 0x00, 0x92, 0x1c, 0x00, 0x00,
-                0xd8, 0x13, 0x00, 0x00, 0xe8, 0x03, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00,
-            ])),
-            patchID: "devicetree.product.front_cam_offset",
-            description: "Set product/front-cam-offset-from-center to d47ap geometry (was syscfg/fcof)"
-        ),
-        PropertyPatch(
-            nodePath: ["device-tree", "product"],
-            property: "rear-cam-offset-from-center",
-            length: 20,
-            flags: 0,
-            value: .bytes(Data([
-                0xed, 0xa5, 0x00, 0x00, 0xb2, 0x56, 0x00, 0x00,
-                0x59, 0x08, 0x00, 0x00, 0xe8, 0x03, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00,
-            ])),
-            patchID: "devicetree.product.rear_cam_offset",
-            description: "Set product/rear-cam-offset-from-center to d47ap geometry (was syscfg/rcof)"
-        ),
+    static let iPadProductProperties: [AddChildNodePatch.PropertySpec] = [
+        .init(name: "lockdown-certtype", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "display-mirroring", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "assistant", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "sandman-support", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "fdr-product-type", length: 9, flags: 0, value: .string("iPad15,3")),
+        .init(name: "ui-pip", length: 0, flags: 0, value: .bytes(hexBytes(""))),
+        .init(name: "wifi-chipset", length: 5, flags: 0, value: .string("4388")),
+        .init(name: "supports-third-party-drivers", length: 0, flags: 0, value: .bytes(hexBytes(""))),
+        .init(name: "bluetooth-lea2", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "product-name", length: 15, flags: 0, value: .string("Butcher Vanity")),
+        .init(name: "hearingaid-audio-equalization", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "RF-exposure-separation-distance", length: 4, flags: 0, value: .bytes(hexBytes("05000000"))),
+        .init(name: "mobiledevice-min-ver", length: 12, flags: 0, value: .string("1827.100.14")),
+        .init(name: "product-id", length: 20, flags: 0, value: .bytes(hexBytes("32ec6f983b5e984241068e698417d5a10c3a96c1"))),
+        .init(name: "sub-product-type", length: 9, flags: 0, value: .string("iPad15,3")),
+        .init(name: "raw-panel-serial-number", length: 87, flags: 0, value: .string("FP1HHS00CPK0000NJLAAAE6BLNGA661DY9HHC00ELC0000NJJXXX9FQQ81D251C43HH6TZ9WM00004WZ180XX3")),
+        .init(name: "product-description", length: 15, flags: 0, value: .string("Butcher Vanity")),
+        .init(name: "supports-recoveryos", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "natural-volume-arrangement", length: 0, flags: 0, value: .bytes(hexBytes(""))),
+        .init(name: "allow-32bit-apps", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "panel-product-id", length: 2, flags: 0, value: .bytes(hexBytes("74c1"))),
+        .init(name: "low-power-wallet-mode", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "builtin-mics", length: 4, flags: 0, value: .bytes(hexBytes("02000000"))),
+        .init(name: "exclaves-enabled", length: 4, flags: 0, value: .bytes(hexBytes("00000000"))),
+        .init(name: "has-boot-chime", length: 4, flags: 0, value: .bytes(hexBytes("00000000"))),
+        .init(name: "rear-cam-offset-from-center", length: 20, flags: 0, value: .bytes(hexBytes("14b20100152b0100f60c0000e803000000000000"))),
+        .init(name: "unique-model", length: 7, flags: 0, value: .string("J607AP")),
+        .init(name: "display-backlight-compensation", length: 116, flags: 0, value: .bytes(hexBytes("00000002000033330000ea77000100000000fed3000200000000ee370000feed00010000000500000000f1c50000fe3100010000000900000000f5fb0000fe4200010000000f00000000fb6e0000ff1d000100000014fae10001000000010000000100000016a666000100000000fee90000feba"))),
+        .init(name: "compatible-device-fallback", length: 9, flags: 0, value: .string("iPad14,8")),
+        .init(name: "external-hdr", length: 0, flags: 0, value: .bytes(hexBytes(""))),
+        .init(name: "device-perf-memory-class", length: 4, flags: 0, value: .bytes(hexBytes("08000000"))),
+        .init(name: "display-corner-radius", length: 8, flags: 0, value: .bytes(hexBytes("1200000001000000"))),
+        .init(name: "artwork-scale-factor", length: 4, flags: 0, value: .bytes(hexBytes("02000000"))),
+        .init(name: "has-exclaves", length: 4, flags: 0, value: .bytes(hexBytes("00000000"))),
+        .init(name: "strict-wake-vendor-id", length: 16, flags: 0, value: .bytes(hexBytes("ac050000ac050000ac050000ac050000"))),
+        .init(name: "hearingaid-low-energy-audio", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "ui-background-quality", length: 4, flags: 0, value: .bytes(hexBytes("64000000"))),
+        .init(name: "strict-wake-product-id", length: 16, flags: 0, value: .bytes(hexBytes("920200006e0200006f02000051040000"))),
+        .init(name: "supports-avatars", length: 0, flags: 0, value: .bytes(hexBytes(""))),
+        .init(name: "public-key-accelerator", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "panel-serial-number", length: 19, flags: 0, value: .string("FP1HHS00CPK0000NJL")),
+        .init(name: "name", length: 8, flags: 0, value: .string("product")),
+        .init(name: "artwork-device-idiom", length: 4, flags: 0, value: .string("pad")),
+        .init(name: "has-virtualization", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "device-color-policy", length: 4, flags: 0, value: .bytes(hexBytes("00000000"))),
+        .init(name: "graphics-featureset-class", length: 7, flags: 0, value: .string("APPLE9")),
+        .init(name: "AAPL,phandle", length: 4, flags: 0, value: .bytes(hexBytes("00010000"))),
+        .init(name: "compatible-app-variant", length: 2, flags: 0, value: .string("0")),
+        .init(name: "artwork-dynamic-displaymode", length: 2, flags: 0, value: .string("0")),
+        .init(name: "bluetooth-le", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "supports-lotx", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "has-applelpm", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "framebuffer-identifier", length: 37, flags: 0, value: .string("1D05B7BF-7313-48A6-B2DF-964AAE76A0DC")),
+        .init(name: "iap2-protocol-supported", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "ui-overlay-app", length: 0, flags: 0, value: .bytes(hexBytes(""))),
+        .init(name: "ephemeral-data-mode", length: 4, flags: 0, value: .bytes(hexBytes("00000000"))),
+        .init(name: "front-cam-rotation-isp", length: 4, flags: 0, value: .bytes(hexBytes("b4000000"))),
+        .init(name: "chrome-identifier", length: 38, flags: 0, value: .string("com.apple.dt.devicekit.chrome.tablet4")),
+        .init(name: "app-macho-architecture", length: 7, flags: 0, value: .string("arm64e")),
+        .init(name: "ptp-large-files", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "medusa-overlay-app-capability", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "udid-version", length: 4, flags: 0, value: .bytes(hexBytes("02000000"))),
+        .init(name: "offline-dictation", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "ui-weather-quality", length: 4, flags: 0, value: .bytes(hexBytes("64000000"))),
+        .init(name: "graphics-featureset-fallbacks", length: 73, flags: 0, value: .string("APPLE8:APPLE7:APPLE6:APPLE5:APPLE4:APPLE3:APPLE3v1:APPLE2:APPLE1:GLES2,0")),
+        .init(name: "dictation", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "itunes-min-ver", length: 4, flags: 0, value: .bytes(hexBytes("00090c00"))),
+        .init(name: "multiuser-sessions", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "artwork-display-gamut", length: 3, flags: 0, value: .string("P3")),
+        .init(name: "front-cam-offset-from-center", length: 20, flags: 0, value: .bytes(hexBytes("1c250000254b010078100000e803000000000000"))),
+        .init(name: "partition-style", length: 4, flags: 0, value: .string("iOS")),
+        .init(name: "single-stage-boot", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "thin-bezel", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "ui-floating-live-app", length: 0, flags: 0, value: .bytes(hexBytes(""))),
+        .init(name: "ui-pinned-app", length: 0, flags: 0, value: .bytes(hexBytes(""))),
+        .init(name: "display-temp-compensation", length: 164, flags: 0, value: .bytes(hexBytes("000000010012b3330000f5d50000f7f700010000001500000000f7f50000f9a700010000001800000000fac10000fbdf00010000001b00000000fd950000fe1a00010000001d88f600010000000100000001000000200000000100000000ff7d0000fda600230000000100000000fedc0000fad100260000000100000000fe3b0000f80400290000000100000000fd980000f53f002d0000000100000000fcbe0000f199"))),
+        .init(name: "builtin-battery", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "artwork-device-subtype", length: 4, flags: 0, value: .bytes(hexBytes("38090000"))),
+        .init(name: "reverse-zoom-supported", length: 4, flags: 0, value: .bytes(hexBytes("01000000"))),
+        .init(name: "primary-calibration-matrix", length: 40, flags: 0, value: .bytes(hexBytes("0100000046f4fc00b88f0500027cfdffbe1901009a5bfa00a78a0400aa25ffffec3800006aa10001"))),
+        .init(name: "usb-c-smc-pwr", length: 0, flags: 0, value: .bytes(hexBytes(""))),
+        .init(name: "side-button-location", length: 20, flags: 0, value: .bytes(hexBytes("0006180000922200f45e00000787020010270000"))),
     ]
 
-    /// Experimental child-node additions. Adds nodes that exist on real
-    /// iPhone17,3 but not on vphone600 — so the userland answer surface
-    /// matches the spoofed identity. Gated by `includeIdentityPatches`
-    /// (EXP variant only).
-    ///
-    /// `/device-tree/product/camera` is required for
-    /// `MGGetBoolAnswer("still-camera")` to return YES — without it,
-    /// SpringBoard's SBAppTags filter hides `Camera.app`'s icon and
-    /// blocks launch. The d47ap DT carries this node with 64 capability
-    /// properties; the subset here is the minimum that backs the
-    /// `cameraCapability` / `aggregateCameraCapability` /
-    /// `autoFocusCameraCapability` getters in libMobileGestalt and the
-    /// `still-camera` answer the SBAppTags consumer hits.
-    static let experimentalNodeAdditions: [AddChildNodePatch] = [
-        // Replicates the full `/product/camera` property set carried by the
-        // iPhone17,3 D47AP DT (62 props in the reference build, all integers
-        // or zero-length placeholders). The minimal 11-property version
-        // wasn't enough — `PurpleBuddy` and other first-boot consumers
-        // re-evaluate camera capability via `MGGetBoolAnswer` reading
-        // additional DT properties (front-flash-capability,
-        // live-photo-capture, rear-cam-superwide-capability, etc.) and
-        // hide the Camera icon if any return nil/absent.
-        //
-        // Values copied byte-for-byte from
-        // `ipsws/iPhone17,3_26.5_23F77_Restore_extracted/Firmware/all_flash/DeviceTree.d47ap.im4p`
-        // post-LZFSE-decompression. Sorted alphabetically for diff stability.
-        // The `"<"` / `"d"` / `"x"` values that ipsw dtree shows are 4-byte
-        // little-endian ints whose first byte happens to print:
-        //   "<" = 0x3C = 60   (60 fps cap)
-        //   "d" = 0x64 = 100  (100-ms burst duration)
-        //   "x" = 0x78 = 120  (120 fps slomo cap)
-        // `<nil>` properties are 0-length placeholders (the name exists but
-        // there's no value blob); MGGetBoolAnswer treats those as YES too.
-        AddChildNodePatch(
-            parentPath: ["device-tree", "product"],
-            nodeName: "camera",
-            properties: [
-                .init(name: "aggregate-cam-photo-zoom", length: 4, flags: 0, value: .integer(0x7d0)),
-                .init(name: "aggregate-cam-video-zoom", length: 4, flags: 0, value: .integer(0x4b0)),
-                .init(name: "aggregate-camera", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "auto-focus", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "auto-low-light-video", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "camera-hdr-version", length: 4, flags: 0, value: .integer(3)),
-                .init(name: "camera-ui-version", length: 4, flags: 0, value: .integer(2)),
-                .init(name: "deferred-processing", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "flash", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "front-auto-focus", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "front-auto-hdr", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "front-burst", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "front-burst-image-duration", length: 4, flags: 0, value: .integer(100)),
-                .init(name: "front-flash-capability", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "front-hdr", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "front-hdr-on", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "front-low-light-photo", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "front-max-burst-length", length: 4, flags: 0, value: .integer(600)),
-                .init(name: "front-max-slomo-video-fps-1080p", length: 4, flags: 0, value: .integer(120)),
-                .init(name: "front-max-slomo-video-fps-720p", length: 4, flags: 0, value: .integer(120)),
-                .init(name: "front-max-video-fps-1080p", length: 4, flags: 0, value: .integer(60)),
-                .init(name: "front-max-video-fps-4k", length: 4, flags: 0, value: .integer(60)),
-                .init(name: "front-max-video-fps-720p", length: 4, flags: 0, value: .integer(60)),
-                .init(name: "front-max-video-zoom", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "front-slowmo", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "front-stage-light-portrait", length: 0, flags: 0, value: .bytes(Data())),
-                .init(name: "front-variable-frame-rate", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "live-effects", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "live-photo-auto", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "live-photo-capture", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "moment-capture", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "p3-color-space-video-recording", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "panorama", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "pearl-camera", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "photo-capture-on-touch-down", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "photos-live-video-rendering", length: 0, flags: 0, value: .bytes(Data())),
-                .init(name: "pipelined-stillimage-capability", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "portrait-lighting-strength", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "post-effects", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "rear-auto-hdr", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "rear-burst", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "rear-burst-image-duration", length: 4, flags: 0, value: .integer(100)),
-                .init(name: "rear-cam-sup-wide-af-capability", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "rear-cam-superwide-capability", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "rear-hdr", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "rear-hdr-on", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "rear-low-light-photo", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "rear-max-burst-length", length: 4, flags: 0, value: .integer(600)),
-                .init(name: "rear-max-slomo-video-fps-1080p", length: 4, flags: 0, value: .integer(240)),
-                .init(name: "rear-max-slomo-video-fps-720p", length: 4, flags: 0, value: .integer(240)),
-                .init(name: "rear-max-video-fps-1080p", length: 4, flags: 0, value: .integer(60)),
+    static let iPadNodeAdditions: [AddChildNodePatch] = [
+        AddChildNodePatch(parentPath: ["device-tree", "product"], nodeName: "camera", properties: [
                 .init(name: "rear-max-video-fps-4k", length: 4, flags: 0, value: .integer(60)),
-                .init(name: "rear-max-video-fps-720p", length: 4, flags: 0, value: .integer(60)),
-                .init(name: "rear-max-video-frame_rate", length: 4, flags: 0, value: .integer(60)),
                 .init(name: "rear-max-video-zoom", length: 4, flags: 0, value: .integer(3)),
+                .init(name: "rear-max-burst-length", length: 4, flags: 0, value: .integer(300)),
+                .init(name: "camera-hdr-version", length: 4, flags: 0, value: .integer(3)),
+                .init(name: "front-max-burst-length", length: 4, flags: 0, value: .integer(300)),
+                .init(name: "auto-focus", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "front-auto-hdr", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "rear-max-video-fps-720p", length: 4, flags: 0, value: .integer(60)),
+                .init(name: "front-burst-image-duration", length: 4, flags: 0, value: .integer(100)),
                 .init(name: "rear-slowmo", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "rear-stage-light-portrait", length: 0, flags: 0, value: .bytes(Data())),
-                .init(name: "rear-variable-frame-rate", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "spatial-over-capture", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "stage-light-portrait-preview", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "front-hdr", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "pipelined-stillimage-capability", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "rear-max-slomo-video-fps-1080p", length: 4, flags: 0, value: .integer(240)),
+                .init(name: "front-flash-capability", length: 4, flags: 0, value: .integer(1)),
                 .init(name: "video-cap", length: 4, flags: 0, value: .integer(2)),
-                .init(name: "video-stills", length: 4, flags: 0, value: .integer(1)),
-            ],
-            patchID: "devicetree.product.camera_node",
-            description: "Add /product/camera node with full iPhone17,3 D47AP property set (62 props)"
-        ),
-
-        // ── /product/facetime (Tier C — front-camera video-call config) ──
-        // d47ap carries this 11-property node (excluding AAPL,phandle).
-        // FaceTime reads bitrate-{2g,3g,lte,wifi}, decoding/encoding
-        // codec parameters, pref-decoding, and tnr-mode-{back,front}
-        // (temporal noise reduction) at app launch. Values byte-for-byte
-        // from the d47ap DT.
-        AddChildNodePatch(
-            parentPath: ["device-tree", "product"],
-            nodeName: "facetime",
-            properties: [
-                .init(name: "bitrate-2g", length: 4, flags: 0, value: .integer(100)),
-                .init(name: "bitrate-3g", length: 4, flags: 0, value: .integer(228)),
-                .init(name: "bitrate-lte", length: 4, flags: 0, value: .integer(228)),
-                .init(name: "bitrate-wifi", length: 4, flags: 0, value: .integer(2000)),
-                .init(name: "decoding", length: 48, flags: 0, value: .bytes(Data([
-                    0x40, 0x01, 0x00, 0x00, 0x0f, 0x00, 0xf0, 0x00,
-                    0x40, 0x01, 0x00, 0x00, 0x1e, 0x00, 0xf0, 0x00,
-                    0xe0, 0x01, 0x00, 0x00, 0x0f, 0x00, 0x70, 0x01,
-                    0xe0, 0x01, 0x00, 0x00, 0x1e, 0x00, 0x70, 0x01,
-                    0x80, 0x02, 0x00, 0x00, 0x1e, 0x00, 0xe0, 0x01,
-                    0x00, 0x04, 0x00, 0x00, 0x1e, 0x00, 0x00, 0x03,
-                ]))),
-                .init(name: "encoding", length: 56, flags: 0, value: .bytes(Data([
-                    0x40, 0x01, 0x00, 0x00, 0x0f, 0x00, 0xf0, 0x00,
-                    0x40, 0x01, 0x00, 0x00, 0x1e, 0x00, 0xf0, 0x00,
-                    0xe0, 0x01, 0x00, 0x00, 0x0f, 0x00, 0x70, 0x01,
-                    0xe0, 0x01, 0x00, 0x00, 0x1e, 0x00, 0x70, 0x01,
-                    0x80, 0x02, 0x00, 0x00, 0x1e, 0x00, 0xe0, 0x01,
-                    0x00, 0x04, 0x00, 0x00, 0x1e, 0x00, 0x00, 0x03,
-                    0x00, 0x05, 0x00, 0x00, 0x1e, 0x00, 0xd0, 0x02,
-                ]))),
-                .init(name: "pref-decoding", length: 8, flags: 0, value: .integer(0x0300_001e_0000_0400)),
-                .init(name: "tnr-mode-back", length: 4, flags: 0, value: .integer(10)),
+                .init(name: "front-hdr-on", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "rear-max-slomo-video-fps-720p", length: 4, flags: 0, value: .integer(240)),
+                .init(name: "front-burst", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "rear-auto-hdr", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "rear-burst-image-duration", length: 4, flags: 0, value: .integer(100)),
+                .init(name: "p3-color-space-video-recording", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "rear-max-video-frame_rate", length: 4, flags: 0, value: .integer(60)),
+                .init(name: "rear-hdr-on", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "auto-low-light-video", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "rear-max-video-fps-1080p", length: 4, flags: 0, value: .integer(60)),
+                .init(name: "medusa-overlay-app-capability", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "rear-hdr", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "rear-burst", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "post-effects", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "photo-capture-on-touch-down", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "stage-light-portrait-preview", length: 4, flags: 0, value: .integer(0)),
+                .init(name: "front-max-video-zoom", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "front-max-video-fps-720p", length: 4, flags: 0, value: .integer(60)),
+                .init(name: "panorama", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "front-max-video-fps-1080p", length: 4, flags: 0, value: .integer(60)),
+                .init(name: "live-photo-capture", length: 4, flags: 0, value: .integer(1)),
+            ], patchID: "devicetree.ipad.camera_node", description: "Add iPad15,3 camera capabilities"),
+        AddChildNodePatch(parentPath: ["device-tree", "product"], nodeName: "facetime", properties: [
+                .init(name: "encoding", length: 56, flags: 0, value: .bytes(Data([ 0x40, 0x01, 0x00, 0x00, 0x0f, 0x00, 0xf0, 0x00, 0x40, 0x01, 0x00, 0x00, 0x1e, 0x00, 0xf0, 0x00, 0xe0, 0x01, 0x00, 0x00, 0x0f, 0x00, 0x70, 0x01, 0xe0, 0x01, 0x00, 0x00, 0x1e, 0x00, 0x70, 0x01, 0x80, 0x02, 0x00, 0x00, 0x1e, 0x00, 0xe0, 0x01, 0x00, 0x04, 0x00, 0x00, 0x1e, 0x00, 0x00, 0x03, 0x00, 0x05, 0x00, 0x00, 0x1e, 0x00, 0xd0, 0x02 ]))),
+                .init(name: "decoding", length: 48, flags: 0, value: .bytes(Data([ 0x40, 0x01, 0x00, 0x00, 0x0f, 0x00, 0xf0, 0x00, 0x40, 0x01, 0x00, 0x00, 0x1e, 0x00, 0xf0, 0x00, 0xe0, 0x01, 0x00, 0x00, 0x0f, 0x00, 0x70, 0x01, 0xe0, 0x01, 0x00, 0x00, 0x1e, 0x00, 0x70, 0x01, 0x80, 0x02, 0x00, 0x00, 0x1e, 0x00, 0xe0, 0x01, 0x00, 0x04, 0x00, 0x00, 0x1e, 0x00, 0x00, 0x03 ]))),
                 .init(name: "tnr-mode-front", length: 4, flags: 0, value: .integer(10)),
-            ],
-            patchID: "devicetree.product.facetime_node",
-            description: "Add /product/facetime node with full iPhone17,3 D47AP property set (9 props)"
-        ),
-
-        // ── /product/audio (Tier C — audio + spatial-capture flags) ──
-        // d47ap carries this 31-property node (excluding AAPL,phandle).
-        // Two camera-joint flags live here: `supports-spatial-audio-capture`
-        // and `supports-spatial-facetime` — needed for spatial-video and
-        // spatial-photo capture pipelines that combine camera + audio.
-        // The remaining 29 properties are pure audio config (mic gains,
-        // speaker cpms, voice trigger, channel layout, codec use-case
-        // formats). Calibration cstrings (`mic-trim-gains-*`,
-        // `speaker-thiele-small-*`, `speaker-trim-gains-*`) keep their
-        // syscfg-reference form — replacing them with concrete values
-        // from d47 wouldn't make the VM's actual mic/speaker hardware
-        // match, but downstream code already handles missing-syscfg
-        // gracefully.
-        AddChildNodePatch(
-            parentPath: ["device-tree", "product"],
-            nodeName: "audio",
-            properties: [
-                .init(name: "acoustic-id", length: 4, flags: 0, value: .integer(8018)),
-                .init(name: "actuator-cpms-bgd_100ms", length: 8, flags: 0, value: .integer(0x0000_0eef_0000_01f4)),
-                .init(name: "actuator-cpms-bgd_inst", length: 8, flags: 0, value: .integer(0x0000_1db0_0000_06d6)),
-                .init(name: "enabledChannels", length: 4, flags: 0, value: .integer(15)),
-                .init(name: "historyChannels", length: 4, flags: 0, value: .integer(15)),
-                .init(name: "mic-trim-gains-0", length: 12, flags: 0, value: .string("syscfg/MiGH")),
-                .init(name: "mic-trim-gains-2", length: 12, flags: 0, value: .string("syscfg/MiGB")),
-                .init(name: "mic-trim-gains-key-cnt", length: 4, flags: 0, value: .integer(2)),
-                .init(name: "speaker-cpms-bgd_100ms", length: 8, flags: 0, value: .integer(0x0000_2328_0000_04b0)),
-                .init(name: "speaker-cpms-bgd_1s", length: 8, flags: 0, value: .integer(0x0000_2328_0000_04b0)),
-                .init(name: "speaker-cpms-bgd_inst", length: 8, flags: 0, value: .integer(0x0000_2328_0000_04b0)),
-                .init(name: "speaker-thiele-small-0", length: 12, flags: 0, value: .string("syscfg/SpPH")),
-                .init(name: "speaker-thiele-small-key-cnt", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "speaker-trim-gains-0", length: 12, flags: 0, value: .string("syscfg/SpGH")),
-                .init(name: "speaker-trim-gains-key-cnt", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "pref-decoding", length: 8, flags: 0, value: .bytes(Data([ 0x00, 0x04, 0x00, 0x00, 0x1e, 0x00, 0x00, 0x03 ]))),
+                .init(name: "bitrate-wifi", length: 4, flags: 0, value: .integer(2000)),
+                .init(name: "tnr-mode-back", length: 4, flags: 0, value: .integer(10)),
+            ], patchID: "devicetree.ipad.facetime_node", description: "Add iPad15,3 facetime capabilities"),
+        AddChildNodePatch(parentPath: ["device-tree", "product"], nodeName: "audio", properties: [
+                .init(name: "supports-auto-mic-mode", length: 4, flags: 0, value: .integer(0)),
+                .init(name: "supports-secure-microphone", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "acoustic-id", length: 4, flags: 0, value: .integer(2025)),
                 .init(name: "stereo-sound-recording", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "supportedChannels", length: 4, flags: 0, value: .integer(15)),
+                .init(name: "supports-audio-mix", length: 4, flags: 0, value: .integer(1)),
                 .init(name: "supports-advanced-vp-chatflavor", length: 4, flags: 0, value: .integer(1)),
                 .init(name: "supports-always-listening", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "supports-audio-mix", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "supports-auto-mic-mode", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "supports-barge-in", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "supports-concurrent-hp-lp-mics", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "supports-mic-modes-telephony", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "supports-spatial-audio-capture", length: 4, flags: 0, value: .integer(1)),
                 .init(name: "supports-spatial-facetime", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "use-case-client-format", length: 96, flags: 0, value: .bytes(Data([
-                    0x61, 0x64, 0x6e, 0x73, 0x80, 0xbb, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x69, 0x72, 0x69, 0x73, 0x80, 0x3e, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x73, 0x74, 0x70, 0x6c, 0x80, 0x3e, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                ]))),
-                .init(name: "use-case-dsp-in-format", length: 160, flags: 0, value: .bytes(Data([
-                    0x64, 0x6b, 0x74, 0x6d, 0x80, 0xbb, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x61, 0x64, 0x6e, 0x73, 0x80, 0xbb, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x64, 0x76, 0x70, 0x73, 0x80, 0xbb, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x69, 0x72, 0x69, 0x73, 0x80, 0x3e, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x73, 0x74, 0x70, 0x6c, 0x80, 0x3e, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                ]))),
-                .init(name: "use-case-struct-version", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "voiceTriggerChannels", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "supports-barge-in", length: 4, flags: 0, value: .integer(1)),
                 .init(name: "wireless-splitter", length: 4, flags: 0, value: .integer(1)),
-            ],
-            patchID: "devicetree.product.audio_node",
-            description: "Add /product/audio node with full iPhone17,3 D47AP property set (31 props)"
-        ),
-
-        // ── /product/iopm (Tier C — always-on technology) ────────────
-        // d47ap carries this 2-property node (excluding AAPL,phandle).
-        // `aot-mode = 13` enables Always-On Technology — drives wake
-        // policy and always-on-display behavior. POTENTIAL DISPLAY
-        // RISK: if the VM display can't service the AOT init path,
-        // this may need to be reverted in isolation. Test this batch
-        // alongside facetime + audio + Tier B; if display breaks,
-        // remove this AddChildNodePatch entry first before bisecting
-        // the rest.
-        AddChildNodePatch(
-            parentPath: ["device-tree", "product"],
-            nodeName: "iopm",
-            properties: [
-                .init(name: "aot-linger-time-ms", length: 4, flags: 0, value: .integer(0)),
-                .init(name: "aot-mode", length: 4, flags: 0, value: .integer(13)),
-            ],
-            patchID: "devicetree.product.iopm_node",
-            description: "Add /product/iopm node with aot-mode=13 + aot-linger-time-ms=0 (2 props)"
-        ),
-
-        // ── ISP / SMC camera-flag stubs (Tier F — /arm-io subtree) ──
-        // Adds minimal stub nodes carrying ONLY the camera-related
-        // properties that libMobileGestalt / SpringBoard / Camera.app
-        // userland code walks under `/arm-io/isp`, `/arm-io/ispRtb`,
-        // and `/arm-io/smc/iop-smc-nub/smc-ext-charger`.
-        //
-        // d47ap carries these as full hardware-attach nodes (65/53/14
-        // properties). We deliberately do NOT replicate the full set
-        // — they describe a real ISP / SMC chip with MMIO regions,
-        // interrupts, DART/IOMMU bindings, kext-`compatible` strings
-        // etc., and the VM has no such hardware. Stubbing only the
-        // camera-* properties + the mandatory `name` (no `compatible`,
-        // no `device_type`, no `reg`, no `interrupts`) means:
-        //
-        //   - IOKit registry sees these nodes appear under `/arm-io`.
-        //   - No kext (`AppleH16CamIn`, AppleSMC, etc.) finds a
-        //     matching `compatible` and binds, so no driver probe
-        //     can fail-and-panic on missing hardware.
-        //   - Userland code that resolves these paths via
-        //     `IORegistryEntryFromPath` + `IORegistryEntryGetProperty`
-        //     still finds the camera-* properties on the empty stub.
-        //
-        // RISK: still untested. If an IOKit walker reports the empty
-        // node and a userland daemon (e.g. cameracaptured) takes the
-        // node's presence as "real ISP attached" and then crashes
-        // trying to talk to it, the symptom is likely a boot stall or
-        // a camera-daemon respawn loop visible in logs. Bisect by
-        // removing /arm-io/isp + /arm-io/ispRtb first if so.
-        //
-        // The three nodes are added in dependency order: each parent
-        // before its children. The patcher walks `experimentalNodeAdditions`
-        // in array order against the in-memory tree, so later entries
-        // can resolve parents added by earlier entries.
-
-        // /arm-io/smc — empty stub (parent for iop-smc-nub).
-        AddChildNodePatch(
-            parentPath: ["device-tree", "arm-io"],
-            nodeName: "smc",
-            properties: [],
-            patchID: "devicetree.arm_io.smc_stub",
-            description: "Add /arm-io/smc empty stub (parent for smc-ext-charger chain)"
-        ),
-
-        // /arm-io/smc/iop-smc-nub — empty stub (parent for smc-ext-charger).
-        AddChildNodePatch(
-            parentPath: ["device-tree", "arm-io", "smc"],
-            nodeName: "iop-smc-nub",
-            properties: [],
-            patchID: "devicetree.arm_io.smc.iop_smc_nub_stub",
-            description: "Add /arm-io/smc/iop-smc-nub empty stub (parent for smc-ext-charger)"
-        ),
-
-        // /arm-io/smc/iop-smc-nub/smc-ext-charger — carries camera-driver.
-        AddChildNodePatch(
-            parentPath: ["device-tree", "arm-io", "smc", "iop-smc-nub"],
-            nodeName: "smc-ext-charger",
-            properties: [
-                .init(name: "camera-driver", length: 14, flags: 0, value: .string("AppleH16CamIn")),
-            ],
-            patchID: "devicetree.arm_io.smc.smc_ext_charger_camera_driver",
-            description: "Add /arm-io/smc/iop-smc-nub/smc-ext-charger with camera-driver='AppleH16CamIn'"
-        ),
-
-        // /arm-io/isp — minimal stub carrying camera-front + camera-rear.
-        AddChildNodePatch(
-            parentPath: ["device-tree", "arm-io"],
-            nodeName: "isp",
-            properties: [
-                .init(name: "camera-front", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "camera-rear", length: 4, flags: 0, value: .integer(1)),
-            ],
-            patchID: "devicetree.arm_io.isp_camera_flags",
-            description: "Add /arm-io/isp stub with camera-front=1 + camera-rear=1"
-        ),
-
-        // /arm-io/ispRtb — minimal stub carrying camera-front + camera-rear.
-        AddChildNodePatch(
-            parentPath: ["device-tree", "arm-io"],
-            nodeName: "ispRtb",
-            properties: [
-                .init(name: "camera-front", length: 4, flags: 0, value: .integer(1)),
-                .init(name: "camera-rear", length: 4, flags: 0, value: .integer(1)),
-            ],
-            patchID: "devicetree.arm_io.ispRtb_camera_flags",
-            description: "Add /arm-io/ispRtb stub with camera-front=1 + camera-rear=1"
-        ),
+                .init(name: "usb-uses-audio-clock", length: 4, flags: 0, value: .integer(1)),
+                .init(name: "supports-concurrent-hp-lp-mics", length: 4, flags: 0, value: .integer(1)),
+            ], patchID: "devicetree.ipad.audio_node", description: "Add iPad15,3 audio capabilities"),
     ]
 
     // MARK: - Device Tree Structures
@@ -727,10 +256,9 @@ public final class DeviceTreePatcher: Patcher {
 
     // MARK: - Init
 
-    public init(data: Data, verbose: Bool = true, includeIdentityPatches: Bool = false) {
+    public init(data: Data, verbose: Bool = true) {
         buffer = BinaryBuffer(data)
         self.verbose = verbose
-        self.includeIdentityPatches = includeIdentityPatches
     }
 
     // MARK: - Patcher
@@ -964,20 +492,18 @@ public final class DeviceTreePatcher: Patcher {
 
     // MARK: - Patch Application
 
-    /// Apply all property patches and record each change.
-    ///
-    /// Always runs `basePropertyPatches`. Additionally runs
-    /// `identityPropertyPatches` + `experimentalNodeAdditions` when
-    /// `includeIdentityPatches` is true (the `.exp` firmware variant) —
-    /// other variants leave the device's identity properties untouched.
+    /// Apply the iPad profile to every firmware variant.
     private func applyPatches(root: DTNode) throws {
-        var patchesToApply = Self.basePropertyPatches
-        if includeIdentityPatches {
-            patchesToApply.append(contentsOf: Self.identityPropertyPatches)
-        }
+        let patchesToApply = Self.basePropertyPatches
         for patch in patchesToApply {
             let node = try resolveNode(root, path: patch.nodePath)
-            let prop = try findProperty(node, name: patch.property)
+            let prop: DTProperty
+            if let existing = node.properties.first(where: { $0.name == patch.property }) {
+                prop = existing
+            } else {
+                prop = DTProperty(name: patch.property, length: 0, flags: 0, value: Data(), valueOffset: 0)
+                node.properties.append(prop)
+            }
 
             let originalBytes = Data(prop.value.prefix(patch.length))
 
@@ -1014,10 +540,39 @@ public final class DeviceTreePatcher: Patcher {
             }
         }
 
-        if includeIdentityPatches {
-            for nodeAdd in Self.experimentalNodeAdditions {
-                try applyNodeAddition(root: root, patch: nodeAdd)
+        let product = try resolveNode(root, path: ["device-tree", "product"])
+        let originalProductProperties = Dictionary(
+            product.properties.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first }
+        )
+        product.properties = try Self.iPadProductProperties.map { spec in
+            let value: Data = switch spec.value {
+            case let .string(text):
+                Self.encodeFixedString(text, length: spec.length)
+            case let .integer(number):
+                try Self.encodeInteger(number, length: spec.length)
+            case let .bytes(bytes):
+                Self.encodeFixedBytes(bytes, length: spec.length)
             }
+            let previous = originalProductProperties[spec.name]
+            patches.append(PatchRecord(
+                patchID: "devicetree.ipad.product.\(spec.name)",
+                component: component,
+                fileOffset: previous?.valueOffset ?? 0,
+                virtualAddress: nil,
+                originalBytes: previous?.value ?? Data(),
+                patchedBytes: value,
+                description: "Set /product/\(spec.name) from J607AP reference"
+            ))
+            return DTProperty(name: spec.name, length: spec.length, flags: spec.flags,
+                              value: value, valueOffset: previous?.valueOffset ?? 0)
+        }
+        if let buttons = try? resolveNode(root, path: ["device-tree", "buttons"]) {
+            buttons.properties.removeAll { $0.name == "home-button-type" }
+        }
+        // An EXP firmware may already contain iPhone capability nodes.
+        product.children.removeAll { ["camera", "facetime", "audio", "iopm"].contains(nodeName($0)) }
+        for nodeAdd in Self.iPadNodeAdditions {
+            try applyNodeAddition(root: root, patch: nodeAdd)
         }
     }
 

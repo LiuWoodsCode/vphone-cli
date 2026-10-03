@@ -9,7 +9,7 @@
 //   .dev     — TXMDevPatcher instead of TXMPatcher
 //   .jb      — TXMDevPatcher + IBootJBPatcher (iBSS) + KernelJBPatcher
 //   .exp     — JB + experimental: KernelEXPPatcher (hv_vmm rename) +
-//              DeviceTreePatcher identity properties (D47AP/iPhone17,3).
+//              DeviceTreePatcher iPad15,3/J607AP product profile.
 //              Other variants are NOT affected by experimental patches.
 
 import Darwin
@@ -362,20 +362,13 @@ public final class FirmwarePipeline {
             }()
         ))
 
-        // 7. DeviceTree — base property patches for every variant. EXP additionally
-        //    applies the 8 identity-rewrite properties (Tier 1b + 1c) that flip the
-        //    device's userland-visible identity toward D47AP / iPhone17,3.
-        let dtIncludeIdentity = variant == .exp
+        // 7. DeviceTree — iPad15,3 product and capability profile for every variant.
         components.append(ComponentDescriptor(
             name: "DeviceTree",
             inRestoreDir: true,
             searchPatterns: ["Firmware/all_flash/DeviceTree.vphone600ap.im4p"],
             patcherFactories: [{ data, verbose in
-                DeviceTreePatcher(
-                    data: data,
-                    verbose: verbose,
-                    includeIdentityPatches: dtIncludeIdentity
-                )
+                DeviceTreePatcher(data: data, verbose: verbose)
             }]
         ))
         

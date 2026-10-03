@@ -13,7 +13,7 @@ Usage:
     python3 fw_manifest.py <iphone_dir> <cloudos_dir>
 """
 
-import copy, os, plistlib, sys
+import copy, os, plistlib, shutil, sys
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +163,19 @@ def main():
     # ── Device tree (vphone600ap — sets MKB dt=1 for keybag-less boot)
     m["DeviceTree"] = entry(C, VP, "DeviceTree")
     m["RestoreDeviceTree"] = entry(C, VP, "RestoreDeviceTree")
+    # The runtime tree gets the iPad profile during fw_patch. Restore must
+    # still boot with the original vphone600 product/firmware properties;
+    # sharing its path with DeviceTree routes ramrod through SPI firmware
+    # update on the virtual flasher and fails at update_iBoot.
+    restore_dt = m["RestoreDeviceTree"]
+    restore_path = restore_dt["Info"]["Path"]
+    restore_dir, restore_name = os.path.split(restore_path)
+    dedicated_path = os.path.join(restore_dir, "Restore" + restore_name)
+    shutil.copyfile(
+        os.path.join(iphone_dir, restore_path),
+        os.path.join(iphone_dir, dedicated_path),
+    )
+    restore_dt["Info"]["Path"] = dedicated_path
 
     # ── SEP (vphone600 — matches device tree) ────────────────────────
     m["SEP"] = entry(C, VP, "SEP")
