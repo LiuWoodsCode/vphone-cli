@@ -132,6 +132,9 @@ help:
 	@echo "  make cfw_install_exp         Install CFW + JB + EXP experimental (hv_vmm rename, post-restore DT, build spoof)"
 	@echo "  make cfw_install_host        Select variant: VARIANT=regular|dev|jb|exp (default exp)  SPOOF_BUILD=<id> (exp)"
 	@echo "  make strip_setup            Remove Setup.app and mark PurpleBuddy setup complete on next boot (VM off)"
+	@echo "  make sup_bak SOURCE=<dir>    Restore configuration profile backup files on next boot (VM off)"
+	@echo "    Options: DISABLE=1         Remove the sup_bak launchd service"
+	@echo "             REMOVE=1          Remove files previously installed by sup_bak on next boot"
 	@echo ""
 	@echo "Variables: VM_DIR=$(VM_DIR) CPU=$(CPU) MEMORY=$(MEMORY) DISK_SIZE=$(DISK_SIZE)"
 
@@ -470,7 +473,7 @@ restore_offline:
 # CFW
 # ═══════════════════════════════════════════════════════════════════
 
-.PHONY: cfw_install cfw_install_dev cfw_install_jb cfw_install_exp cfw_install_host strip_setup
+.PHONY: cfw_install cfw_install_dev cfw_install_jb cfw_install_exp cfw_install_host strip_setup sup_bak
 
 cfw_install:
 	$(MAKE) cfw_install_host VARIANT=regular
@@ -494,3 +497,8 @@ cfw_install_host:
 # VM must be off; re-execs under sudo.
 strip_setup:
 	zsh "$(CURDIR)/$(SCRIPTS)/strip_setup.sh" "$(VM_DIR_ABS)"
+
+# Stage backup configuration-profile files on System; a guest launchd helper
+# installs/removes them after the encrypted Data volume is mounted.
+sup_bak:
+	zsh "$(CURDIR)/$(SCRIPTS)/sup_bak.sh" "$(VM_DIR_ABS)" "$(SOURCE)" "$(DISABLE)" "$(REMOVE)"
