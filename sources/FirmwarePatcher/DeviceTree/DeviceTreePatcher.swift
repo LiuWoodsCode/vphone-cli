@@ -78,9 +78,7 @@ public final class DeviceTreePatcher: Patcher {
             description: "Tell iOS that we are a homebutton-less device"
         ),
     ]
-
-    /// Literal /product property snapshot from the supplied J607AP IORegistry dump.
-    /// Only product-name keeps the project's fake value.
+    
     private static func hexBytes(_ text: String) -> Data {
         let chars = Array(text.utf8)
         precondition(chars.count.isMultiple(of: 2))
