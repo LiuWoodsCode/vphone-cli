@@ -95,7 +95,7 @@ assert_mount_under_vm() {
 
 # ── Find restore directory ─────────────────────────────────────
 find_restore_dir() {
-    for dir in "$VM_DIR"/iPhone*_Restore; do
+    for dir in "$VM_DIR"/iPad*_Restore; do
         [[ -f "$dir/BuildManifest.plist" ]] && echo "$dir" && return
     done
     die "No restore directory found in $VM_DIR"

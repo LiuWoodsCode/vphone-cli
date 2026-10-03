@@ -73,7 +73,7 @@ mkdir -p "$JB_TEMP_DIR"
 
 # Find the restore directory (same logic as cfw_install.sh)
 JB_RESTORE_DIR=""
-for d in "$VM_DIR_ABS"/iPhone*_Restore; do
+for d in "$VM_DIR_ABS"/iPad*_Restore; do
     [[ -d "$d" ]] && { JB_RESTORE_DIR="$d"; break; }
 done
 
