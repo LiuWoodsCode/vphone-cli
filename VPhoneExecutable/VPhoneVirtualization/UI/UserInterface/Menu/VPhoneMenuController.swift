@@ -46,6 +46,7 @@ class VPhoneMenuController {
     var isUninstallingBootstrap = false
     var isRebuildingAppRegistrations = false
     var installPackageItem: NSMenuItem?
+    var installTrollStoreItem: NSMenuItem?
     var clipboardGetItem: NSMenuItem?
     var clipboardSetItem: NSMenuItem?
     var appsListItem: NSMenuItem?

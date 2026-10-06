@@ -62,11 +62,15 @@ Launchpad と同じシリーズの VPhone.bundle をインストールして、
 
 仮想マシンには標準でパッケージマネージャが入っていません。インストール手順は次のとおりです。
 
-1. メニューバーで **Apps > Install Bootstrap…** を選び、レイアウトとして **roothide** を選択します（**rootless** は非推奨です）。仮想マシンに Irisin がインストールされます。
+**Apps > Install Bootstrap…** で **Procursus + Sileo** を選ぶと、通常の rootless 環境と Sileo を直接インストールできます。従来の手順を使う場合は **Irisin** を選んでください。
+
+1. **Irisin** を選び、レイアウトとして **roothide** を選択します（Irisin の **rootless** は非推奨です）。仮想マシンに Irisin がインストールされます。
 2. Irisin で **OwnGoal Packages** リポジトリを開き、**OwnGoal Bootstrap for vphone**（`owngoal-bootstrap-vphone`）を **Bootstrap Install** でインストールします。
 
    このパッケージ 1 つで、仮想マシンに必要なものが一度にそろいます：`apt` と `dpkg`、`bash`、`zsh` と `dash`、`sudo`、基本的なコマンドラインツール、`openssh-server`、`curl`、`wget`、`vim`、`git`、`uikittools`、`launchctl`、そして OwnGoal のアプリです。これらを一つずつインストールしないでください。一部のパッケージは相互に依存しており、`openssh-server` には循環した依存の記述があるため、個別にインストールすると途中で失敗することがあります。
 3. 初回のインストール後は、ほかのパッケージを通常どおりインストールできます。
+
+**Apps > Install TrollStore Lite…** は、rootless 環境に TrollStore Lite を追加します。すでに TrollStore がある場合は再インストールしません。
 
 初回のインストールに失敗した場合や、環境が不整合な状態になった場合は、その場で修復しようとせず、**Apps > Uninstall Bootstrap…** で環境を削除し、手順 1 からインストールし直してください。
 

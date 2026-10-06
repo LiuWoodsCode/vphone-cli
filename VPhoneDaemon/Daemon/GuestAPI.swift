@@ -100,6 +100,7 @@ enum GuestAPI {
                 "ipa_install",
                 "bootstrap_install",
                 "bootstrap_uninstall",
+                "trollstore_lite_install",
                 "port_forward",
                 "camera",
                 "screenshot",
@@ -268,6 +269,7 @@ enum GuestAPI {
             return try GuestIrisinInstaller.install(
                 jailbreak: jailbreakInfo(),
                 layout: layout,
+                source: params["source"] as? String ?? "irisin",
                 packagePath: params["package_path"] as? String,
             )
         case "bootstrap.status":
@@ -283,6 +285,8 @@ enum GuestAPI {
             )
         case "bootstrap.firmware":
             return try GuestIrisinInstaller.repairFirmwareRecord()
+        case "apps.install_trollstore_lite":
+            return try GuestIrisinInstaller.installTrollStoreLite()
         case "input.touch":
             guard let phase = (params["phase"] as? String).flatMap(TouchPhase.init(rawValue:)) else {
                 throw GuestAPIError.invalidRequest("phase must be down, move or up")

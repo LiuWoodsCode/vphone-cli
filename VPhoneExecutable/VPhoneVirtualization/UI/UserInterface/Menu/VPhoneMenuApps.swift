@@ -39,6 +39,15 @@ extension VPhoneMenuController {
         installPackageItem = install
         menu.addItem(install)
 
+        let trollStore = makeItem(
+            "Install TrollStore Lite…",
+            action: #selector(installTrollStoreLite),
+            symbol: "square.and.arrow.down.on.square",
+        )
+        trollStore.isEnabled = false
+        installTrollStoreItem = trollStore
+        menu.addItem(trollStore)
+
         menu.addItem(NSMenuItem.separator())
         addBootstrapItems(to: menu)
 
@@ -56,6 +65,30 @@ extension VPhoneMenuController {
 
     func updateInstallAvailability(available: Bool) {
         installPackageItem?.isEnabled = available
+        installTrollStoreItem?.isEnabled = available && control.guestCapabilities.contains("trollstore_lite_install")
+    }
+
+    @objc func installTrollStoreLite() {
+        Task {
+            do {
+                let result = try await control.installTrollStoreLite()
+                let already = result["already_installed"] as? Bool == true
+                VPhoneAlert.present(
+                    title: "TrollStore Lite",
+                    message: already ? "TrollStore is already installed in the guest."
+                        : "TrollStore Lite is installed in the guest.",
+                    style: .informational,
+                )
+            } catch let VPhoneGuestControl.ControlError.guestError(message) {
+                VPhoneAlert.present(title: "Unable to Install TrollStore Lite", message: message, style: .warning)
+            } catch {
+                VPhoneAlert.present(
+                    title: "Unable to Install TrollStore Lite",
+                    message: "Check the guest connection and package environment, then try again.",
+                    style: .warning,
+                )
+            }
+        }
     }
 
     @objc func openAppBrowser() {

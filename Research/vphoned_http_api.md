@@ -94,6 +94,12 @@ before IcliKit copies it into a container, registers it, and owns rollback.
 `POST /v1/bootstrap/install` (or RPC method `bootstrap.install`) accepts
 `{"layout":"rootless"}` or `{"layout":"roothide"}` and installs the latest
 published `Lakr233/Irisin` release as the selected bootstrap's initial app.
+With `{"layout":"rootless","source":"procursus"}`, it instead extracts the
+published Procursus rootless archive, runs its preparation script, installs
+Sileo, and registers its app. `source` defaults to `irisin` for older clients.
+`apps.install_trollstore_lite` installs TrollStore Lite through APT after a
+rootless package environment is present, and returns `already_installed` when
+TrollStore is already registered.
 An optional `package_path` selects a guest-uploaded Irisin `.deb` instead.
 The path must be `/var/root/Library/Caches/vphoned-irisin-<UUID>.deb`; vphoned
 opens it without following symlinks, requires a regular file of at most 64 MiB,

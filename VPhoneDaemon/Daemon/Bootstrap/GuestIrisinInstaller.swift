@@ -4,7 +4,8 @@ import Foundation
 import IcliKit
 import IcliSystem
 
-/// Installs the published Irisin payload without dpkg or maintainer scripts.
+/// Installs the selected guest package environment. The Irisin path copies its
+/// payload without dpkg; the Procursus path is implemented in `Rootless/`.
 ///
 /// This file holds the layout-independent flow. RootHide's root, loader links
 /// and bootstrap base live in `RootHide/`, rootless's `/var/jb` in `Rootless/`,
@@ -21,7 +22,7 @@ enum GuestIrisinInstaller {
         .deletingLastPathComponent()
         .appendingPathComponent(".vphoned-boostrap-completed")
 
-    static func install(jailbreak: [String: Any], layout: String, packagePath: String? = nil) throws -> [String: Any] {
+    static func install(jailbreak: [String: Any], layout: String, source: String = "irisin", packagePath: String? = nil) throws -> [String: Any] {
         installLock.lock()
         defer { installLock.unlock() }
         // Installation runs once. A second request is not a failure: answer
@@ -30,12 +31,20 @@ enum GuestIrisinInstaller {
         if let installation = try completedBootstrap() {
             throw GuestAPIError.alreadyDone(
                 code: alreadyInstalledCode,
-                message: "Irisin bootstrap already completed in \(installation.root) (\(installation.layout))",
+                message: "Bootstrap already completed in \(installation.root) (\(installation.layout))",
             )
         }
-        setProgress(["phase": "preparing", "layout": layout])
+        guard source == "irisin" || source == "procursus" else {
+            throw GuestAPIError.invalidRequest("source must be irisin or procursus")
+        }
+        guard source != "procursus" || (layout == "rootless" && packagePath == nil) else {
+            throw GuestAPIError.invalidRequest("Procursus requires the rootless layout and no Irisin package")
+        }
+        setProgress(["phase": "preparing", "layout": layout, "source": source])
         do {
-            let result = try performInstall(jailbreak: jailbreak, layout: layout, packagePath: packagePath)
+            let result = try source == "procursus"
+                ? installProcursus(jailbreak: jailbreak)
+                : performInstall(jailbreak: jailbreak, layout: layout, packagePath: packagePath)
             setProgress(["phase": "completed", "layout": layout,
                          "version": result["version"] ?? "", "jbroot": result["jbroot"] ?? ""])
             return result
@@ -219,7 +228,7 @@ enum GuestIrisinInstaller {
         return nil
     }
 
-    private static func writeMarker(_ marker: [String: Any]) throws {
+    static func writeMarker(_ marker: [String: Any]) throws {
         try FileManager.default.createDirectory(
             at: completionMarker.deletingLastPathComponent(),
             withIntermediateDirectories: true,
@@ -230,7 +239,7 @@ enum GuestIrisinInstaller {
 
     // MARK: - Progress
 
-    private static func setProgress(_ value: [String: Any]) {
+    static func setProgress(_ value: [String: Any]) {
         progressLock.lock()
         progress = value
         progressLock.unlock()

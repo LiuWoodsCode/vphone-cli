@@ -14,6 +14,7 @@
 		C10000000000000000000015 /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000064 /* NIOPosix */; };
 		C10000000000000000000016 /* NIOWebSocket in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000065 /* NIOWebSocket */; };
 		C10000000000000000000018 /* IcliSystem in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000068 /* IcliSystem */; };
+		C10000000000000000000019 /* ArchiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000069 /* ArchiveKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,6 +57,7 @@
 				C10000000000000000000015 /* NIOPosix in Frameworks */,
 				C10000000000000000000016 /* NIOWebSocket in Frameworks */,
 				C10000000000000000000018 /* IcliSystem in Frameworks */,
+				C10000000000000000000019 /* ArchiveKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -127,6 +129,7 @@
 				C10000000000000000000064 /* NIOPosix */,
 				C10000000000000000000065 /* NIOWebSocket */,
 				C10000000000000000000068 /* IcliSystem */,
+				C10000000000000000000069 /* ArchiveKit */,
 			);
 			productName = vphoned;
 			productReference = C10000000000000000000002 /* vphoned */;
@@ -153,6 +156,7 @@
 				C10000000000000000000071 /* XCRemoteSwiftPackageReference "icli" */,
 				C10000000000000000000072 /* XCRemoteSwiftPackageReference "swift-nio" */,
 				C10000000000000000000074 /* XCRemoteSwiftPackageReference "swift-collections" */,
+				C10000000000000000000075 /* XCRemoteSwiftPackageReference "libarchive.xcframework" */,
 			);
 			projectDirPath = "";
 			projectRoot = "";
@@ -364,6 +368,14 @@
 				minimumVersion = 1.7.1;
 			};
 		};
+		C10000000000000000000075 /* XCRemoteSwiftPackageReference "libarchive.xcframework" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Lakr233/libarchive.xcframework.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -396,6 +408,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C10000000000000000000071 /* XCRemoteSwiftPackageReference "icli" */;
 			productName = IcliSystem;
+		};
+		C10000000000000000000069 /* ArchiveKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C10000000000000000000075 /* XCRemoteSwiftPackageReference "libarchive.xcframework" */;
+			productName = ArchiveKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

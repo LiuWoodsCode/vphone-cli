@@ -404,7 +404,11 @@ final class VPhoneGuestControl {
     func call(_ method: String, params: [String: Any] = [:]) async throws -> [String: Any] {
         let object: [String: Any] = ["id": UUID().uuidString, "method": method, "params": params]
         let body = try JSONSerialization.data(withJSONObject: object)
-        let response = try await http(method: "POST", path: "/v1/rpc", body: body)
+        let longOperation = method == "bootstrap.install" || method == "apps.install_trollstore_lite"
+        let response = try await http(
+            method: "POST", path: "/v1/rpc", body: body,
+            limits: longOperation ? .installation : .rpc,
+        )
         guard let envelope = try JSONSerialization.jsonObject(with: response.body) as? [String: Any]
         else { throw ControlError.protocolError("invalid JSON response") }
         if let error = envelope["error"] as? [String: Any] {
@@ -492,7 +496,7 @@ final class VPhoneGuestControl {
         }
     }
 
-    func installBootstrap(layout: String, localURL: URL? = nil) async throws -> [String: Any] {
+    func installBootstrap(layout: String, source: String = "irisin", localURL: URL? = nil) async throws -> [String: Any] {
         guard guestCapabilities.contains("bootstrap_install") else {
             throw ControlError.unsupportedCapability("bootstrap_install")
         }
@@ -506,9 +510,9 @@ final class VPhoneGuestControl {
             try await createDirectory(path: "/var/root/Library/Caches")
             try await uploadFile(path: path, data: data)
             defer { Task { try? await deleteFile(path: path) } }
-            return try await callBootstrapInstall(["layout": layout, "package_path": path])
+            return try await callBootstrapInstall(["layout": layout, "source": source, "package_path": path])
         }
-        return try await callBootstrapInstall(["layout": layout])
+        return try await callBootstrapInstall(["layout": layout, "source": source])
     }
 
     /// vphoned refuses a second install. A current guest says so with an error
@@ -518,6 +522,7 @@ final class VPhoneGuestControl {
             return try await call("bootstrap.install", params: params)
         } catch let ControlError.guestError(message)
             where message.hasPrefix("Irisin bootstrap already completed")
+                || message.hasPrefix("Bootstrap already completed")
         {
             throw ControlError.bootstrapAlreadyInstalled(message)
         }
@@ -543,6 +548,13 @@ final class VPhoneGuestControl {
             throw ControlError.unsupportedCapability("bootstrap_uninstall")
         }
         return try await call("bootstrap.inspect")
+    }
+
+    func installTrollStoreLite() async throws -> [String: Any] {
+        guard guestCapabilities.contains("trollstore_lite_install") else {
+            throw ControlError.unsupportedCapability("trollstore_lite_install")
+        }
+        return try await call("apps.install_trollstore_lite")
     }
 
     func uninstallBootstrap(at roots: [String], reboot: Bool) async throws -> [String: Any] {
@@ -731,6 +743,7 @@ private struct VPhoneHTTPLimits: Sendable {
     /// JSON, RPC and clipboard responses. A guest operation may run up to the
     /// 120 s read timeout before it answers, so the deadline sits above it.
     static let rpc = VPhoneHTTPLimits(maxBodyLength: 64 * 1024 * 1024, deadline: .seconds(180))
+    static let installation = VPhoneHTTPLimits(maxBodyLength: 64 * 1024 * 1024, deadline: .seconds(30 * 60))
     /// File downloads: the response body is the file.
     static let download = VPhoneHTTPLimits(maxBodyLength: 2_147_483_647, deadline: .seconds(30 * 60))
     /// Uploads: the request body is large, the response is a small JSON reply.
@@ -756,7 +769,9 @@ private final class VPhoneHTTPTransaction: @unchecked Sendable {
     private let deadline: ContinuousClock.Instant
 
     /// Per-read and per-write socket timeout.
-    private static let socketTimeout: Duration = .seconds(120)
+    private var socketTimeout: Duration {
+        limits.deadline >= .seconds(10 * 60) ? .seconds(30 * 60) : .seconds(120)
+    }
 
     init(
         connection: VZVirtioSocketConnection,
@@ -783,7 +798,7 @@ private final class VPhoneHTTPTransaction: @unchecked Sendable {
         guard fcntl(fd, F_SETNOSIGPIPE, 1) != -1 else {
             throw VPhoneGuestControl.ControlError.notConnected
         }
-        var timeout = Self.socketTimeval(Self.socketTimeout)
+        var timeout = Self.socketTimeval(socketTimeout)
         guard
             setsockopt(
                 fd, SOL_SOCKET, SO_RCVTIMEO, &timeout,
@@ -880,7 +895,7 @@ private final class VPhoneHTTPTransaction: @unchecked Sendable {
         guard remaining > .zero else {
             throw VPhoneGuestControl.ControlError.protocolError("HTTP response timed out")
         }
-        var timeout = Self.socketTimeval(min(remaining, Self.socketTimeout))
+        var timeout = Self.socketTimeval(min(remaining, socketTimeout))
         guard setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) == 0 else {
             throw VPhoneGuestControl.ControlError.notConnected
         }

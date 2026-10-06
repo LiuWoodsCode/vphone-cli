@@ -3,8 +3,8 @@ import UniformTypeIdentifiers
 
 // MARK: - Bootstrap Installation and Removal
 
-/// Installs the Irisin bootstrap in the guest from the Apps menu and shows
-/// vphoned's progress while it downloads, extracts and registers it.
+/// Installs the selected guest package environment from the Apps menu and
+/// shows vphoned's progress while it downloads and configures it.
 extension VPhoneMenuController {
     /// Install and Uninstall, each with an Option alternate.
     func addBootstrapItems(to menu: NSMenu) {
@@ -71,7 +71,24 @@ extension VPhoneMenuController {
 
     @objc func installBootstrap() {
         unlessBootstrapInstalled { [weak self] in
-            self?.chooseBootstrapLayout(localURL: nil)
+            self?.chooseBootstrapSource()
+        }
+    }
+
+    private func chooseBootstrapSource() {
+        VPhoneAlert.present(
+            title: "Install Bootstrap",
+            message: "Choose a package environment for the guest.",
+            style: .informational,
+            buttons: ["Procursus + Sileo", "Irisin", "Cancel"],
+        ) { [weak self] response in
+            switch response {
+            case .alertFirstButtonReturn:
+                self?.performBootstrapInstallation(layout: "rootless", source: "procursus", localURL: nil)
+            case .alertSecondButtonReturn:
+                self?.chooseBootstrapLayout(localURL: nil)
+            default: break
+            }
         }
     }
 
@@ -145,7 +162,7 @@ extension VPhoneMenuController {
         }
     }
 
-    private func performBootstrapInstallation(layout: String, localURL: URL?) {
+    private func performBootstrapInstallation(layout: String, source: String = "irisin", localURL: URL?) {
         isInstallingBootstrap = true
         installBootstrapItem?.isEnabled = false
         installBootstrapFromFileItem?.isEnabled = false
@@ -156,6 +173,8 @@ extension VPhoneMenuController {
         alert.messageText = VPhoneLocalization.text("Install Bootstrap")
         alert.informativeText = if let localURL {
             VPhoneLocalization.format("Installing %@ in the guest.", localURL.lastPathComponent)
+        } else if source == "procursus" {
+            VPhoneLocalization.text("Installing Procursus and Sileo in the guest.")
         } else {
             VPhoneLocalization.text("Installing the latest Irisin release in the guest.")
         }
@@ -199,7 +218,7 @@ extension VPhoneMenuController {
                 }
             }
             do {
-                let result = try await control.installBootstrap(layout: layout, localURL: localURL)
+                let result = try await control.installBootstrap(layout: layout, source: source, localURL: localURL)
                 poller.cancel()
                 await poller.value
                 let version = result["version"] as? String ?? ""
@@ -209,7 +228,9 @@ extension VPhoneMenuController {
                 indicator.maxValue = 100
                 indicator.doubleValue = 100
                 statusLabel.stringValue = VPhoneLocalization.text("Bootstrap installed")
-                alert.informativeText = if result["service_start_warning"] as? String != nil {
+                alert.informativeText = if source == "procursus" {
+                    VPhoneLocalization.format("Installed Procursus and Sileo in %@.", root)
+                } else if result["service_start_warning"] as? String != nil {
                     VPhoneLocalization.format(
                         "Installed Irisin %1$@ in %2$@.\n\nSome services did not start, but the bootstrap is ready to use.",
                         version,
@@ -395,6 +416,8 @@ extension VPhoneMenuController {
     private func updateBootstrapProgress(
         _ status: [String: Any], label: NSTextField, indicator: NSProgressIndicator,
     ) {
+        let procursus = status["source"] as? String == "procursus"
+        let package = status["package"] as? String == "sileo" ? "Sileo" : "Procursus"
         switch status["phase"] as? String {
         case "downloading":
             let received = status["downloaded_bytes"] as? Int64 ?? 0
@@ -406,14 +429,18 @@ extension VPhoneMenuController {
                 indicator.doubleValue = Double(received)
                 let current = ByteCountFormatter.string(fromByteCount: received, countStyle: .file)
                 let expected = ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
-                label.stringValue = VPhoneLocalization.format("Downloading Irisin: %@ of %@", current, expected)
+                label.stringValue = procursus
+                    ? VPhoneLocalization.format("Downloading %1$@: %2$@ of %3$@", package, current, expected)
+                    : VPhoneLocalization.format("Downloading Irisin: %@ of %@", current, expected)
             } else {
-                label.stringValue = VPhoneLocalization.text("Downloading Irisin…")
+                label.stringValue = procursus
+                    ? VPhoneLocalization.format("Downloading %@…", package)
+                    : VPhoneLocalization.text("Downloading Irisin…")
             }
         case "extracting":
-            label.stringValue = VPhoneLocalization.text("Extracting Irisin…")
+            label.stringValue = VPhoneLocalization.text(procursus ? "Extracting Procursus…" : "Extracting Irisin…")
         case "installing":
-            label.stringValue = VPhoneLocalization.text("Registering Irisin…")
+            label.stringValue = VPhoneLocalization.text(procursus ? "Installing Procursus and Sileo…" : "Registering Irisin…")
         case "firmware":
             label.stringValue = VPhoneLocalization.text("Recording firmware version…")
         default: break

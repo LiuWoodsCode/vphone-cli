@@ -79,7 +79,7 @@ extension GuestIrisinInstaller {
         }
     }
 
-    static func fetch(_ url: URL, reportDownload: Bool = false) throws -> Data {
+    static func fetch(_ url: URL, reportDownload: Bool = false, maximumBytes: Int = 64 * 1024 * 1024) throws -> Data {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 180
@@ -112,8 +112,8 @@ extension GuestIrisinInstaller {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw GuestAPIError.operationFailed("Irisin download returned HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
         }
-        guard data.count <= 64 * 1024 * 1024 else {
-            throw GuestAPIError.operationFailed("Irisin download exceeds 64 MiB")
+        guard data.count <= maximumBytes else {
+            throw GuestAPIError.operationFailed("Download exceeds \(maximumBytes) bytes")
         }
         return data
     }
