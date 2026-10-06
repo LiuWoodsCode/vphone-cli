@@ -1876,6 +1876,7 @@ struct VPhoneCustomFirmwareInstaller {
 
         // The repairs, which share the one devicetree.img4.
         var repairGroup: [(id: String, verb: String, arguments: [String])] = []
+        repairGroup.append((FirmwareGuestSystemPatchSet.prebootIdentityValues, "patch-dt-identity-values", []))
         if let boardDeviceTree {
             if guestDevice.presentsBoard {
                 repairGroup.append((FirmwareGuestSystemPatchSet.prebootBoardAudio, "patch-dt-board-audio", [boardDeviceTree.path]))

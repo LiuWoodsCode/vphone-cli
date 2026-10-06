@@ -126,6 +126,15 @@ public enum CustomFirmwarePostRestoreDeviceTree {
         }
     }
 
+    /// Reapply the four values owned by DeviceTreePropertyPatches after restore.
+    @discardableResult
+    public static func protectIdentity(at url: URL, dryRun: Bool = false, verbose: Bool = true) throws -> Outcome {
+        try rewrite(at: url, dryRun: dryRun, verbose: verbose) { blob in
+            let (updated, changes) = try withProtectedIdentity(blob)
+            return (updated, changes, updated.count)
+        }
+    }
+
     /// Remove `/product/haptics` from a guest's `devicetree.img4` (or bare
     /// `.im4p`), in place. See `DeviceTreePatcher.removeHaptics(from:)`.
     @discardableResult
@@ -395,6 +404,34 @@ public enum CustomFirmwarePostRestoreDeviceTree {
             sum + align4(change.after.count) - (change.before.map { align4($0.count) } ?? -36)
         }
         return (serializeNode(root), records, delta)
+    }
+
+    public static func withProtectedIdentity(_ blob: Data) throws -> (Data, [Change]) {
+        let root = try parseTree(blob, label: "DT")
+        var changes: [Change] = []
+        for patch in DeviceTreePatcher.basePropertyPatches where DeviceTreePatcher.protectedIdentityProperties.contains(patch.property) {
+            var node = root
+            for name in patch.nodePath.dropFirst() {
+                guard let child = node.children.first(where: { nodeName($0) == name }) else {
+                    throw PatcherError.patchSiteNotFound("DeviceTree: node \(name) is missing")
+                }
+                node = child
+            }
+            guard case let .string(text) = patch.value else { continue }
+            let value = encodeFixedString(text, length: patch.length)
+            let existing = node.properties.first { $0.name == patch.property }
+            if existing?.value == value && existing?.flags == patch.flags { continue }
+            let before = existing.map { cString($0.value) } ?? "absent"
+            if let existing {
+                existing.value = value
+                existing.flags = patch.flags
+            } else {
+                node.properties.append(DeviceTreePatcher.DTProperty(name: patch.property, flags: patch.flags, value: value, valueOffset: 0))
+            }
+            changes.append(Change(property: patch.nodePath.dropFirst().joined(separator: "/") + "/" + patch.property,
+                                  before: before, after: text))
+        }
+        return changes.isEmpty ? (blob, []) : (serializeNode(root), changes)
     }
 
     /// `blob` without `/product/haptics`, through

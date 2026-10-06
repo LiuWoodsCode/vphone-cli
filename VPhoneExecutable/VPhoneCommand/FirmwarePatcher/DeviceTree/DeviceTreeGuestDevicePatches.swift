@@ -76,9 +76,7 @@ extension DeviceTreePatcher {
         ("fdr-product-type", iPadIdentityPatch),
         ("sub-product-type", iPadIdentityPatch),
         ("unique-model", iPadIdentityPatch),
-        // Name, chrome, and the panel and camera geometry.
-        ("product-name", iPadProductPatch),
-        ("product-description", iPadProductPatch),
+        // Chrome and panel geometry. The names are set by basePropertyPatches.
         ("chrome-identifier", iPadProductPatch),
         ("compatible-device-fallback", iPadProductPatch),
         ("display-corner-radius", iPadProductPatch),
@@ -338,7 +336,7 @@ extension DeviceTreePatcher {
     ///
     /// On vphone600 these are placeholders no syscfg fills, and MobileGestalt
     /// reads a placeholder as absent. Settings then has no Siri page (`assistant`),
-    /// no Model Name (`product-name`), no dictation (`dictation`), and the
+    /// no dictation (`dictation`), and the
     /// button geometry SpringBoard lays out against is missing. Measured on a
     /// 26.6.2 iPhone17,3 guest: with these from D47AP, Siri opens from the side
     /// button, dictation appears, and Camera Control and the Action Button are
@@ -350,8 +348,6 @@ extension DeviceTreePatcher {
     /// exclaves, `has-*`, the graphics feature set, `framebuffer-identifier`,
     /// display calibration — stay as vphone600 has them.
     static let iPhoneProductProperties = [
-        // What Settings and MobileGestalt name the device.
-        "product-name", "product-description",
         // Siri and dictation.
         "assistant", "siri-gesture", "dictation", "offline-dictation", "builtin-mics",
         // Buttons SpringBoard and Settings lay out against.

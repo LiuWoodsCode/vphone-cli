@@ -304,6 +304,12 @@ public enum FirmwareGuestSystemPatchSet {
                 target: .prebootDeviceTree,
             ),
             VPhonePatchDeclaration(
+                identifier: prebootIdentityValues,
+                title: "Device identity values",
+                summary: "Reapplies the DeviceTree catalogue's serial number, product name, product description and model number to the restored Preboot tree.",
+                target: .prebootDeviceTree,
+            ),
+            VPhonePatchDeclaration(
                 identifier: prebootHaptics,
                 title: "Haptics node",
                 summary: """
@@ -386,6 +392,8 @@ public enum FirmwareGuestSystemPatchSet {
     /// The iPhone product description in the restored Preboot device tree,
     /// taken from the iPhone's own tree: see `DeviceTreePatcher.presentPhoneProduct`.
     public static let prebootIPhoneProduct = "preboot-cfw-devicetree_iphone_product"
+
+    public static let prebootIdentityValues = "preboot-cfw-devicetree_identity_values"
 
     /// The haptics node removal in the restored Preboot device tree, for any
     /// VM patched before `fw patch` removed it from every guest's tree.

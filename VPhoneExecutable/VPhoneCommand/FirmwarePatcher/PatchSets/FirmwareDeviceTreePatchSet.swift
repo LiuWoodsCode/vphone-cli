@@ -48,6 +48,31 @@ public enum FirmwareDeviceTreePatchSet {
                 "Gives the board a well-formed serial number.",
             ),
             property(
+                "devicetree-cfw-product_name",
+                "Product name",
+                "Sets the guest's product name from the device tree patch catalogue.",
+            ),
+            property(
+                "devicetree-cfw-product_description",
+                "Product description",
+                "Sets the guest's product description from the device tree patch catalogue.",
+            ),
+            property(
+                "devicetree-cfw-model_number",
+                "Model number",
+                "Sets the guest's model number from the device tree patch catalogue.",
+            ),
+            property(
+                "devicetree-cfw-watch_companion",
+                "Watch companion",
+                "Enables Apple Watch companion support.",
+            ),
+            property(
+                "devicetree-cfw-assistant",
+                "Assistant",
+                "Enables Siri assistant support.",
+            ),
+            property(
                 "devicetree-cfw-home_button_type",
                 "Home button type",
                 "Declares a gesture-driven device with no home button.",

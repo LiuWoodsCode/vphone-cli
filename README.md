@@ -30,16 +30,34 @@ vphone-cli runs iOS with Apple's Virtualization.framework and PCC research virtu
 
 ## Get Started
 
-1. Download `vphone-launchpad-<version>-notarized.zip` from the [latest release](https://github.com/Lakr233/vphone-cli/releases/latest), unzip it, and open it. Not every release is notarized. If the latest one has no `-notarized` file, pick a notarized version from [Downloads](Documents/Downloads/README.md).
+~~1. Download `vphone-launchpad-<version>-notarized.zip` from the [latest release](https://github.com/Lakr233/vphone-cli/releases/latest), unzip it, and open it. Not every release is notarized. If the latest one has no `-notarized` file, pick a notarized version from [Downloads](Documents/Downloads/README.md).
 2. In **Host Setup**, grant Developer Tools access and install the helper.
 3. In **Core Bundle**, click **Download and Install**.
-4. In **Machines**, click **New Machine**, choose a firmware pairing, and click **Create**.
+4. In **Machines**, click **New Machine**, choose a firmware pairing, and click **Create**.~~
 
-Launchpad downloads the firmware, patches it, restores the system, and boots the VM. To use your own iPhone and cloudOS IPSWs, see [Compatibility](Documents/Guides/compatibility.md).
+Launchpad downloads the firmware, patches it, restores the system, and boots the VM.To use your own iPhone and cloudOS IPSWs, see [Compatibility](Documents/Guides/compatibility.md).
 
 To install a package manager in the VM, see [Package Environment](Documents/Guides/package-environment.md).
 
-### Let an agent do it
+### Building
+
+While in the source directory: 
+```
+xcodebuild \
+  -workspace VPhone.xcworkspace \
+  -scheme VPhone \
+  -configuration Debug \
+  -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath .build/XcodeBundle \
+  build
+```
+
+This produces file `.build/XcodeBundle/Build/Products/Debug/VPhone.bundle/Contents/MacOS/vphone-cli`
+
+### Let an agent do it (!!! DO NOT RECOMMEND !!!)
+
+> [!WARNING]
+> DO NOT USE THIS!!! This is hardcoded to download binaries that could contain malware. Always build the program by yourself!
 
 If you use a coding agent (Claude Code, Codex, or similar) on this Mac, paste the prompt below instead of following the steps by hand. The agent reads the vphone skill, checks what is already set up, installs Launchpad and `VPhone.bundle`, and stops to ask when a step needs you, such as an administrator password or a change in macOS Recovery.
 

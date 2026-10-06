@@ -339,9 +339,12 @@ public final class DeviceTreePatcher: BufferedPatcher {
             guard gateAllows(patch.patchID) else { continue }
 
             let node = try resolveNode(root, path: patch.nodePath)
-            let prop = try findProperty(node, name: patch.property)
-
-            let originalBytes = Data(prop.value.prefix(patch.length))
+            let prop = node.properties.first { $0.name == patch.property }
+            let mayAdd = Self.protectedIdentityProperties.contains(patch.property)
+            guard prop != nil || mayAdd else {
+                throw PatcherError.patchSiteNotFound("DeviceTree: property \(patch.property) is missing")
+            }
+            let originalBytes = prop.map { Data($0.value.prefix(patch.length)) } ?? Data()
 
             let newValue: Data = switch patch.value {
             case let .string(s):
@@ -352,13 +355,17 @@ public final class DeviceTreePatcher: BufferedPatcher {
                 Self.encodeFixedBytes(d, length: patch.length)
             }
 
-            prop.flags = patch.flags
-            prop.value = newValue
+            if let prop {
+                prop.flags = patch.flags
+                prop.value = newValue
+            } else {
+                node.properties.append(DTProperty(name: patch.property, flags: patch.flags, value: newValue, valueOffset: 0))
+            }
 
             let record = PatchRecord(
                 patchID: patch.patchID,
                 component: component,
-                fileOffset: prop.valueOffset,
+                fileOffset: prop?.valueOffset ?? 0,
                 virtualAddress: nil,
                 originalBytes: originalBytes,
                 patchedBytes: newValue,
@@ -369,7 +376,7 @@ public final class DeviceTreePatcher: BufferedPatcher {
             if verbose {
                 print(String(
                     format: "  0x%06X: %@ → %@  [%@]",
-                    prop.valueOffset,
+                    prop?.valueOffset ?? 0,
                     originalBytes.hex,
                     newValue.hex,
                     patch.patchID,
@@ -398,6 +405,13 @@ public final class DeviceTreePatcher: BufferedPatcher {
     static let deviceNeutralPatches: Set<String> = [
         "devicetree-cfw-serial_number",
         "devicetree-cfw-home_button_type",
+        "devicetree-cfw-product_name",
+        "devicetree-cfw-product_description",
+        "devicetree-cfw-model_number",
+    ]
+
+    static let protectedIdentityProperties: Set<String> = [
+        "serial-number", "product-name", "product-description", "model-number",
     ]
 
     /// Apply a single `AddChildNodePatch`: construct the new `DTNode`,

@@ -251,6 +251,7 @@ struct VPhoneCustomFirmwareCommand: ParsableCommand {
             VPhoneCustomFirmwarePatchPostRestoreDeviceTreeCommand.self,
             VPhoneCustomFirmwarePatchBoardAudioCommand.self,
             VPhoneCustomFirmwarePatchIPhoneProductCommand.self,
+            VPhoneCustomFirmwarePatchDTIdentityValuesCommand.self,
             VPhoneCustomFirmwarePatchHapticsCommand.self,
             VPhoneCustomFirmwarePatchMicrophoneArrayCommand.self,
         ] + VPhoneCustomFirmwareMachOVerbs.all + VPhoneCustomFirmwareDyldSharedCacheVerbs.all,

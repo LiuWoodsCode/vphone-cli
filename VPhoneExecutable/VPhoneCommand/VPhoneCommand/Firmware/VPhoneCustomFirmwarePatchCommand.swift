@@ -451,6 +451,23 @@ struct VPhoneCustomFirmwarePatchBoardAudioCommand: ParsableCommand {
 
 // MARK: - patch-dt-iphone-product
 
+struct VPhoneCustomFirmwarePatchDTIdentityValuesCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "patch-dt-identity-values",
+        abstract: "Reapply the DeviceTree catalogue's serial, product and model values after restore",
+    )
+
+    @Argument(transform: URL.init(fileURLWithPath:))
+    var deviceTree: URL
+
+    @Flag(name: .customLong("dry-run"))
+    var dryRun = false
+
+    func run() throws {
+        try CustomFirmwarePostRestoreDeviceTree.protectIdentity(at: deviceTree, dryRun: dryRun)
+    }
+}
+
 struct VPhoneCustomFirmwarePatchIPhoneProductCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "patch-dt-iphone-product",

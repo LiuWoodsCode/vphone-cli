@@ -50,9 +50,9 @@ extension DeviceTreePatcher {
             property: "serial-number",
             length: 12,
             flags: 0,
-            value: .string("vphone-1337"),
+            value: .string("FLVRF0LEY01"),
             patchID: "devicetree-cfw-serial_number",
-            description: "Set serial number to vphone-1337",
+            description: "Set serial number to FLVRF0LEY01"
         ),
         PropertyPatch(
             nodePath: ["device-tree", "buttons"],
@@ -61,7 +61,25 @@ extension DeviceTreePatcher {
             flags: 0,
             value: .integer(2),
             patchID: "devicetree-cfw-home_button_type",
-            description: "Set home button type to 2",
+            description: "Set home button type to 2"
+        ),
+        PropertyPatch(
+            nodePath: ["device-tree", "product"],
+            property: "watch-companion",
+            length: 4,
+            flags: 0,
+            value: .integer(1),
+            patchID: "devicetree-cfw-watch_companion",
+            description: "Enable Apple Watch companion support"
+        ),
+        PropertyPatch(
+            nodePath: ["device-tree", "product"],
+            property: "assistant",
+            length: 4,
+            flags: 0,
+            value: .integer(1),
+            patchID: "devicetree-cfw-assistant",
+            description: "Enable Siri assistant support"
         ),
         PropertyPatch(
             nodePath: ["device-tree", "product"],
@@ -70,8 +88,37 @@ extension DeviceTreePatcher {
             flags: 0,
             value: .integer(2556),
             patchID: "devicetree-cfw-artwork_device_subtype",
-            description: "Set artwork device subtype to 2556",
+            description: "Set artwork device subtype to 2556"
         ),
+        PropertyPatch(
+          nodePath: ["device-tree", "product"],
+          property: "product-name",
+          length: 16, // "Butcher Vanity" + NUL
+          flags: 0,
+          value: .string("Butcher Vanity"),
+          patchID: "devicetree-cfw-product_name",
+          description: "Set product name to Butcher Vanity"
+      ),
+
+      PropertyPatch(
+          nodePath: ["device-tree", "product"],
+          property: "product-description",
+          length: 16, // "Butcher Vanity" + NUL
+          flags: 0,
+          value: .string("Butcher Vanity"),
+          patchID: "devicetree-cfw-product_description",
+          description: "Set product description to Butcher Vanity"
+      ),
+
+      PropertyPatch(
+          nodePath: ["device-tree"],
+          property: "model-number",
+          length: 7, // if this property exists
+          flags: 0,
+          value: .string("YIXI<3"),
+          patchID: "devicetree-cfw-model_number",
+          description: "Set model number to YIXI<3"
+      ),
         PropertyPatch(
             nodePath: ["device-tree", "product"],
             property: "island-notch-location",
@@ -79,7 +126,7 @@ extension DeviceTreePatcher {
             flags: 0,
             value: .integer(144),
             patchID: "devicetree-cfw-island_notch_location",
-            description: "Set island notch location to 144",
+            description: "Set island notch location to 144"
         ),
     ]
 
