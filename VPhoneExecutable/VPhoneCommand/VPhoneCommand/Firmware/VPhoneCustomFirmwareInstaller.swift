@@ -911,9 +911,6 @@ struct VPhoneCustomFirmwareInstaller {
             let capacity =
                 try URL(fileURLWithPath: path).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
                     .volumeAvailableCapacityForImportantUsage ?? 0
-            guard capacity > 50 * 1024 * 1024 * 1024 else {
-                throw ValidationError("Less than 50 GiB of disk space is available on the volume holding \(path). Free up space, then install CFW again.")
-            }
         }
     }
 

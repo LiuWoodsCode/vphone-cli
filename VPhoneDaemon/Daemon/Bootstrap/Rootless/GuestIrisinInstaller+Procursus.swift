@@ -31,8 +31,9 @@ extension GuestIrisinInstaller {
               FileManager.default.isExecutableFile(atPath: rootlessRoot + "/usr/bin/apt-get")
         else { throw GuestAPIError.operationFailed("Install the Procursus rootless bootstrap first") }
 
+        try removeBrokenProcursusKernelPackages()
         let os = ProcessInfo.processInfo.operatingSystemVersion
-        if os.majorVersion >= 27 {
+        if os.majorVersion > 26 || (os.majorVersion == 26 && os.minorVersion > 0) {
             let work = FileManager.default.temporaryDirectory
                 .appendingPathComponent("vphoned-trollstore-\(UUID().uuidString).deb")
             defer { try? FileManager.default.removeItem(at: work) }
@@ -43,7 +44,11 @@ extension GuestIrisinInstaller {
             else { throw GuestAPIError.operationFailed("TrollStore Lite package has unexpected metadata") }
             try runProcursusTool(rootlessRoot + "/usr/bin/apt-get", ["update", "-qq"])
             try runProcursusTool(rootlessRoot + "/usr/bin/apt-get", ["install", "-y", "ldid"])
-            try runProcursusTool(rootlessRoot + "/usr/bin/apt-get", ["install", "-y", work.path])
+            // The release's postinst uses /bin/sh, which this research guest
+            // does not have. Install the payload natively, then run its helper.
+            _ = try installDebFile(work.path)
+            try runProcursusTool(rootlessRoot + "/usr/bin/trollstorehelper",
+                                 ["install", rootlessRoot + "/usr/share/trollstore27/TrollStoreLite.ipa"])
         } else {
             let source = URL(fileURLWithPath: rootlessRoot + "/etc/apt/sources.list.d/havoc.list")
             try FileManager.default.createDirectory(at: source.deletingLastPathComponent(),
@@ -55,12 +60,59 @@ extension GuestIrisinInstaller {
             try runProcursusTool(rootlessRoot + "/usr/bin/apt-get",
                                  ["install", "-y", "com.opa334.trollstorelite"])
         }
-        let app = rootlessRoot + "/Applications/TrollStoreLite.app"
+        let apps = try searchApps("TrollStoreLite")["apps"] as? [[String: Any]] ?? []
+        let registeredPath = apps.first {
+            ($0["bundle_id"] as? String)?.lowercased() == "com.opa334.trollstorelite"
+        }?["bundle_path"] as? String
+        let app = registeredPath ?? rootlessRoot + "/Applications/TrollStoreLite.app"
         guard isDirectory(app) else {
             throw GuestAPIError.operationFailed("TrollStore Lite package installed without its app")
         }
-        let registration = try registerApp(app)
+        let currentRegistration = try appRegistration(app)
+        let registration: [String: Any]
+        if currentRegistration["registered"] as? Bool == true {
+            registration = currentRegistration
+        } else {
+            registration = try registerApp(app)
+        }
         return ["already_installed": false, "app_path": app, "registration": registration]
+    }
+
+    /// The published bootstrap contains three kernel-blob packages, but no
+    /// libkrw0 plugin. Their unsatisfied dependency blocks unrelated APT
+    /// installs. These exact archive versions have no use on a research VM.
+    static func removeBrokenProcursusKernelPackages() throws {
+        let archiveVersions = [
+            "shshd": "1.1.1.1",
+            "libdimentio0": "1:0~20230202.7ffffff",
+            "libkrw0": "1.1.1-2",
+        ]
+        let krw = try packageStatus("libkrw0")
+        guard krw["installed"] as? Bool == true else { return }
+        let rows = try listPackages(filter: nil)["packages"] as? [[String: Any]] ?? []
+        let names = rows.compactMap { $0["package"] as? String }
+        let archiveNames = Set(archiveVersions.keys)
+        for name in names {
+            let status = try packageStatus(name)
+            let fields = status["fields"] as? [String: String] ?? [:]
+            let provides = fields["Provides"] ?? ""
+            if provides.components(separatedBy: CharacterSet(charactersIn: " ,|()<>=")).contains("libkrw0-plugin") {
+                return
+            }
+            guard !archiveNames.contains(name) else { continue }
+            let dependencies = (fields["Depends"] ?? "") + "," + (fields["Pre-Depends"] ?? "")
+            let required = Set(dependencies.components(separatedBy: CharacterSet(charactersIn: " ,|()<>=")).filter { !$0.isEmpty })
+            if !required.isDisjoint(with: archiveNames) {
+                throw GuestAPIError.operationFailed("Cannot repair Procursus APT: \(name) depends on its kernel packages")
+            }
+        }
+        let installed = ["shshd", "libdimentio0", "libkrw0"].filter { names.contains($0) }
+        for name in installed where (try packageStatus(name))["version"] as? String != archiveVersions[name] {
+            throw GuestAPIError.operationFailed("Cannot repair Procursus APT: \(name) has been updated")
+        }
+        for name in installed {
+            _ = try removeDeb(name)
+        }
     }
 
     static func installProcursus(jailbreak: [String: Any]) throws -> [String: Any] {
@@ -71,7 +123,16 @@ extension GuestIrisinInstaller {
             throw GuestAPIError.operationFailed("/var/jb already exists; inspect or remove that environment first")
         }
 
-        let work = FileManager.default.temporaryDirectory
+        // /tmp and /var can both be symlinks on iOS. libarchive's secure
+        // extraction rejects either one in the destination's parent path.
+        let temporaryPath = FileManager.default.temporaryDirectory.path
+        guard let resolvedPath = realpath(temporaryPath, nil) else {
+            throw GuestAPIError.operationFailed(
+                "Could not resolve the guest temporary directory: \(String(cString: strerror(errno)))",
+            )
+        }
+        defer { free(resolvedPath) }
+        let work = URL(fileURLWithPath: String(cString: resolvedPath), isDirectory: true)
             .appendingPathComponent("vphoned-procursus-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: work) }
@@ -150,7 +211,8 @@ extension GuestIrisinInstaller {
             }
         }
 
-        try runProcursusTool("/bin/sh", [rootlessRoot + "/prep_bootstrap.sh"])
+        try runProcursusTool(rootlessRoot + "/bin/sh", [rootlessRoot + "/prep_bootstrap.sh"])
+        try removeBrokenProcursusKernelPackages()
         let firmware = try ensureFirmwareRecord(root: rootlessRoot)
         for name in [".procursus_strapped", ".installed_dopamine"] {
             let marker = rootlessRoot + "/" + name
@@ -223,7 +285,8 @@ extension GuestIrisinInstaller {
             }
             let flags = Int32(ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_SECURE_SYMLINKS)
             guard archive_read_extract(reader, entry, flags) == ARCHIVE_OK else {
-                throw GuestAPIError.operationFailed("Could not extract Procursus entry: \(raw)")
+                let reason = archive_error_string(reader).map { String(cString: $0) } ?? "unknown archive error"
+                throw GuestAPIError.operationFailed("Could not extract Procursus entry \(raw): \(reason)")
             }
         }
         guard archive_errno(reader) == 0 else {

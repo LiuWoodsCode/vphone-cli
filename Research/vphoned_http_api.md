@@ -153,8 +153,10 @@ later requests refuse to bootstrap again while that record describes an installe
 bootstrap. Older records beside the vphoned binary are read when no data-volume
 record exists. Uninstall writes a tombstone so a legacy record on a read-only
 system volume cannot reappear.
-The VM window exposes the same operation at Guest > Install Bootstrap…;
-choose Rootless or RootHide in the confirmation sheet. The item is enabled
+The VM window exposes the same operation at Apps > Install Bootstrap…;
+choose Procursus + Sileo (rootless), Irisin (RootHide), or Irisin (rootless,
+deprecated) in one sheet. The deprecated choice and the rootless choice for a
+local Irisin `.deb` ask for confirmation and offer Procursus + Sileo first. The install items are enabled
 when vphoned advertises `bootstrap_install`. Its sheet polls
 `GET /v1/bootstrap/status` (RPC `bootstrap.status`) while installation runs.
 The status reports `phase` and, during download, `downloaded_bytes` and

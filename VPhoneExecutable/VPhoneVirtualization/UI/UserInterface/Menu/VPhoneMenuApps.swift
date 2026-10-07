@@ -79,12 +79,12 @@ extension VPhoneMenuController {
                         : "TrollStore Lite is installed in the guest.",
                     style: .informational,
                 )
-            } catch let VPhoneGuestControl.ControlError.guestError(message) {
-                VPhoneAlert.present(title: "Unable to Install TrollStore Lite", message: message, style: .warning)
             } catch {
+                let reason = (error as? VPhoneGuestControl.ControlError)?.description
+                    ?? error.localizedDescription
                 VPhoneAlert.present(
                     title: "Unable to Install TrollStore Lite",
-                    message: "Check the guest connection and package environment, then try again.",
+                    message: reason,
                     style: .warning,
                 )
             }

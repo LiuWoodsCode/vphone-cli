@@ -62,13 +62,15 @@ https://raw.githubusercontent.com/Lakr233/vphone-cli/main/Skills/vphone-guest-co
 
 在 **Apps > Install Bootstrap…** 中选择 **Procursus + Sileo**，可直接安装常规 rootless 环境和 Sileo。如需使用原有方式，请选择 **Irisin**。
 
-1. 选择 **Irisin**，再选择 **roothide** 布局（Irisin 的 **rootless** 已弃用）。虚拟机中会安装 Irisin。
+1. 选择 **Irisin (RootHide)**。虚拟机中会安装 Irisin。
 2. 在 Irisin 中打开 **OwnGoal Packages** 软件源，找到 **OwnGoal Bootstrap for vphone**（`owngoal-bootstrap-vphone`），选择 **Bootstrap Install** 安装。
 
    这一个软件包会一次装好虚拟机需要的全部内容：`apt` 和 `dpkg`、`bash`、`zsh` 和 `dash`、`sudo`、常用命令行工具、`openssh-server`、`curl`、`wget`、`vim`、`git`、`uikittools`、`launchctl`，以及 OwnGoal 的几个应用。不要逐个安装这些软件包：其中部分软件包相互依赖，`openssh-server` 的依赖声明也存在循环，逐个安装可能在中途失败。
 3. 首次安装完成后，其余软件包使用普通安装即可。
 
 **Apps > Install TrollStore Lite…** 可在 rootless 环境中安装 TrollStore Lite；如果已经安装 TrollStore，则不会重复安装。
+
+如果确实需要已弃用的 Irisin rootless，请在 **Apps > Install Bootstrap…** 中选择 **Irisin (rootless, deprecated)**，并在确认窗口中选择 **Install Irisin Rootless Anyway**。确认窗口也可改选常规的 **Procursus + Sileo**。
 
 如果首次安装失败，或安装后环境状态异常，不建议在原环境上修复。请通过 **Apps > Uninstall Bootstrap…** 删除环境，再从第 1 步重新安装。
 

@@ -76,18 +76,31 @@ extension VPhoneMenuController {
     }
 
     private func chooseBootstrapSource() {
-        VPhoneAlert.present(
-            title: "Install Bootstrap",
-            message: "Choose a package environment for the guest.",
-            style: .informational,
-            buttons: ["Procursus + Sileo", "Irisin", "Cancel"],
-        ) { [weak self] response in
-            switch response {
-            case .alertFirstButtonReturn:
+        let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 360, height: 28), pullsDown: false)
+        picker.addItems(withTitles: [
+            VPhoneLocalization.text("Procursus + Sileo (rootless)"),
+            VPhoneLocalization.text("Irisin (RootHide)"),
+            VPhoneLocalization.text("Irisin (rootless, deprecated)"),
+        ])
+        picker.selectItem(at: 0)
+        picker.setAccessibilityLabel(VPhoneLocalization.text("Bootstrap environment"))
+
+        let alert = NSAlert()
+        alert.messageText = VPhoneLocalization.text("Install Bootstrap")
+        alert.informativeText = VPhoneLocalization.text("Choose which package environment to install in the guest.")
+        alert.accessoryView = picker
+        alert.addButton(withTitle: VPhoneLocalization.text("Install"))
+        alert.addButton(withTitle: VPhoneLocalization.text("Cancel"))
+        VPhoneAlert.present(alert) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            switch picker.indexOfSelectedItem {
+            case 0:
                 self?.performBootstrapInstallation(layout: "rootless", source: "procursus", localURL: nil)
-            case .alertSecondButtonReturn:
-                self?.chooseBootstrapLayout(localURL: nil)
-            default: break
+            case 1:
+                self?.performBootstrapInstallation(layout: "roothide", source: "irisin", localURL: nil)
+            case 2:
+                self?.confirmRootlessIrisin(localURL: nil)
+            default: return
             }
         }
     }
@@ -140,25 +153,47 @@ extension VPhoneMenuController {
         }
     }
 
-    private func chooseBootstrapLayout(localURL: URL?) {
+    private func chooseBootstrapLayout(localURL: URL) {
+        VPhoneAlert.present(
+            title: "Install Irisin from File",
+            message: VPhoneLocalization.format("Choose the Irisin layout for %@.", localURL.lastPathComponent),
+            style: .informational,
+            buttons: ["Irisin (RootHide)", "Irisin (rootless, deprecated)", "Cancel"],
+        ) { [weak self] response in
+            switch response {
+            case .alertFirstButtonReturn:
+                self?.performBootstrapInstallation(layout: "roothide", localURL: localURL)
+            case .alertSecondButtonReturn:
+                self?.confirmRootlessIrisin(localURL: localURL)
+            default: break
+            }
+        }
+    }
+
+    private func confirmRootlessIrisin(localURL: URL?) {
         let message = if let localURL {
-            VPhoneLocalization.format("Choose the bootstrap layout for %@.", localURL.lastPathComponent)
+            VPhoneLocalization.format(
+                "%@ contains Irisin. The usual rootless environment is Procursus + Sileo. Which one do you want to install?",
+                localURL.lastPathComponent,
+            )
         } else {
-            VPhoneLocalization.text("Choose the bootstrap layout. This installs the latest Irisin release once in the guest.")
+            VPhoneLocalization.text(
+                "Rootless Irisin is deprecated. The usual rootless environment is Procursus + Sileo. Which one do you want to install?",
+            )
         }
         VPhoneAlert.present(
-            title: "Install Bootstrap",
+            title: "Confirm Rootless Bootstrap",
             message: message,
-            style: .informational,
-            buttons: ["roothide", "rootless (deprecated)", "Cancel"],
+            style: .warning,
+            buttons: ["Procursus + Sileo", "Install Irisin Rootless Anyway", "Cancel"],
         ) { [weak self] response in
-            let layout: String
             switch response {
-            case .alertFirstButtonReturn: layout = "roothide"
-            case .alertSecondButtonReturn: layout = "rootless"
-            default: return
+            case .alertFirstButtonReturn:
+                self?.performBootstrapInstallation(layout: "rootless", source: "procursus", localURL: nil)
+            case .alertSecondButtonReturn:
+                self?.performBootstrapInstallation(layout: "rootless", source: "irisin", localURL: localURL)
+            default: break
             }
-            self?.performBootstrapInstallation(layout: layout, localURL: localURL)
         }
     }
 
@@ -182,16 +217,24 @@ extension VPhoneMenuController {
         close.isEnabled = false
         // NSAlert places the accessory 16 points from each edge; inset its
         // contents another 6 points to align with the alert's text columns.
-        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 52))
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 132))
         let statusLabel = NSTextField(labelWithString: VPhoneLocalization.text("Preparing bootstrap…"))
-        statusLabel.frame = NSRect(x: 6, y: 26, width: 348, height: 22)
+        statusLabel.frame = NSRect(x: 6, y: 106, width: 348, height: 22)
         statusLabel.lineBreakMode = .byTruncatingMiddle
         accessory.addSubview(statusLabel)
-        let indicator = NSProgressIndicator(frame: NSRect(x: 6, y: 4, width: 348, height: 16))
+        let indicator = NSProgressIndicator(frame: NSRect(x: 6, y: 84, width: 348, height: 16))
         indicator.style = .bar
         indicator.isIndeterminate = true
         indicator.startAnimation(nil)
         accessory.addSubview(indicator)
+        let detailScroll = NSTextView.scrollableTextView()
+        detailScroll.frame = NSRect(x: 6, y: 4, width: 348, height: 72)
+        detailScroll.isHidden = true
+        let detailText = detailScroll.documentView as! NSTextView
+        detailText.isEditable = false
+        detailText.isSelectable = true
+        detailText.font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        accessory.addSubview(detailScroll)
         alert.accessoryView = accessory
         VPhoneAlert.present(alert)
 
@@ -246,28 +289,28 @@ extension VPhoneMenuController {
                 alert.informativeText = VPhoneLocalization.text(
                     "The bootstrap is already installed. To reinstall it, uninstall the bootstrap first.",
                 )
-            } catch let VPhoneGuestControl.ControlError.guestError(message) where !message.isEmpty {
-                // vphoned answered: show its reason rather than suggest the
-                // connection is at fault.
-                poller.cancel()
-                await poller.value
-                statusLabel.stringValue = VPhoneLocalization.text("Bootstrap installation failed")
-                alert.alertStyle = .warning
-                alert.informativeText = VPhoneLocalization.format("Unable to install the bootstrap.\n\n%@", message)
             } catch {
                 poller.cancel()
                 await poller.value
                 statusLabel.stringValue = VPhoneLocalization.text("Bootstrap installation failed")
                 alert.alertStyle = .warning
-                alert.informativeText = if localURL != nil {
-                    VPhoneLocalization.text(
-                        "Unable to install the bootstrap. Check the file and guest connection, then try again.",
-                    )
+                let directReason = (error as? VPhoneGuestControl.ControlError)?.description
+                    ?? error.localizedDescription
+                let status = try? await control.bootstrapStatus()
+                let guestReason: String? = if status?["phase"] as? String == "failed",
+                                              status?["layout"] as? String == layout {
+                    status?["error"] as? String
                 } else {
-                    VPhoneLocalization.text(
-                        "Unable to install the bootstrap. Check that the guest agent is connected, then try again.",
-                    )
+                    nil
                 }
+                let reason = if let guestReason, !guestReason.isEmpty, guestReason != directReason {
+                    directReason + "\n\n" + guestReason
+                } else {
+                    directReason
+                }
+                detailText.string = reason
+                detailScroll.isHidden = false
+                alert.informativeText = VPhoneLocalization.text("Unable to install the bootstrap.")
             }
         }
     }
