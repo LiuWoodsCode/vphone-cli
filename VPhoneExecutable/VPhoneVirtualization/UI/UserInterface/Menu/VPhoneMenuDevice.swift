@@ -104,6 +104,7 @@ extension VPhoneMenuController {
         addUDIDItems(to: menu)
         menu.addItem(NSMenuItem.separator())
         addSetupAssistantItem(to: menu)
+        addManagementItem(to: menu)
         // Saved to this machine and read when vphoned next starts in the guest.
         let unlockItem = makeItem("Unlock at Startup", action: #selector(toggleUnlockAtStartup), symbol: "lock.open")
         unlockItem.state = control.unlocksAtStartup ? .on : .off

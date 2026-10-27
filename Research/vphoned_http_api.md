@@ -97,6 +97,16 @@ published `Lakr233/Irisin` release as the selected bootstrap's initial app.
 With `{"layout":"rootless","source":"procursus"}`, it instead extracts the
 published Procursus rootless archive, runs its preparation script, installs
 Sileo, and registers its app. `source` defaults to `irisin` for older clients.
+Before installing Sileo, the Procursus path removes only the archive versions
+of `shshd`, `libdimentio0`, and `libkrw0` when no installed package provides
+`libkrw0-plugin` or depends on those packages. It reads the dpkg status metadata
+directly: firmware-generated virtual identifiers such as
+`cy+model.iphone14,5` can appear in the installed list but are rejected by
+IcliKit's `packageStatus` identifier validation. Passing every listed name to
+that API caused bootstrap installation to fail with `invalid package identifier`
+after the preparation script. Only the three fixed removal names go through
+IcliKit's package mutation APIs; updated versions and external dependents still
+stop the repair before any package is removed.
 `apps.install_trollstore_lite` installs TrollStore Lite through APT after a
 rootless package environment is present, and returns `already_installed` when
 TrollStore is already registered.

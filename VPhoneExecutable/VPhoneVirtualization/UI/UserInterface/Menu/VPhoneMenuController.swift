@@ -58,6 +58,8 @@ class VPhoneMenuController {
     var setUDIDItem: NSMenuItem?
     var resetUDIDItem: NSMenuItem?
     var skipSetupAssistantItem: NSMenuItem?
+    var manipulateManagementItem: NSMenuItem?
+    var isManipulatingManagement = false
     var panelMenuItems: [VPhoneGuestPanel: NSMenuItem] = [:]
     var rotateMenuItems: [NSMenuItem] = []
     var touchIDMonitor: VPhoneTouchIDMonitor? {

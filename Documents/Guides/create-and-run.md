@@ -42,8 +42,8 @@ vphone-cli fw prepare myphone \
 vphone-cli fw patch myphone
 
 vphone-cli vm launch myphone --dfu &
-vphone-cli restore myphone
-vphone-cli vm stop myphone
+vphone-cli restore vm
+vphone-cli vm stop vm
 
 vphone-cli cfw install myphone
 vphone-cli vm launch myphone

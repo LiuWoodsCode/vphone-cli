@@ -82,22 +82,49 @@ extension GuestIrisinInstaller {
     /// libkrw0 plugin. Their unsatisfied dependency blocks unrelated APT
     /// installs. These exact archive versions have no use on a research VM.
     static func removeBrokenProcursusKernelPackages() throws {
+        let status = try String(contentsOfFile: rootlessRoot + "/var/lib/dpkg/status", encoding: .utf8)
+        for name in try procursusKernelPackagesToRemove(status: status) {
+            _ = try removeDeb(name)
+        }
+    }
+
+    static func procursusKernelPackagesToRemove(status: String) throws -> [String] {
         let archiveVersions = [
             "shshd": "1.1.1.1",
             "libdimentio0": "1:0~20230202.7ffffff",
             "libkrw0": "1.1.1-2",
         ]
-        let krw = try packageStatus("libkrw0")
-        guard krw["installed"] as? Bool == true else { return }
-        let rows = try listPackages(filter: nil)["packages"] as? [[String: Any]] ?? []
-        let names = rows.compactMap { $0["package"] as? String }
+        // firmware generates legacy virtual identifiers such as
+        // cy+model.iphone14,5. IcliKit lists those records but packageStatus
+        // rejects their names. Read metadata without validating identifiers;
+        // only the three fixed archive names below reach removeDeb.
+        let packages = status.replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n\n").compactMap { paragraph -> [String: String]? in
+                var fields: [String: String] = [:]
+                var current: String?
+                for line in paragraph.split(separator: "\n") {
+                    if line.hasPrefix(" ") || line.hasPrefix("\t") {
+                        if let current {
+                            fields[current, default: ""] += " " + line.trimmingCharacters(in: .whitespaces)
+                        }
+                    } else if let colon = line.firstIndex(of: ":") {
+                        let key = String(line[..<colon])
+                        fields[key] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                        current = key
+                    }
+                }
+                return fields["Status"]?.hasSuffix(" installed") == true ? fields : nil
+            }
+        guard packages.contains(where: { $0["Package"] == "libkrw0" }) else { return [] }
+        let names = packages.compactMap { $0["Package"] }
         let archiveNames = Set(archiveVersions.keys)
-        for name in names {
-            let status = try packageStatus(name)
-            let fields = status["fields"] as? [String: String] ?? [:]
+        for fields in packages {
+            guard let name = fields["Package"] else {
+                throw GuestAPIError.operationFailed("Cannot repair Procursus APT: installed record has no package name")
+            }
             let provides = fields["Provides"] ?? ""
             if provides.components(separatedBy: CharacterSet(charactersIn: " ,|()<>=")).contains("libkrw0-plugin") {
-                return
+                return []
             }
             guard !archiveNames.contains(name) else { continue }
             let dependencies = (fields["Depends"] ?? "") + "," + (fields["Pre-Depends"] ?? "")
@@ -107,12 +134,12 @@ extension GuestIrisinInstaller {
             }
         }
         let installed = ["shshd", "libdimentio0", "libkrw0"].filter { names.contains($0) }
-        for name in installed where (try packageStatus(name))["version"] as? String != archiveVersions[name] {
-            throw GuestAPIError.operationFailed("Cannot repair Procursus APT: \(name) has been updated")
-        }
         for name in installed {
-            _ = try removeDeb(name)
+            guard packages.first(where: { $0["Package"] == name })?["Version"] == archiveVersions[name] else {
+                throw GuestAPIError.operationFailed("Cannot repair Procursus APT: \(name) has been updated")
+            }
         }
+        return installed
     }
 
     static func installProcursus(jailbreak: [String: Any]) throws -> [String: Any] {

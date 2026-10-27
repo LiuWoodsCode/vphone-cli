@@ -15,6 +15,7 @@ struct VPhoneCommand: ParsableCommand {
             VPhoneHostCommand.self,
             VPhoneSignCommand.self, VPhoneDumpEntitlementsCommand.self,
             VPhoneArchiveCommand.self,
+            VPhoneManagementCloudCommand.self,
         ],
         defaultSubcommand: VPhoneBootCommand.self,
     )

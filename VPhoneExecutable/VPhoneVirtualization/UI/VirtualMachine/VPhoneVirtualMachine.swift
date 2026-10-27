@@ -7,6 +7,7 @@ import VPhoneCoreKit
 @MainActor
 class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
     let virtualMachine: VZVirtualMachine
+    let configURL: URL
     /// The configuration actually used by this VM, rather than a pending preference.
     let usesHardwareKeyboard: Bool
     /// The manifest's unlock-at-startup setting as the VM started with it.
@@ -54,6 +55,7 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
 
     init(options: Options) throws {
         try Self.checkBundleFiles(options)
+        configURL = options.configURL
 
         // --- Hardware model (PV=3) ---
         let hwModel = try VPhoneHardware.createModel()

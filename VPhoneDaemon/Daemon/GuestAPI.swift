@@ -125,6 +125,7 @@ enum GuestAPI {
                 "environment_update",
                 "udid_override",
                 "setup_skip",
+                "management_manipulation",
                 "network_ipv4",
                 "network_hostname",
                 "network_static_names",

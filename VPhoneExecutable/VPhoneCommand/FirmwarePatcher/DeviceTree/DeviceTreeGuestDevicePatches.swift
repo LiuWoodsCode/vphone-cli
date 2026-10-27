@@ -357,7 +357,7 @@ extension DeviceTreePatcher {
         "display-corner-radius", "display-mirroring", "oled-display", "thin-bezel", "large-format-phone",
         // UI and feature switches.
         "ui-pip", "ui-reachability", "ui-background-quality", "ui-weather-quality",
-        "hme-in-arkit", "carplay-2", "location-reminders", "watch-companion",
+        "hme-in-arkit", "carplay-2", "location-reminders", "watch-companion", "car-integration", "find-my", "has-boot-chime", "personal-hotspot", "display-mirroring", "supports-personal-translator" 
     ]
 
     /// `/product` properties vphone600 lacks altogether, added from the board:
