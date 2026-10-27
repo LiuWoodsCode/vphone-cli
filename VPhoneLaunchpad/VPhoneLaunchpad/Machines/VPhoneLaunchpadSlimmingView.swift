@@ -117,11 +117,11 @@ struct VPhoneLaunchpadSlimmingSections: View {
 
     // MARK: - Services and apps
 
-    /// Apple Account is not offered: the guest refuses its sign-in either
-    /// way, so the trimmed profile always turns its daemons off.
     private var servicesSection: some View {
         Section {
             Toggle("Turn off unneeded services", isOn: $slimming.trimsServices)
+            Toggle("Turn off Apple Account services", isOn: $slimming.accountsOff)
+                .disabled(!slimming.trimsServices)
             LabeledContent("Remove system apps") {
                 HStack {
                     Button("Choose…") { choosesApps = true }
@@ -138,7 +138,7 @@ struct VPhoneLaunchpadSlimmingSections: View {
             Text("Services and Apps")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
-                Text("About 140 launch daemons a research machine rarely needs, Apple Account's among them.")
+                Text("Service trimming turns off about 140 launch daemons. Apple Account services are a separate option. Both are off by default.")
                 if warnsAboutServiceTrimming {
                     Text("Service trimming is available only for iOS 26 and iOS 27. This step will be skipped on unsupported versions.")
                 }

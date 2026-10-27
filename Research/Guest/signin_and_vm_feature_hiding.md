@@ -1,5 +1,11 @@
 # Hiding Apple-ID sign-in surfaces and VM-unavailable features
 
+> Current fork defaults (2026-10-27): every shipped preset leaves sign-in
+> suppression, follow-up group hiding and Settings-row hiding off. They remain
+> optional patches; the measurements below describe the hooks when enabled.
+> The hook identifiers are now `system-apps-exp-signin_sheets` and
+> `system-preferences-exp-followup_groups` (older records migrate automatically).
+
 Feasibility study (2026-10-07) on an iOS 27.0 guest (iPhone17,3, 24A435), never
 signed in, no Apple ID. Two questions:
 

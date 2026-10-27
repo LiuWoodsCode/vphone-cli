@@ -766,9 +766,11 @@ struct VPhoneLaunchpadControlCommands {
             }
             slimming.keptApps = identifiers
         }
-        // The Apple Account daemons go with the trimmed profile whether or
-        // not the flag is given; it is still refused where the CLI refuses it.
-        if request.flag("accounts-off"), !slimming.trimsServices {
+        slimming.accountsOff = request.flag("accounts-off")
+        if slimming.accountsOff, request.option("service-profile") == nil {
+            slimming.trimsServices = true
+        }
+        if slimming.accountsOff, !slimming.trimsServices {
             throw VPhoneLaunchpadError("--accounts-off needs --service-profile trimmed.")
         }
         if let problem = slimming.problem {

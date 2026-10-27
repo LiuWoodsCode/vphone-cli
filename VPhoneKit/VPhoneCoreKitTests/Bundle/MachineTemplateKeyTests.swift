@@ -190,7 +190,7 @@ struct MachineTemplateKeyTests {
     @Test func `an app the setup boot left behind is named as the difference`() throws {
         // B1: find keyed the request by ten removed apps; the setup boot left
         // Find My, so the machine's records give nine.
-        let requested = Self.key(slimming: VPhoneTemplateSlimmingRequest.defaultSlimming)
+        let requested = Self.key(slimming: try VPhoneTemplateSlimmingRequest(removeApps: true).resolve())
         var adopted = requested
         adopted.slimming.removedApps.removeAll { $0 == "com.apple.findmy" }
         let mismatch = try #require(adopted.mismatch(expecting: requested.identifier))

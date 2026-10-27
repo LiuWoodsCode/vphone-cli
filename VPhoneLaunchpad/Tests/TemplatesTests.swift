@@ -22,15 +22,14 @@ struct TemplatesTests {
 
     static func slimmingArguments() {
         let standard = VPhoneLaunchpadSlimming()
-        // Apple Account is always off and the system apps stay; every other
-        // default is the CLI's own.
-        precondition(standard.arguments == ["--accounts-off", "--remove-apps", "off"], "The defaults: \(standard.arguments)")
-        precondition(standard.setupArguments == ["--accounts-off", "--remove-apps", "off"], "Setup takes the defaults too")
+        // Apps and services stay available unless their switches are chosen.
+        precondition(standard.arguments == ["--service-profile", "none", "--remove-apps", "off"], "The defaults: \(standard.arguments)")
+        precondition(standard.setupArguments == ["--service-profile", "none", "--remove-apps", "off"], "Setup takes the defaults too")
         precondition(standard.trimArguments == ["--tier", "standard"], "Standard trim: \(standard.trimArguments ?? [])")
         precondition(standard.removedApps.isEmpty, "No app goes by default")
         var apps = VPhoneLaunchpadSlimming()
         apps.removesApps = true
-        precondition(apps.arguments == ["--accounts-off"] && apps.removedApps.count == 10, "Ten apps go when removing")
+        precondition(apps.arguments == ["--service-profile", "none", "--remove-apps", "on"] && apps.removedApps.count == 10, "Ten apps go when removing")
         precondition(!apps.removedApps.contains("com.apple.camera") && !apps.removedApps.contains("com.apple.camera") && !standard.removedApps.contains("com.apple.mobilephone"),
                      "Camera and Phone are never removed")
 
@@ -55,18 +54,18 @@ struct TemplatesTests {
         parts.keptApps = ["com.apple.Passbook", "com.apple.findmy", "com.apple.camera"]
         // Languages count only for the standard tier; accounts only with the
         // trimmed profile; Camera is not one of the apps.
-        precondition(parts.arguments == ["--trim", "conservative", "--service-profile", "none",
+        precondition(parts.arguments == ["--trim", "conservative", "--service-profile", "none", "--remove-apps", "on",
                                          "--keep-apps", "com.apple.findmy,com.apple.Passbook"],
                      "Mixed switches: \(parts.arguments)")
-        precondition(parts.setupArguments == ["--service-profile", "none", "--keep-apps", "com.apple.findmy,com.apple.Passbook"],
+        precondition(parts.setupArguments == ["--service-profile", "none", "--remove-apps", "on", "--keep-apps", "com.apple.findmy,com.apple.Passbook"],
                      "Setup drops the trim: \(parts.setupArguments)")
         precondition(parts.trimArguments == ["--tier", "conservative"], "Conservative trim keeps no languages")
 
         var languages = VPhoneLaunchpadSlimming()
         languages.removesApps = true
         languages.keptLanguages = " en , ja ,"
-        precondition(languages.arguments == ["--keep-languages", "en,ja", "--accounts-off"], "Languages: \(languages.arguments)")
-        precondition(languages.setupArguments == ["--accounts-off"], "Setup leaves the languages to the trim")
+        precondition(languages.arguments == ["--keep-languages", "en,ja", "--service-profile", "none", "--remove-apps", "on"], "Languages: \(languages.arguments)")
+        precondition(languages.setupArguments == ["--service-profile", "none", "--remove-apps", "on"], "Setup leaves the languages to the trim")
         precondition(languages.trimArguments == ["--tier", "standard", "--keep-languages", "en,ja"], "Trim with languages")
         languages.keptLanguages = "en,zh-Hans,zh"
         precondition(languages.languagesArgument == nil, "The default languages are not passed")
@@ -78,12 +77,12 @@ struct TemplatesTests {
         var noApps = VPhoneLaunchpadSlimming()
         noApps.removesApps = false
         noApps.keptApps = ["com.apple.news"]
-        precondition(noApps.arguments == ["--accounts-off", "--remove-apps", "off"], "Remove apps off ignores the kept list")
+        precondition(noApps.arguments == ["--service-profile", "none", "--remove-apps", "off"], "Remove apps off ignores the kept list")
 
         var none = VPhoneLaunchpadSlimming()
         none.removesApps = true
         none.trim = .none
-        precondition(none.arguments == ["--trim", "none", "--accounts-off"] && none.trimArguments == nil, "No trim step for tier none")
+        precondition(none.arguments == ["--trim", "none", "--service-profile", "none", "--remove-apps", "on"] && none.trimArguments == nil, "No trim step for tier none")
         print("Slimming switch tests passed")
     }
 
@@ -105,7 +104,9 @@ struct TemplatesTests {
         ] {
             precondition(!VPhoneLaunchpadSlimming.warnsAboutServiceTrimming(iphoneSource: source), source)
         }
-        let requested = VPhoneLaunchpadSlimming()
+        var requested = VPhoneLaunchpadSlimming()
+        requested.trimsServices = true
+        requested.accountsOff = true
         let request = VPhoneLaunchpadTemplateCommands.Request(
             iphoneSource: "/tmp/iPhone17,3_18.6.2_22G100_Restore.ipsw", cloudOSSource: "cloud",
             preset: "standard", diskSizeGB: 64, slimming: requested,
@@ -146,7 +147,7 @@ struct TemplatesTests {
         // Strict: an app the setup boot cannot remove fails the step.
         precondition(VPhoneLaunchpadTemplateCommands.setup("template-1a2b3c4d", slimming)
             == ["vm", "template", "setup", "template-1a2b3c4d", "--strict", "--service-profile", "none", "--remove-apps", "off"], "setup")
-        precondition(VPhoneLaunchpadTemplateCommands.setup("t", VPhoneLaunchpadSlimming()) == ["vm", "template", "setup", "t", "--strict", "--accounts-off", "--remove-apps", "off"],
+        precondition(VPhoneLaunchpadTemplateCommands.setup("t", VPhoneLaunchpadSlimming()) == ["vm", "template", "setup", "t", "--strict", "--service-profile", "none", "--remove-apps", "off"],
                      "setup with the defaults")
         // The adopt expects the id Find Template computed.
         precondition(VPhoneLaunchpadTemplateCommands.adopt("template-1a2b3c4d", iphoneSource: "i", cloudOSSource: "c", expect: "2847ec2a3e3e")

@@ -43,15 +43,14 @@ nonisolated struct VPhoneLaunchpadSlimming: Hashable, Sendable {
     /// separated; empty keeps ``defaultLanguages``.
     var keptLanguages = ""
     /// The trimmed service profile; off is `--service-profile none`.
-    var trimsServices = true
+    var trimsServices = false
     /// Off by default: the system apps stay unless New Machine picks them.
     var removesApps = false
     /// Apps of ``removableApps`` to keep.
     var keptApps: Set<String> = []
     /// Also turns off the Apple Account daemons, which counts only with the
-    /// trimmed profile. On by default and not offered in New Machine: the
-    /// guest refuses Apple Account sign-in and its services either way.
-    var accountsOff = true
+    /// trimmed profile. Off by default so account services remain available.
+    var accountsOff = false
 
     static let defaultLanguages = "en,zh-Hans,zh"
 
@@ -147,6 +146,7 @@ nonisolated struct VPhoneLaunchpadSlimming: Hashable, Sendable {
         if !removesApps {
             arguments += ["--remove-apps", "off"]
         } else {
+            arguments += ["--remove-apps", "on"]
             let kept = Self.removableApps.map(\.id).filter(keptApps.contains)
             if !kept.isEmpty {
                 arguments += ["--keep-apps", kept.joined(separator: ",")]
@@ -159,7 +159,7 @@ nonisolated struct VPhoneLaunchpadSlimming: Hashable, Sendable {
         if !trimsServices {
             return ["--service-profile", "none"]
         }
-        return accountsOff ? ["--accounts-off"] : []
+        return ["--service-profile", "trimmed"] + (accountsOff ? ["--accounts-off"] : [])
     }
 
     /// For `vm template setup`: the same without the trim, which the setup

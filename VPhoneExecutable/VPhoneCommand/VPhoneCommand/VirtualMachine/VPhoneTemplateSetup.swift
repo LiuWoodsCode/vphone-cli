@@ -18,9 +18,9 @@ struct VPhoneTemplateSlimmingOptions: ParsableArguments {
     var trim: String?
     @Option(help: ArgumentHelp("Languages whose linguistic data --trim standard keeps (en is always kept)", valueName: "en,zh-Hans,zh"))
     var keepLanguages: String?
-    @Option(help: ArgumentHelp("Service profile the template applies: trimmed (default) | none", valueName: "profile"))
+    @Option(help: ArgumentHelp("Service profile the template applies: none (default) | trimmed", valueName: "profile"))
     var serviceProfile: String?
-    @Option(help: ArgumentHelp("Remove the default system apps (App Store, TV, News, …): on (default) | off", valueName: "on|off"))
+    @Option(help: ArgumentHelp("Remove the default system apps (App Store, TV, News, …): off (default) | on", valueName: "on|off"))
     var removeApps: String?
     @Option(
         help: ArgumentHelp("Bundle IDs of default-removed apps to keep, comma-separated (com.apple.findmy,com.apple.Passbook)", valueName: "ids"),

@@ -1,5 +1,20 @@
 # Patch Comparison: Regular / Development / Jailbreak / Experimental
 
+> **Stock app and account surfaces by default (2026-10-27).** All shipped
+> presets now leave Settings-row hiding, sign-in suppression and follow-up
+> group hiding off. The two library declarations are renamed to
+> `system-apps-exp-signin_sheets` and `system-preferences-exp-followup_groups`,
+> with migration from their former `cfw` identifiers. Explicit per-VM opt-ins
+> remain supported. With no plan the installer also leaves both libraries
+> absent; an environment update removes unselected copies and preserves the
+> existing binary-patch undo paths. CLI and Launchpad template defaults keep
+> system apps (including Games and Phone), use service profile `none`, and
+> leave Apple Account services enabled. App removal and service trimming
+> remain available only when requested. No instruction patch is added or changed.
+> Full-bundle validation also moves the fork's Procursus tool runner onto
+> vphoned's existing native spawn wrappers, matching the other guest runners
+> so the iOS and tvOS daemon targets both compile.
+
 > **Fork integration with upstream `7d633c9` (2026-10-27).** Retains the
 > DeviceTree serial `FLVRF0LEY01`, product name and description `Butcher Vanity`,
 > and model number `YIXI<3`, including the selectable

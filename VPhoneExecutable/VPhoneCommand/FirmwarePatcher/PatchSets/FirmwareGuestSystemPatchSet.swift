@@ -29,8 +29,10 @@ public enum FirmwareGuestSystemPatchSet {
     public static let gyroscope = "system-backboardd-cfw-gyroscope"
     public static let accelerometer = "system-backboardd-cfw-accelerometer"
     public static let attitude = "system-apps-cfw-attitude"
-    public static let followUpGroups = "system-preferences-cfw-followup_groups"
-    public static let signInSheets = "system-apps-cfw-signin_sheets"
+    public static let followUpGroups = "system-preferences-exp-followup_groups"
+    public static let signInSheets = "system-apps-exp-signin_sheets"
+    /// Hiding account surfaces is always an explicit per-VM choice.
+    public static let featureHidingPatches = settingsRowPatches.union([followUpGroups, signInSheets])
     public static let arm64eX1DyldBootstrap = "system-dyld-boot-arm64e_x1_bootstrap"
     public static let arm64eX1CacheBootstrap = "dyld-boot-arm64e_x1_bootstrap"
     public static let arm64eX1LaunchdBootstrap = "system-launchd-boot-arm64e_x1_bootstrap"

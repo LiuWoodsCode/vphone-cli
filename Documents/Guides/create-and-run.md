@@ -86,8 +86,8 @@ The setup boot finishes the template the way every clone should start. It boots 
 1. deletes the `orig-fs.disabled.rn-*` APFS snapshot `cfw install` left (it holds about 20 MB, and every file trimmed from the System volume until it is gone);
 2. skips Setup Assistant (`setup.skip`);
 3. waits for first-boot work to settle (`setup.settle`, up to 10 minutes): installd expands the removable system apps on the first boot;
-4. removes the system apps (`apps.remove_system`, backups kept in the guest);
-5. applies the service profile (`services.profile.apply`), which includes turning off the sign-in follow-up daemons (`followupd`, `appleidsetupd`);
+4. removes system apps only when requested (`apps.remove_system`, backups kept in the guest);
+5. applies the requested service profile (`services.profile.apply`); the default `none` keeps services running, while `trimmed` turns off jobs including `followupd` and `appleidsetupd`;
 6. reboots, then checks: no snapshot left, Setup done, none of the profile's services running, the removed apps gone, vphoned answering;
 7. clears the device name `vphone-vm` pinned for this boot, and shuts the guest down cleanly.
 
@@ -98,12 +98,14 @@ Every step has a deadline. A failed step stops the VM, records nothing and leave
 | `--slim on\|off` | on | `off` trims nothing and keeps every app and service. The setup boot still runs: Setup is skipped and the snapshot deleted. |
 | `--trim none\|conservative\|standard` | standard | The offline trim above. |
 | `--keep-languages <list>` | `en,zh-Hans,zh` | The languages `--trim standard` keeps. |
-| `--service-profile trimmed\|none` | trimmed | vphoned's trimmed profile: about 140 launchd jobs off, the App Store daemons and sign-in follow-up among them. A phone with this profile cannot pair an Apple Watch (see `Research/Guest/watch_pairing.md`). |
-| `--remove-apps on\|off` | on | Removes App Store, Home, TV, News, FaceTime, iTunes Store, Messages, Games, Find My and Wallet. Camera and Phone stay. |
-| `--keep-apps <ids>` | none | Bundle IDs from that list to keep, comma-separated (`com.apple.findmy,com.apple.Passbook`). |
-| `--accounts-off` | off | Also turns off `akd`, `amsaccountsd` and `appleaccountd`. The guest then cannot sign in to an Apple Account. |
+| `--service-profile trimmed\|none` | none | Opt-in `trimmed` turns about 140 launchd jobs off, the App Store daemons and sign-in follow-up among them. A phone with this profile cannot pair an Apple Watch (see `Research/Guest/watch_pairing.md`). |
+| `--remove-apps on\|off` | off | Opt-in removal of App Store, Home, TV, News, FaceTime, iTunes Store, Messages, Games, Find My and Wallet. Camera and Phone stay. |
+| `--keep-apps <ids>` | none | Bundle IDs from that list to keep, comma-separated (`com.apple.findmy,com.apple.Passbook`). Given alone, opts into removing the other listed apps. |
+| `--accounts-off` | off | Opts into the trimmed profile and also turns off `akd`, `amsaccountsd` and `appleaccountd`. The guest then cannot sign in to an Apple Account. |
 
 Each choice is part of the key, so templates with different slimming live side by side and each serves only the creates that ask for it. Removed apps and the profile stay reversible on a clone: `apps.restore_system` puts an app back from its backup, and `services.profile.apply {"profile":"none"}` turns back on exactly what the profile turned off (both through `vphone-launchpad-cli guest rpc`, or Guest System in Launchpad).
+
+Sign-in sheets, Settings suggestion cards, and the Apple Account/iCloud/Wallet/Game Center/Software Update rows are kept by every shipped preset. Hiding them requires explicitly enabling the corresponding patches. Existing explicit patch choices remain valid; `cfw update-environment` applies changed defaults to installed hooks and restores reversible binary patches. These defaults do not restore apps manually moved out of a guest.
 
 What every clone inherits from the template: Setup done, the apps and services as the setup boot left them, the first-boot work installd and the indexers did, and the Data volume as of that boot. It does not inherit a device name: the template's pin is cleared, so a clone shows `iPhone` until its own VM connects and pins the clone's name. A new identity also means the Mac asks "Trust This Computer?" again.
 
@@ -137,7 +139,7 @@ It works out the key as `vm create` does. The builds come from the IPSWs when th
 
 ### In Launchpad
 
-Launchpad 2.9 creates machines from templates by default. New Machine opens on a short page: the name, the device and iOS version from the firmware catalog, and a Slim System switch. A row below it sums up the rest and opens Advanced Options, four pages for hardware; the template and its parts (the trim tier and kept languages, the service profile, and which system apps go); the Core Bundle, custom IPSWs and patches; and the location, network and restore options. The row counts the settings that differ from the defaults and names anything there that stops Create. Turning off Create from a template restores the machine on its own, as `--no-template` does, with keys of its own and without slimming. Apple Account is not offered: the guest refuses its sign-in either way, so Launchpad passes `--accounts-off` whenever the service profile is trimmed. The sheet grows with its page up to 600 points and scrolls past that, so its buttons stay on a laptop screen.
+Launchpad 2.9 creates machines from templates by default. New Machine opens on a short page: the name, the device and iOS version from the firmware catalog, and a Slim System switch. A row below it sums up the rest and opens Advanced Options, four pages for hardware; the template and its parts (the trim tier and kept languages, the service profile, and which system apps go); the Core Bundle, custom IPSWs and patches; and the location, network and restore options. The row counts the settings that differ from the defaults and names anything there that stops Create. Turning off Create from a template restores the machine on its own, as `--no-template` does, with keys of its own and without slimming. Services and system apps are kept by default. Advanced Options offers service trimming, app removal, and a separate Apple Account service switch; each requires opting in. The sheet grows with its page up to 600 points and scrolls past that, so its buttons stay on a laptop screen.
 
 Under Firmware, a release that also runs on its own cloudOS (`fw catalog`'s third column) offers that cloudOS beside the recommended one, with the `ipsw` that stages the kernelcache mix. The creation then stages the mix as you and has the helper link it as root, which asks for authorization once.
 

@@ -1,5 +1,10 @@
 # Post-setup sign-in surfaces and removing the App Store
 
+> Current fork defaults (2026-10-27): system apps and account services are
+> kept, and all UI-hiding patches require explicit opt-in. The removals below,
+> including Games and Phone on `panetest-iphone`, are historical guest
+> experiments, not automatic actions on new machines.
+
 Companion to `setup_assistant_pane_gating.md`: what the Apple ID / iCloud
 sign-in surfaces look like *after* Setup finishes on a guest that never signed
 in, what it takes to suppress them, and how the App Store — a staged system

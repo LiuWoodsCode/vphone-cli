@@ -1287,11 +1287,11 @@ struct VPhoneCustomFirmwareInstaller {
 
         // Whether the VM's plan (its guest half re-resolved from the current
         // selection) turned this guest patch on. A VM with no plan gets every
-        // legacy patch, which is what it was restored with. New Settings-row
-        // preferences and motion sensors still require an explicit plan.
+        // legacy patch, which is what it was restored with. Feature hiding
+        // and motion sensors still require an explicit plan.
         func on(_ identifier: String) -> Bool {
             guard let plan else {
-                return !FirmwareGuestSystemPatchSet.settingsRowPatches.contains(identifier)
+                return !FirmwareGuestSystemPatchSet.featureHidingPatches.contains(identifier)
                     && identifier != FirmwareGuestSystemPatchSet.gyroscope
                     && identifier != FirmwareGuestSystemPatchSet.accelerometer
                     && identifier != FirmwareGuestSystemPatchSet.attitude

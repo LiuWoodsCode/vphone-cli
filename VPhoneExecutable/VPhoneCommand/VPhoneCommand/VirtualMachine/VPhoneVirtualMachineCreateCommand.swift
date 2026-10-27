@@ -26,9 +26,9 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
         After cfw install a new template's System volume is trimmed offline (--trim, standard \
         by default; vm template trim describes the tiers). It then boots once before it is \
         frozen (its setup boot): the orig-fs snapshot is deleted, which frees what the trim \
-        removed, Setup Assistant skipped, first-boot work waited for, the default system apps \
-        removed (App Store, Home, TV, News, FaceTime, iTunes Store, Messages, Games, Find My, \
-        Wallet; never Phone or Camera) and the trimmed service profile applied, then it reboots, \
+        removed, Setup Assistant skipped and first-boot work waited for. System apps and \
+        services are kept unless --remove-apps on or --service-profile trimmed is requested. \
+        The template then reboots, \
         is checked and shut down. Every clone starts at the Lock Screen with that state. \
         --slim off trims nothing and keeps every app and service (Setup is still skipped); \
         --trim, --keep-languages, --service-profile, --remove-apps, --keep-apps and \

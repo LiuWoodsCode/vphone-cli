@@ -19,9 +19,9 @@ public struct VPhoneTemplateSlimmingRequest: Equatable, Sendable {
     /// `--keep-languages`: the languages a language-removing tier keeps.
     /// Given alone it means the standard tier keeping these languages.
     public var keepLanguages: String?
-    /// `--service-profile none|trimmed`; nil is trimmed when slimming.
+    /// `--service-profile none|trimmed`; nil keeps services unless accounts-off is requested.
     public var serviceProfile: String?
-    /// `--remove-apps on|off`; nil is on when slimming.
+    /// `--remove-apps on|off`; nil keeps apps unless keep-apps requests a removal list.
     public var removeApps: Bool?
     /// `--keep-apps`: apps of ``defaultRemovedApps`` to keep.
     public var keepApps: [String]
@@ -68,7 +68,7 @@ public struct VPhoneTemplateSlimmingRequest: Equatable, Sendable {
     /// takes `none` (``VPhoneMachineTemplateSlimming/fitted(toIOSVersion:)``).
     public static let trimmedServiceProfileMajors = [26, 27]
 
-    /// The removable system apps a slimmed template drops (list C of the
+    /// The removable system apps an opt-in removal drops (list C of the
     /// template trim plan), each verified to stay removed across a respring
     /// and a reboot on iOS 27.0. Camera stays for camera passthrough checks;
     /// Phone lives on the System volume and `apps.remove_system` refuses it.
@@ -151,11 +151,11 @@ public struct VPhoneTemplateSlimmingRequest: Equatable, Sendable {
                 problems.append("--slim off turns slimming off; it cannot be combined with \(contradicted.joined(separator: ", "))")
             }
         }
-        let profile = slim == false ? "none" : serviceProfile ?? "trimmed"
+        let profile = slim == false ? "none" : serviceProfile ?? (accountsOff ? "trimmed" : "none")
         if accountsOff, profile != "trimmed" {
             problems.append("--accounts-off needs --service-profile trimmed")
         }
-        let removes = slim == false ? false : removeApps ?? true
+        let removes = slim == false ? false : removeApps ?? !keepApps.isEmpty
         if !removes, !keepApps.isEmpty, slim != false {
             problems.append("--keep-apps has nothing to keep with --remove-apps off")
         }

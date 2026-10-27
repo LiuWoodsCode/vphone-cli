@@ -2,6 +2,7 @@ import ArchiveKit
 import Darwin
 import Foundation
 import IcliKit
+import VphonedNative
 
 // MARK: - Procursus rootless bootstrap
 
@@ -336,14 +337,14 @@ extension GuestIrisinInstaller {
             throw GuestAPIError.operationFailed("Could not capture package tool output")
         }
         var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        posix_spawn_file_actions_adddup2(&actions, outputPipe[1], STDOUT_FILENO)
-        posix_spawn_file_actions_adddup2(&actions, outputPipe[1], STDERR_FILENO)
-        posix_spawn_file_actions_addclose(&actions, outputPipe[0])
-        posix_spawn_file_actions_addclose(&actions, outputPipe[1])
+        vp_spawn_file_actions_init(&actions)
+        vp_spawn_file_actions_adddup2(&actions, outputPipe[1], STDOUT_FILENO)
+        vp_spawn_file_actions_adddup2(&actions, outputPipe[1], STDERR_FILENO)
+        vp_spawn_file_actions_addclose(&actions, outputPipe[0])
+        vp_spawn_file_actions_addclose(&actions, outputPipe[1])
         var pid: pid_t = 0
-        let started = posix_spawn(&pid, path, &actions, nil, &argv, &envp)
-        posix_spawn_file_actions_destroy(&actions)
+        let started = vp_spawn(&pid, path, &actions, nil, &argv, &envp)
+        vp_spawn_file_actions_destroy(&actions)
         close(outputPipe[1])
         guard started == 0 else {
             close(outputPipe[0])

@@ -7,14 +7,13 @@ import Testing
 struct TemplateSlimmingRequestTests {
     private typealias Request = VPhoneTemplateSlimmingRequest
 
-    @Test func `no switch asks for a setup boot, the trimmed profile and list C`() throws {
+    @Test func `no switch keeps system apps and services through the setup boot`() throws {
         let slimming = try Request().resolve()
         #expect(slimming.setupBoot)
         #expect(slimming.trimTier == Request.defaultTrimTier)
-        #expect(slimming.serviceProfile == "trimmed")
+        #expect(slimming.serviceProfile == "none")
         #expect(slimming.serviceGroups.isEmpty)
-        #expect(slimming.removedApps == Request.defaultRemovedApps.sorted())
-        #expect(slimming.removedApps.count == 10)
+        #expect(slimming.removedApps.isEmpty)
         #expect(slimming == Request.defaultSlimming)
         #expect(Request().isEmpty)
     }
@@ -69,11 +68,11 @@ struct TemplateSlimmingRequestTests {
     }
 
     @Test func `parts can be turned off on their own`() throws {
-        let noProfile = try Request(serviceProfile: "none").resolve()
+        let noProfile = try Request(serviceProfile: "none", removeApps: true).resolve()
         #expect(noProfile.serviceProfile == "none")
         #expect(noProfile.removedApps.count == 10)
 
-        let noApps = try Request(removeApps: false).resolve()
+        let noApps = try Request(serviceProfile: "trimmed", removeApps: false).resolve()
         #expect(noApps.serviceProfile == "trimmed")
         #expect(noApps.removedApps.isEmpty)
         #expect(noApps.setupBoot)
@@ -120,8 +119,8 @@ struct TemplateSlimmingRequestTests {
         let requests = [
             Request(),
             Request(slim: false),
-            Request(serviceProfile: "none"),
-            Request(removeApps: false),
+            Request(serviceProfile: "trimmed"),
+            Request(removeApps: true),
             Request(keepApps: ["com.apple.games"]),
             Request(accountsOff: true),
             Request(trimTier: "conservative"),
@@ -132,7 +131,7 @@ struct TemplateSlimmingRequestTests {
     }
 
     @Test func `the trimmed profile stays on the iOS versions vphoned has a service list for`() throws {
-        let slimming = try Request().resolve()
+        let slimming = try Request(serviceProfile: "trimmed").resolve()
         #expect(VPhoneTemplateSlimmingRequest.trimmedServiceProfileMajors == [26, 27])
         for version in ["26.6.2", "26.0", "27.0", "27.0.1"] {
             #expect(try slimming.fitted(toIOSVersion: version) == slimming)
@@ -143,7 +142,7 @@ struct TemplateSlimmingRequestTests {
     }
 
     @Test func `an iOS 26 key keeps the trimmed profile and differs from its untrimmed one`() throws {
-        let trimmed = try Request().resolve().fitted(toIOSVersion: "26.6.2")
+        let trimmed = try Request(serviceProfile: "trimmed").resolve().fitted(toIOSVersion: "26.6.2")
         let none = try Request(serviceProfile: "none").resolve().fitted(toIOSVersion: "26.6.2")
         #expect(trimmed.serviceProfile == "trimmed")
         #expect(none.serviceProfile == "none")
@@ -156,7 +155,7 @@ struct TemplateSlimmingRequestTests {
     }
 
     @Test func `the trimmed profile becomes none on an iOS vphoned has no service list for`() throws {
-        let slimming = try Request().resolve()
+        let slimming = try Request(serviceProfile: "trimmed").resolve()
         let on25 = try slimming.fitted(toIOSVersion: "25.4")
         #expect(on25.serviceProfile == "none")
         #expect(on25.serviceGroups.isEmpty)

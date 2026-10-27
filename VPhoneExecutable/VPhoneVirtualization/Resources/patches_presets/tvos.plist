@@ -120,8 +120,8 @@
 			<string>preboot-cfw-devicetree_microphone_array</string>
 			<string>restoreramdisk-boot-apfs_sha3_hash</string>
 			<string>system-apps-cfw-attitude</string>
-			<string>system-apps-cfw-signin_sheets</string>
-			<string>system-preferences-cfw-followup_groups</string>
+			<string>system-apps-exp-signin_sheets</string>
+			<string>system-preferences-exp-followup_groups</string>
 			<string>system-backboardd-cfw-gyroscope</string>
 			<string>system-backboardd-cfw-accelerometer</string>
 			<string>system-campo-cfw-entitlements</string>

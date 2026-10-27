@@ -73,6 +73,8 @@
 		<string>Block</string>
 		<key>Patches</key>
 		<array>
+			<string>system-preferences-exp-followup_groups</string>
+			<string>system-apps-exp-signin_sheets</string>
 			<string>system-homepod-exp-top_cap</string>
 			<string>system-homepod-exp-setup_bypass</string>
 			<string>system-homepod-exp-welcome</string>

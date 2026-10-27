@@ -335,14 +335,34 @@ private final class FakeGuest: VPhoneTemplateSetupMachine {
     }
 }
 
+// Explicitly requested trimming for the state-machine and recovery tests.
+private let optedInSlimming = VPhoneMachineTemplateSlimming(
+    trimTier: VPhoneTemplateSlimmingRequest.defaultTrimTier,
+    setupBoot: true,
+    serviceProfile: "trimmed",
+    removedApps: VPhoneTemplateSlimmingRequest.defaultRemovedApps,
+)
+
 // MARK: - Tests
 
 /// The setup boot as a state machine: step order, retries, deadlines and what
 /// a failure leaves behind, against a scripted guest. No VM is started.
 struct TemplateSetupBootTests {
+    @Test func `default setup keeps Games Phone and account services`() throws {
+        let guest = FakeGuest(clock: FakeClock())
+        let outcome = try run(guest, slimming: VPhoneTemplateSlimmingRequest.defaultSlimming).get()
+        #expect(outcome.isComplete)
+        #expect(outcome.removedApps.isEmpty)
+        #expect(guest.installed.contains("com.apple.games"))
+        #expect(guest.installed.contains("com.apple.mobilephone"))
+        #expect(guest.profile == "none")
+        #expect(guest.disabled.isEmpty)
+        #expect(!guest.calls.contains("apps.remove_system"))
+    }
+
     private func run(
         _ guest: FakeGuest,
-        slimming: VPhoneMachineTemplateSlimming = VPhoneTemplateSlimmingRequest.defaultSlimming,
+        slimming: VPhoneMachineTemplateSlimming = optedInSlimming,
         requiresEveryApp: Bool = true,
     ) -> Result<VPhoneTemplateSetupOutcome, VPhoneTemplateSetupFailure> {
         let boot = VPhoneTemplateSetupBoot(
@@ -409,7 +429,7 @@ struct TemplateSetupBootTests {
         #expect(steps.trimTier == trimmed.trimTier)
         #expect(steps.setupDone)
         #expect(steps.snapshotDeleted)
-        #expect(steps.slimming == VPhoneTemplateSlimmingRequest.defaultSlimming)
+        #expect(steps.slimming == optedInSlimming)
     }
 
     @Test func `slim off skips the setup but slims nothing`() throws {
@@ -487,7 +507,7 @@ struct TemplateSetupBootTests {
         var lines: [String] = []
         let boot = VPhoneTemplateSetupBoot(
             machine: guest,
-            plan: VPhoneTemplateSetupPlan(slimming: VPhoneTemplateSlimmingRequest.defaultSlimming, requiresEveryApp: true),
+            plan: VPhoneTemplateSetupPlan(slimming: optedInSlimming, requiresEveryApp: true),
             clock: guest.clock,
             log: { lines.append($0) },
         )
@@ -561,7 +581,7 @@ struct TemplateSetupBootTests {
         var lines: [String] = []
         let boot = VPhoneTemplateSetupBoot(
             machine: guest,
-            plan: VPhoneTemplateSetupPlan(slimming: VPhoneTemplateSlimmingRequest.defaultSlimming, requiresEveryApp: true),
+            plan: VPhoneTemplateSetupPlan(slimming: optedInSlimming, requiresEveryApp: true),
             clock: guest.clock,
             log: { lines.append($0) },
         )
@@ -590,7 +610,7 @@ struct TemplateSetupBootTests {
         var lines: [String] = []
         let boot = VPhoneTemplateSetupBoot(
             machine: guest,
-            plan: VPhoneTemplateSetupPlan(slimming: VPhoneTemplateSlimmingRequest.defaultSlimming, requiresEveryApp: true),
+            plan: VPhoneTemplateSetupPlan(slimming: optedInSlimming, requiresEveryApp: true),
             clock: guest.clock,
             log: { lines.append($0) },
         )
@@ -778,7 +798,7 @@ struct TemplateSetupBootTests {
         var lines: [String] = []
         let boot = VPhoneTemplateSetupBoot(
             machine: guest,
-            plan: VPhoneTemplateSetupPlan(slimming: VPhoneTemplateSlimmingRequest.defaultSlimming, requiresEveryApp: true),
+            plan: VPhoneTemplateSetupPlan(slimming: optedInSlimming, requiresEveryApp: true),
             clock: guest.clock,
             log: { lines.append($0) },
         )
@@ -813,7 +833,7 @@ struct TemplateSetupBootTests {
         #expect(!outcome.removedApps.contains("com.apple.findmy"))
         #expect(outcome.removedApps.count == 9)
         let steps = outcome.applying(to: VPhoneMachineTemplateSteps())
-        #expect(steps.slimming != VPhoneTemplateSlimmingRequest.defaultSlimming)
+        #expect(steps.slimming != optedInSlimming)
     }
 
     @Test func `a strict setup boot of a machine fails where the lenient one warns`() throws {
@@ -830,7 +850,7 @@ struct TemplateSetupBootTests {
     }
 
     @Test func `deviations name what fell short of the plan`() throws {
-        let plan = VPhoneTemplateSetupPlan(slimming: VPhoneTemplateSlimmingRequest.defaultSlimming, requiresEveryApp: true)
+        let plan = VPhoneTemplateSetupPlan(slimming: optedInSlimming, requiresEveryApp: true)
         var outcome = VPhoneTemplateSetupOutcome()
         outcome.apps = plan.removedApps.map { VPhoneTemplateSetupAppResult(bundleID: $0, status: "removed") }
         outcome.serviceProfile = plan.serviceProfile
@@ -869,7 +889,7 @@ struct TemplateSetupBootTests {
         var lines: [String] = []
         let boot = VPhoneTemplateSetupBoot(
             machine: guest,
-            plan: VPhoneTemplateSetupPlan(slimming: VPhoneTemplateSlimmingRequest.defaultSlimming, requiresEveryApp: true),
+            plan: VPhoneTemplateSetupPlan(slimming: optedInSlimming, requiresEveryApp: true),
             clock: guest.clock,
             log: { lines.append($0) },
         )
@@ -1000,7 +1020,7 @@ struct TemplateSetupBootTests {
         let boot = VPhoneTemplateSetupBoot(
             machine: guest,
             plan: VPhoneTemplateSetupPlan(
-                slimming: VPhoneTemplateSlimmingRequest.defaultSlimming,
+                slimming: optedInSlimming,
                 requiresEveryApp: true,
                 clearsCrashReports: false,
             ),
@@ -1061,7 +1081,7 @@ struct TemplateSetupRecordingTests {
         guest.stopsCleanly = complete
         let boot = VPhoneTemplateSetupBoot(
             machine: guest,
-            plan: VPhoneTemplateSetupPlan(slimming: VPhoneTemplateSlimmingRequest.defaultSlimming, requiresEveryApp: true),
+            plan: VPhoneTemplateSetupPlan(slimming: optedInSlimming, requiresEveryApp: true),
             clock: guest.clock,
             log: { _ in },
         )
@@ -1073,7 +1093,7 @@ struct TemplateSetupRecordingTests {
     }
 
     @Test func `a complete setup boot is recorded and the build freezes`() throws {
-        let (root, build, lock) = try makeBuild(slimming: VPhoneTemplateSlimmingRequest.defaultSlimming)
+        let (root, build, lock) = try makeBuild(slimming: optedInSlimming)
         defer {
             lock.release()
             try? FileManager.default.removeItem(at: root)
@@ -1101,7 +1121,7 @@ struct TemplateSetupRecordingTests {
     }
 
     @Test func `a failed setup boot records nothing and the build never freezes`() throws {
-        let (root, build, lock) = try makeBuild(slimming: VPhoneTemplateSlimmingRequest.defaultSlimming)
+        let (root, build, lock) = try makeBuild(slimming: optedInSlimming)
         defer {
             lock.release()
             try? FileManager.default.removeItem(at: root)
@@ -1118,7 +1138,7 @@ struct TemplateSetupRecordingTests {
     }
 
     @Test func `a file trim recorded before the setup boot survives it`() throws {
-        var slimming = VPhoneTemplateSlimmingRequest.defaultSlimming
+        var slimming = optedInSlimming
         slimming.trimTier = "conservative/1"
         let (root, build, lock) = try makeBuild(slimming: slimming)
         defer {

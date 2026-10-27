@@ -249,13 +249,31 @@ struct FirmwarePatchSetCatalogTests {
                     && $0.identifier != FirmwareGuestSystemPatchSet.homePodCryptexStaging
                     && $0.identifier != FirmwareGuestSystemPatchSet.homePodCryptexClass
                     && $0.identifier != FirmwareGuestSystemPatchSet.homePodAdHocInstall
+                    && !FirmwareGuestSystemPatchSet.featureHidingPatches.contains($0.identifier)
                     && $0.applicability.matches(iOSBase: version, cloudOS: cloud)
             }.map(\.identifier))
             #expect(experimental.enabled.subtracting(standard.enabled) == applicableManual)
             #expect(standard.enabled.subtracting(experimental.enabled).isEmpty)
-            #expect(experimental.isEnabled(FirmwareGuestSystemPatchSet.settingsRootRows) == (base == "27.0"))
-            #expect(experimental.isEnabled(FirmwareGuestSystemPatchSet.settingsSoftwareUpdate) == (base == "27.0"))
+            #expect(!experimental.isEnabled(FirmwareGuestSystemPatchSet.settingsRootRows))
+            #expect(!experimental.isEnabled(FirmwareGuestSystemPatchSet.settingsSoftwareUpdate))
         }
+    }
+
+    @Test func `Every shipped preset leaves feature hiding off but allows explicit opt-in`() throws {
+        for preset in FirmwarePatchSetCatalog.builtInPresets {
+            let plan = try VPhonePatchPlan.resolve(
+                preset: preset, patchSets: FirmwarePatchSetCatalog.bundled,
+                iOSBase: VPhoneVersion("27.0"), cloudOS: VPhoneVersion("26.4"),
+            )
+            #expect(plan.enabled.isDisjoint(with: FirmwareGuestSystemPatchSet.featureHidingPatches))
+        }
+        var requested = FirmwarePatchSetCatalog.standardPreset
+        requested.selection = requested.selection.allowing(FirmwareGuestSystemPatchSet.featureHidingPatches)
+        let plan = try VPhonePatchPlan.resolve(
+            preset: requested, patchSets: FirmwarePatchSetCatalog.bundled,
+            iOSBase: VPhoneVersion("27.0"), cloudOS: VPhoneVersion("26.4"),
+        )
+        #expect(FirmwareGuestSystemPatchSet.featureHidingPatches.isSubset(of: plan.enabled))
     }
 
     @Test
