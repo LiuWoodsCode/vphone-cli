@@ -119,6 +119,7 @@ enum GuestAPI {
                 "display",
                 "display_orientation",
                 "display_auto_lock",
+                "device_pose",
                 "screen_unlock",
                 "audio",
                 "input_gestures",

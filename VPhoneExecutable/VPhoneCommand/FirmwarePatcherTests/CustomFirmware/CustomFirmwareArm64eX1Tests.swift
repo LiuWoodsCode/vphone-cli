@@ -13,6 +13,27 @@ struct CustomFirmwareArm64eX1Tests {
     static let auth: UInt32 = 0xF3A0_007F
     static let ret: UInt32 = 0x5520_009F
 
+    @Test func `cached decodes match Capstone across targets and page boundaries`() throws {
+        // Reuse the Keystone-checked encoder corpus, plus the X1 and literal
+        // fixtures below, to exercise both family templates and word caches.
+        let cases = ARM64EncoderKeystoneParityTests.asmCallSiteCases
+            + ARM64EncoderKeystoneParityTests.operandCoverageCases
+        let words = cases.map(\.keystone) + [
+            Self.pac, Self.add, Self.sub, Self.auth, Self.ret,
+            0x1000_0011, 0xB8B0_7A30, 0xD61F_0200,
+        ]
+        let cached = CustomFirmwareArm64eX1.Decoder()
+        let capstone = ARM64Disassembler()
+        for address in [0x2000, 0x4004, 0x8FFC, 0xC000, 0x4004] {
+            for word in words {
+                let expected = try #require(capstone.disassembleOne(ARM64.encodeU32(word), at: UInt64(address)))
+                let actual = try #require(cached.decode(word, at: address))
+                #expect(CustomFirmwareArm64eX1.sameDecode(actual, expected))
+                #expect(cached.decodes(word) == (expected.isDecoded && expected.size == 4))
+            }
+        }
+    }
+
     static func fixture(_ code: [UInt32]) -> Data {
         var data = Data()
         func word(_ v: UInt32) { data += ARM64.encodeU32(v) }

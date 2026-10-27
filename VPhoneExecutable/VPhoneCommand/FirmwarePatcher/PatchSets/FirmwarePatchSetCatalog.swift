@@ -239,6 +239,7 @@ public enum FirmwarePatchSetCatalog {
     public static let tvOSBlockedPatches: Set<String> = [
         paravirtTask3Patch,
         FirmwareGuestSystemPatchSet.arm64eX1CacheBootstrap,
+        FirmwareGuestSystemPatchSet.arm64eX1CacheRemaining,
         "dyld-boot-iomfb_force_kern",
         "dyld-boot-iomfb_swapend",
         "dyld-boot-lockdown_mode",
@@ -252,6 +253,7 @@ public enum FirmwarePatchSetCatalog {
         "preboot-cfw-devicetree_haptics",
         FirmwareGuestSystemPatchSet.prebootIdentityValues,
         "preboot-cfw-devicetree_iphone_product",
+        "preboot-cfw-devicetree_foldable_vm_subtype",
         "preboot-cfw-devicetree_microphone_array",
         RestoreRamDiskSealPatcher.patchIdentifier,
         "system-apps-cfw-attitude",
@@ -277,6 +279,7 @@ public enum FirmwarePatchSetCatalog {
         "system-systemhook-cfw-metal_cache_reuse",
         "system-systemversion-cfw-build_version",
         "system-virtiosound-cfw-hal_plugin",
+        "system-virtualaudio-cfw-device_state_null_gate",
         "system-virtualaudio-cfw-microphone_graph_chains",
         "system-virtualaudio-cfw-mute_set_throw",
         "system-virtualaudio-cfw-speaker_graph_chains",
