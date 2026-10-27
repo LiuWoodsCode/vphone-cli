@@ -1,5 +1,7 @@
 @testable import FirmwarePatcher
 import Foundation
+import CryptoKit
+import VPhoneCoreKit
 import Testing
 
 /// Identity selection for the hybrid manifest.
@@ -17,6 +19,54 @@ import Testing
 /// pinned here without a firmware image, which is what these do.
 @Suite("Hybrid manifest identity selection")
 struct FirmwareManifestSelectionTests {
+    @Test
+    func `TV donor digests authenticate unchanged payloads using PCC SHA384`() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let payload = Data("unchanged donor payload".utf8)
+        try payload.write(to: root.appending(path: "payload.im4p"))
+        let names = ["Ap,SystemVolumeCanonicalMetadata", "OS", "StaticTrustCache", "SystemVolume"]
+        let entry: PlistDict = ["Digest": Data(Insecure.SHA1.hash(data: payload)),
+                                "Trusted": true, "Info": ["Path": "payload.im4p"]]
+        var components = PlistDict()
+        for name in names { components[name] = entry }
+        components["KernelCache"] = entry
+        let identity: PlistDict = ["Manifest": components]
+        let normalized = try FirmwareManifest.normalizeGuestComponentDigests(
+            identity, device: .appleTV5_3, restoreDir: root,
+        )
+        let result = try #require(normalized["Manifest"] as? PlistDict)
+        for name in names {
+            let component = try #require(result[name] as? PlistDict)
+            #expect(component["Digest"] as? Data == Data(SHA384.hash(data: payload)))
+            #expect(component["Trusted"] as? Bool == true)
+        }
+        #expect((result["KernelCache"] as? PlistDict)?["Digest"] as? Data == entry["Digest"] as? Data)
+        #expect(try Data(contentsOf: root.appending(path: "payload.im4p")) == payload)
+    }
+
+    @Test
+    func `phone and pad manifest digests remain unchanged without reading files`() throws {
+        let identity: PlistDict = ["Manifest": ["OS": ["Digest": Data([1, 2, 3])]]]
+        for device in [VPhoneGuestDevice.iPhone17_3, .iPad16_1] {
+            let result = try FirmwareManifest.normalizeGuestComponentDigests(
+                identity, device: device, restoreDir: URL(fileURLWithPath: "/missing"),
+            )
+            #expect(NSDictionary(dictionary: result).isEqual(to: identity))
+        }
+    }
+
+    @Test
+    func `TV digest normalization rejects paths outside the restore tree`() {
+        let identity: PlistDict = ["Manifest": ["Ap,SystemVolumeCanonicalMetadata": ["Info": ["Path": "../outside"]]]]
+        #expect(throws: (any Error).self) {
+            try FirmwareManifest.normalizeGuestComponentDigests(
+                identity, device: .appleTV5_3, restoreDir: URL(fileURLWithPath: "/missing"),
+            )
+        }
+    }
+
     // MARK: - Fixtures
 
     static func identity(
@@ -121,6 +171,78 @@ struct FirmwareManifestSelectionTests {
         #expect(throws: (any Error).self) {
             try FirmwareManifest.findCloudOS(identities, deviceClass: "vphone600ap")
         }
+    }
+
+    // MARK: - findRuntime
+
+    @Test
+    func `the guest takes vphone600ap's identities where the cloudOS has them`() {
+        let identities = [
+            Self.identity(deviceClass: "vresearch101ap"),
+            Self.identity(deviceClass: "vresearch101ap", variant: "Research Erase Install"),
+            Self.identity(deviceClass: "vphone600ap"),
+            Self.identity(deviceClass: "vphone600ap", variant: "Research Erase Install"),
+        ]
+        let (release, research) = FirmwareManifest.findRuntime(identities, researchBoard: (0, 1))
+        #expect(release == 2)
+        #expect(research == 3)
+    }
+
+    @Test
+    func `without vphone600ap the research board stands in`() {
+        let identities = [
+            Self.identity(deviceClass: "vresearch101ap"),
+            Self.identity(deviceClass: "vresearch101ap", variant: "Research Erase Install"),
+        ]
+        let (release, research) = FirmwareManifest.findRuntime(identities, researchBoard: (0, 1))
+        #expect(release == 0)
+        #expect(research == 1)
+    }
+
+    /// An identity naming each of `components` at `<component>.<device class>`.
+    static func identity(deviceClass: String, variant: String, components: [String]) -> PlistDict {
+        var identity = identity(deviceClass: deviceClass, variant: variant)
+        var manifest = PlistDict()
+        for component in components {
+            manifest[component] = ["Info": ["Path": "\(component).\(deviceClass)"] as PlistDict] as PlistDict
+        }
+        identity["Manifest"] = manifest
+        return identity
+    }
+
+    @Test
+    func `the research board supplies the guest's components and may lack a RecoveryMode`() throws {
+        let cloud = [
+            "LLB", "iBSS", "iBEC", "iBoot", "Ap,RestoreSecurePageTableMonitor", "Ap,RestoreTrustedExecutionMonitor",
+            "Ap,SecurePageTableMonitor", "Ap,TrustedExecutionMonitor", "DeviceTree", "RestoreDeviceTree", "SEP",
+            "RestoreSEP", "KernelCache", "RestoreKernelCache", "RestoreRamDisk", "RestoreTrustCache",
+        ]
+        let cloudIdentities = [
+            Self.identity(deviceClass: "vresearch101ap", variant: "Darwin Cloud Customer Erase Install (IPSW)", components: cloud),
+            Self.identity(deviceClass: "vresearch101ap", variant: "Research Darwin Cloud Customer Erase Install (IPSW)", components: cloud),
+        ]
+        let iPhoneIdentities = [
+            Self.identity(deviceClass: "d47ap", variant: "Customer Erase Install (IPSW)", components: [
+                "Ap,SystemVolumeCanonicalMetadata", "OS", "StaticTrustCache", "SystemVolume",
+            ]),
+        ]
+        let (vp, vpr) = FirmwareManifest.findRuntime(cloudIdentities, researchBoard: (0, 1))
+        let identity = try FirmwareManifest.buildEraseIdentity(
+            cloudIdentities: cloudIdentities,
+            iPhoneIdentities: iPhoneIdentities,
+            prod: 0,
+            res: 1,
+            vp: vp,
+            vpr: vpr,
+            iErase: 0,
+        )
+        let manifest = try #require(identity["Manifest"] as? PlistDict)
+        func path(_ component: String) -> String? {
+            ((manifest[component] as? PlistDict)?["Info"] as? PlistDict)?["Path"] as? String
+        }
+        #expect(path("RestoreDeviceTree") == "RestoreDeviceTree.vresearch101ap")
+        #expect(path("SEP") == "SEP.vresearch101ap")
+        #expect(manifest["RecoveryMode"] == nil)
     }
 
     // MARK: - findIPhoneErase

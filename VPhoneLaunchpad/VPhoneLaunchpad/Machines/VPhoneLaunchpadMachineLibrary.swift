@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UniformTypeIdentifiers
 
 /// The third stage: the VM library, driven entirely through `vphone-cli vm`.
 ///
@@ -30,7 +31,6 @@ final class VPhoneLaunchpadMachineLibrary {
     private(set) var creations: [Path: VPhoneLaunchpadCreationPipeline] = [:]
     /// Each listed machine's Core Bundle, read from its `launchpad.json`.
     private(set) var bindings: [Path: VPhoneLaunchpadMachineBinding] = [:]
-    private(set) var globalActivity: String?
     /// Folders chosen in New Machine, in the order they were added. The
     /// default library is not among them.
     private(set) var addedRoots: [String]
@@ -42,8 +42,19 @@ final class VPhoneLaunchpadMachineLibrary {
     private let bundles: VPhoneLaunchpadCoreBundle
     private let helper: VPhoneLaunchpadHelperClient
     private var launched: [Path: VPhoneLaunchpadChildProcess] = [:]
-    private var externallyRunning: Set<Path> = []
+    /// The processes other than Launchpad that the last `lsof` listed for each
+    /// machine's disk image, the machine's own VM included.
+    private var diskHolders: [Path: [VPhoneLaunchpadDiskHolder]] = [:]
     private var activities: [Path: String] = [:]
+    /// The last `cfw install` or update run on each machine this session,
+    /// kept once it ends so its sheet and the inspector can say how it went.
+    private(set) var maintenance: [Path: VPhoneLaunchpadMaintenanceRun] = [:]
+    /// Machines whose maintenance sheet is open: their failures show there,
+    /// not as an alert.
+    var showsMaintenance: Set<Path> = []
+    /// A run that has just started from Launchpad itself, for the machines
+    /// view to open its sheet. It clears this once it has.
+    var maintenanceSheetRequest: Path?
     private var isRefreshing = false
     private var timer: Timer?
 
@@ -95,12 +106,15 @@ final class VPhoneLaunchpadMachineLibrary {
     /// The bar the state label shows in place of its text: an export's
     /// progress, or the IPSW download of a creation.
     func progress(of machine: Path) -> Double? {
-        exports[machine]?.fraction ?? creations[machine]?.downloadFraction
+        exports[machine]?.fraction ?? creation(for: machine)?.downloadFraction
     }
 
+    /// A creation shows only its current step: the spinner says it is busy,
+    /// and the inspector says what is being created.
     func state(of machine: Path) -> RunState {
-        if let creation = creations[machine], creation.isRunning, let step = creation.current {
-            return .busy(String(localized: "Creating: \(step.title)"))
+        // The machine, or the temporary machine a template is built in.
+        if let creation = creation(for: machine), creation.isRunning, let step = creation.current {
+            return .busy(step.title)
         }
         if let activity = activities[machine] {
             return .busy(activity)
@@ -108,14 +122,34 @@ final class VPhoneLaunchpadMachineLibrary {
         if exports[machine]?.isWaiting == true {
             return .busy(String(localized: "Waiting to export…"))
         }
-        if launched[machine]?.isRunning == true || externallyRunning.contains(machine) {
+        // Only a VM process holding the disk runs the machine; a reader such
+        // as `tail` or a backup tool leaves it stopped (see `otherDiskHolders`).
+        if launched[machine]?.isRunning == true || diskHolders[machine]?.contains(where: \.runsMachine) == true {
             return .running
         }
         return .stopped
     }
 
+    /// The processes the last `lsof` listed for the machine's disk that do not
+    /// run it. The machine is not running for them, but its disk is not
+    /// standing still either: the meter leaves it alone, and operations that
+    /// need the disk to themselves refuse.
+    func otherDiskHolders(of machine: Path) -> [VPhoneLaunchpadDiskHolder] {
+        diskHolders[machine, default: []].filter { !$0.runsMachine }
+    }
+
+    /// `otherDiskHolders`, asked of `lsof` now rather than at the last refresh.
+    func currentOtherDiskHolders(of machine: Path) async -> [VPhoneLaunchpadDiskHolder] {
+        await Task.detached { Self.diskHolders([machine])[machine, default: []] }.value.filter { !$0.runsMachine }
+    }
+
     func launchedProcess(_ machine: Path) -> VPhoneLaunchpadChildProcess? {
         launched[machine]
+    }
+
+    /// The creation of a machine, or the one building a template in it.
+    func creation(for machine: Path) -> VPhoneLaunchpadCreationPipeline? {
+        creations[machine] ?? creations.values.first { $0.buildMachine == machine }
     }
 
     // MARK: - Locations
@@ -190,6 +224,7 @@ final class VPhoneLaunchpadMachineLibrary {
                     var machines = try JSONDecoder().decode([VPhoneLaunchpadMachine].self, from: data)
                     for index in machines.indices {
                         machines[index].libraryRoot = root
+                        machines[index].guestProductType = VPhoneLaunchpadMachine.guestProductType(in: machines[index].path.url)
                     }
                     found += machines
                     listed.insert(root)
@@ -206,18 +241,23 @@ final class VPhoneLaunchpadMachineLibrary {
         listError = errors.first
         hasListed = true
         forgetEmptyLocations(listed: listed)
-        selection.formIntersection(machines.map(\.id))
+        selection.formIntersection(machines.map(\.id) + imports.map(\.row))
         if selection.isEmpty, let first = machines.first {
             selection = [first.id]
         }
         let paths = machines.map(\.path)
-        externallyRunning = await Task.detached { Self.machinesHoldingDisks(paths) }.value
+        diskHolders = await Task.detached { Self.diskHolders(paths) }.value
+        // A stopped machine's guest boots afresh when it starts again.
+        pendingGuestRestarts = pendingGuestRestarts.filter { state(of: $0.key) != .stopped }
         await loadBindings(paths)
+        refreshDiskUsage()
     }
 
-    /// The same test `vm stop` uses: a machine runs while some process holds
-    /// its disk image open. This also finds guests started outside Launchpad.
-    private nonisolated static func machinesHoldingDisks(_ machines: [Path]) -> Set<Path> {
+    /// Every process other than Launchpad holding each machine's disk image,
+    /// by executable. The same test `vm stop` uses: a machine runs while a VM
+    /// process holds its disk, which also finds guests started outside
+    /// Launchpad.
+    private nonisolated static func diskHolders(_ machines: [Path]) -> [Path: [VPhoneLaunchpadDiskHolder]] {
         var diskOwners: [String: Path] = [:]
         for machine in machines {
             let bundle = machine.url
@@ -228,26 +268,20 @@ final class VPhoneLaunchpadMachineLibrary {
             diskOwners[bundle.appendingPathComponent(disk).path] = machine
         }
         guard !diskOwners.isEmpty else {
-            return []
+            return [:]
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        process.arguments = ["-F", "n", "--"] + diskOwners.keys.sorted()
+        process.arguments = ["-F", "pn", "--"] + diskOwners.keys.sorted()
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         guard (try? process.run()) != nil else {
-            return []
+            return [:]
         }
         let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         process.waitUntilExit()
-        var running: Set<Path> = []
-        for line in output.split(separator: "\n") where line.hasPrefix("n") {
-            if let machine = diskOwners[String(line.dropFirst())] {
-                running.insert(machine)
-            }
-        }
-        return running
+        return VPhoneLaunchpadDiskHolder.holders(lsofOutput: output, diskOwners: diskOwners, excluding: getpid())
     }
 
     /// `name` when it is one path component, otherwise nil.
@@ -265,7 +299,7 @@ final class VPhoneLaunchpadMachineLibrary {
     /// version, so a bundle installed later does not change what it runs. A
     /// machine still being created is skipped: its pipeline binds it.
     private func loadBindings(_ paths: [Path]) async {
-        let pending = Set(creations.keys)
+        let pending = Set(creations.keys).union(creations.values.compactMap(\.buildMachine))
         let fallback = bundles.defaultVersion
         let before = bindings
         var loaded = await Task.detached {
@@ -307,6 +341,22 @@ final class VPhoneLaunchpadMachineLibrary {
         machines.filter { bundleVersion(for: $0.path) == version }.map(\.name)
     }
 
+    /// Names of the machines bound to `version` that are not stopped.
+    func activeMachineNames(boundTo version: String) -> [String] {
+        machines.filter { bundleVersion(for: $0.path) == version && state(of: $0.path) != .stopped }.map(\.name)
+    }
+
+    /// True when the machine's Core Bundle is not installed, so it cannot
+    /// run until it is given another one.
+    func isDamaged(_ machine: Path) -> Bool {
+        bundleVersion(for: machine).map { !bundles.selectableVersions.contains($0) } ?? false
+    }
+
+    /// The binding on disk, or the listed copy when the file cannot be read.
+    private func currentBinding(of machine: Path) -> VPhoneLaunchpadMachineBinding? {
+        VPhoneLaunchpadMachineBinding.load(machine) ?? bindings[machine]
+    }
+
     /// Writes a machine's binding and keeps the listed copy in step.
     func bind(_ machine: Path, _ binding: VPhoneLaunchpadMachineBinding) throws {
         try binding.save(to: machine)
@@ -317,18 +367,49 @@ final class VPhoneLaunchpadMachineLibrary {
     /// on the next start. With `updateEnvironment`, each stopped machine also
     /// gets that version's guest environment; a running one keeps its own
     /// until it is updated later. Boot chain and patches stay as created.
-    func setBundle(_ version: String, for machines: [Path], updateEnvironment: Bool) async {
+    /// A machine whose disk another process holds is left as it was rather
+    /// than rebound without its update (`VPhoneLaunchpadBundleChange`).
+    /// `willUpdate` hears of each update just before it starts.
+    func setBundle(
+        _ version: String,
+        for machines: [Path],
+        updateEnvironment: Bool,
+        willUpdate: (Path) -> Void = { _ in },
+    ) async {
         guard bundles.commandLine(version: version) != nil else {
             actionError = VPhoneLaunchpadError(String(localized: "VPhone.bundle \(version) is not installed."))
             return
         }
         for machine in machines {
-            var binding = VPhoneLaunchpadMachineBinding.load(machine)
-                ?? bindings[machine]
+            var binding = currentBinding(of: machine)
                 ?? VPhoneLaunchpadMachineBinding(bundle: version)
             binding.bundle = version
+            // A machine not restored yet, or whose custom firmware install
+            // did not finish, has no guest environment to update.
+            let listed = self.machines.first { $0.path == machine }
+            let updates = updateEnvironment && state(of: machine) == .stopped
+                && listed?.restoreInfo != nil && listed?.customFirmwareInstalled != false
+            let change: VPhoneLaunchpadBundleChange
             do {
-                try bind(machine, binding)
+                change = try await VPhoneLaunchpadBundleChange.perform(
+                    updatesEnvironment: updates,
+                    otherDiskHolders: { await currentOtherDiskHolders(of: machine) },
+                    bind: { try bind(machine, binding) },
+                    // A failed update says first which layer moved.
+                    updateEnvironment: {
+                        willUpdate(machine)
+                        return await updateGuestEnvironment(machine) { failure in
+                            VPhoneLaunchpadError(
+                                String(localized: "Unable to Update the Guest Environment of \(machine.name)"),
+                                detail: [
+                                    String(localized: "\(machine.name) now runs with Core Bundle \(version), but its guest environment was not updated. Update its guest environment to finish the change."),
+                                    failure.message,
+                                    failure.detail,
+                                ].compactMap(\.self).joined(separator: "\n\n"),
+                            )
+                        }
+                    },
+                )
             } catch {
                 actionError = VPhoneLaunchpadError(
                     String(localized: "Unable to Change the Core Bundle of \(machine.name)"),
@@ -336,13 +417,11 @@ final class VPhoneLaunchpadMachineLibrary {
                 )
                 continue
             }
-            // A machine not restored yet, or whose custom firmware install
-            // did not finish, has no guest environment to update.
-            let listed = self.machines.first { $0.path == machine }
-            if updateEnvironment, state(of: machine) == .stopped,
-               listed?.restoreInfo != nil, listed?.customFirmwareInstalled != false
-            {
-                await updateGuestEnvironment(machine)
+            if case let .refused(others) = change {
+                actionError = VPhoneLaunchpadError(
+                    String(localized: "Unable to Change the Core Bundle of \(machine.name)"),
+                    detail: Self.diskHeldDetail(machine, others),
+                )
             }
         }
     }
@@ -460,38 +539,47 @@ final class VPhoneLaunchpadMachineLibrary {
         }
     }
 
+    /// False, with `actionError` set, while a process that does not run the
+    /// machine has its disk open. `cfw install` and the updates refuse such a
+    /// disk, but say so only in the console log; this names the holder here.
+    private func requireDiskUnheld(
+        _ machine: Path,
+        explain: (VPhoneLaunchpadError) -> VPhoneLaunchpadError = { $0 },
+    ) async -> Bool {
+        let others = await currentOtherDiskHolders(of: machine)
+        guard !others.isEmpty else {
+            return true
+        }
+        actionError = explain(VPhoneLaunchpadError(String(localized: "Unable to Complete Action"), detail: Self.diskHeldDetail(machine, others)))
+        return false
+    }
+
+    /// Names the processes that hold a machine's disk without running it.
+    private static func diskHeldDetail(_ machine: Path, _ others: [VPhoneLaunchpadDiskHolder]) -> String {
+        String(localized: "The disk of \(machine.name) is open in process \(VPhoneLaunchpadDiskHolder.describe(others)), which does not run it. Try again once that process closes it.")
+    }
+
     /// Runs `cfw install` again through the helper, for a machine whose last
-    /// install did not finish. Output goes to the machine's console log.
+    /// install did not finish.
     func installCustomFirmware(_ machine: Path) async {
         guard let version = bundleVersion(for: machine) else {
             actionError = VPhoneLaunchpadError(String(localized: "No Core Bundle version is installed. Install one in Core Bundle."))
             return
         }
-        activities[machine] = String(localized: "Installing custom firmware…")
-        defer { activities[machine] = nil }
-        appendConsoleLog(machine, "$ vphone-cli cfw install \(machine.name)")
-        let log = Self.consoleLog(machine)
-        do {
-            let status = try await helper.installCustomFirmware(
+        guard await requireDiskUnheld(machine) else {
+            return
+        }
+        let installed = await performMaintenance(.installCustomFirmware, on: machine) { onLine in
+            try await helper.installCustomFirmware(
                 bundleVersion: version,
                 machineName: machine.name,
                 libraryRoot: machine.libraryRoot,
                 keepArtifacts: true,
-                onLine: { line in Self.append(line, to: log) },
+                onLine: onLine,
             )
-            if status != 0 {
-                actionError = VPhoneLaunchpadError(
-                    String(localized: "Unable to install custom firmware. Check the log for details."),
-                    detail: String(localized: "Choose Show Console Log for the full output."),
-                )
-            } else {
-                recordGuestEnvironment(machine, version)
-            }
-        } catch {
-            if !(error is CancellationError) {
-                actionError = error as? VPhoneLaunchpadError
-                    ?? VPhoneLaunchpadError(String(localized: "Unable to install custom firmware. Check the log for details."), detail: error.localizedDescription)
-            }
+        }
+        if installed {
+            recordGuestEnvironment(machine, version)
         }
         await refresh()
     }
@@ -500,37 +588,33 @@ final class VPhoneLaunchpadMachineLibrary {
     /// machine's own bundle into it while it is stopped, through the helper,
     /// and nothing else. This is how a machine created by an older bundle
     /// gets newer hooks, since its restore tree is gone after the first boot.
-    func updateGuestEnvironment(_ machine: Path) async {
+    /// True once the environment is recorded as updated. `explain` rewords a
+    /// failure before it is shown.
+    @discardableResult
+    func updateGuestEnvironment(
+        _ machine: Path,
+        explain: (VPhoneLaunchpadError) -> VPhoneLaunchpadError = { $0 },
+    ) async -> Bool {
         guard let version = bundleVersion(for: machine) else {
-            actionError = VPhoneLaunchpadError(String(localized: "No Core Bundle version is installed. Install one in Core Bundle."))
-            return
+            actionError = explain(VPhoneLaunchpadError(String(localized: "No Core Bundle version is installed. Install one in Core Bundle.")))
+            return false
         }
-        activities[machine] = String(localized: "Updating guest environment…")
-        defer { activities[machine] = nil }
-        appendConsoleLog(machine, "$ vphone-cli cfw update-environment \(machine.name)")
-        let log = Self.consoleLog(machine)
-        do {
-            let status = try await helper.updateGuestEnvironment(
+        guard await requireDiskUnheld(machine, explain: explain) else {
+            return false
+        }
+        let updated = await performMaintenance(.updateGuestEnvironment, on: machine, explain: explain) { onLine in
+            try await helper.updateGuestEnvironment(
                 bundleVersion: version,
                 machineName: machine.name,
                 libraryRoot: machine.libraryRoot,
-                onLine: { line in Self.append(line, to: log) },
+                onLine: onLine,
             )
-            if status != 0 {
-                actionError = VPhoneLaunchpadError(
-                    String(localized: "Unable to update the guest environment."),
-                    detail: String(localized: "Choose Show Console Log for the full output."),
-                )
-            } else {
-                recordGuestEnvironment(machine, version)
-            }
-        } catch {
-            if !(error is CancellationError) {
-                actionError = error as? VPhoneLaunchpadError
-                    ?? VPhoneLaunchpadError(String(localized: "Unable to update the guest environment."), detail: error.localizedDescription)
-            }
+        }
+        if updated {
+            recordGuestEnvironment(machine, version)
         }
         await refresh()
+        return updated
     }
 
     /// Replaces the machine's Preboot kernelcache with the one its current
@@ -541,30 +625,93 @@ final class VPhoneLaunchpadMachineLibrary {
             actionError = VPhoneLaunchpadError(String(localized: "No Core Bundle version is installed. Install one in Core Bundle."))
             return
         }
-        activities[machine] = String(localized: "Updating kernel…")
-        defer { activities[machine] = nil }
-        appendConsoleLog(machine, "$ vphone-cli cfw update-kernel \(machine.name)")
-        let log = Self.consoleLog(machine)
-        do {
-            let status = try await helper.updateKernel(
+        guard await requireDiskUnheld(machine) else {
+            return
+        }
+        await performMaintenance(.updateKernel, on: machine) { onLine in
+            try await helper.updateKernel(
                 bundleVersion: version,
                 machineName: machine.name,
                 libraryRoot: machine.libraryRoot,
-                onLine: { line in Self.append(line, to: log) },
+                onLine: onLine,
             )
-            if status != 0 {
-                actionError = VPhoneLaunchpadError(
-                    String(localized: "Unable to update the kernel."),
-                    detail: String(localized: "Choose Show Console Log for the full output."),
-                )
-            }
-        } catch {
-            if !(error is CancellationError) {
-                actionError = error as? VPhoneLaunchpadError
-                    ?? VPhoneLaunchpadError(String(localized: "Unable to update the kernel."), detail: error.localizedDescription)
-            }
         }
         await refresh()
+    }
+
+    // MARK: - Maintenance runs
+
+    /// Runs one of the helper's maintenance commands with the machine shown
+    /// busy. Each line goes to the machine's console log, as it always has,
+    /// to the run's own log, which its sheet follows, and to `forward`; the
+    /// few that mark a step or a warning reach the run itself. `presents`
+    /// asks the machines view to open the sheet. A failure is recorded on the
+    /// run in the words its sheet and an alert use; what the helper throws is
+    /// thrown on.
+    func runMaintenance(
+        _ run: VPhoneLaunchpadMaintenanceRun,
+        presents: Bool,
+        forward: (@Sendable (String) -> Void)? = nil,
+        _ command: (@escaping @Sendable (String) -> Void) async throws -> Int32,
+    ) async throws -> Int32 {
+        let machine = run.machine
+        maintenance[machine] = run
+        activities[machine] = run.kind.activity
+        defer { activities[machine] = nil }
+        if presents {
+            maintenanceSheetRequest = machine
+        }
+        let banner = "$ vphone-cli \(run.kind.command) \(machine.name)"
+        appendConsoleLog(machine, banner)
+        run.log.write(banner)
+        let console = Self.consoleLog(machine)
+        let log = run.log
+        let output: @Sendable (String) -> Void = { [weak run] line in
+            Self.append(line, to: console)
+            log.write(line)
+            forward?(line)
+            if VPhoneLaunchpadMaintenanceProgress.isNotable(line) {
+                Task { @MainActor in run?.read(line) }
+            }
+        }
+        do {
+            let status = try await command(output)
+            if status != 0 {
+                run.failure = VPhoneLaunchpadError(run.kind.failure, detail: log.tail)
+            }
+            run.finish(succeeded: status == 0)
+            return status
+        } catch {
+            if !(error is CancellationError) {
+                run.failure = error as? VPhoneLaunchpadError
+                    ?? VPhoneLaunchpadError(run.kind.failure, detail: error.localizedDescription)
+            }
+            run.finish(succeeded: false)
+            throw error
+        }
+    }
+
+    /// `runMaintenance` for a button or a menu item: its sheet opens, and a
+    /// failure, reworded by `explain`, becomes `actionError` unless that
+    /// sheet is open to show it. True once the command has succeeded.
+    @discardableResult
+    private func performMaintenance(
+        _ kind: VPhoneLaunchpadMaintenanceRun.Kind,
+        on machine: Path,
+        explain: (VPhoneLaunchpadError) -> VPhoneLaunchpadError = { $0 },
+        _ command: (@escaping @Sendable (String) -> Void) async throws -> Int32,
+    ) async -> Bool {
+        let run = VPhoneLaunchpadMaintenanceRun(kind: kind, machine: machine)
+        if (try? await runMaintenance(run, presents: true, command)) == 0 {
+            return true
+        }
+        if let failure = run.failure {
+            run.failure = explain(failure)
+            if !showsMaintenance.contains(machine) {
+                actionError = run.failure
+            }
+        }
+        return false
     }
 
     /// Stops a machine. The guest is asked to shut down first, so it quits its
@@ -578,6 +725,31 @@ final class VPhoneLaunchpadMachineLibrary {
         }
         await perform(String(localized: "Stopping…"), on: machine, ["vm", "stop", machine.name] + machine.libraryArguments)
         launched[machine]?.interrupt()
+    }
+
+    /// Kills the machine's VM processes, `vphone-vm` and Virtualization's VM
+    /// service, without asking the guest or `vphone-cli`: for a guest that
+    /// hangs or ignores a stop. They run as this user, so no helper is
+    /// needed. The `vphone-cli` that launched it exits once they are gone.
+    func forceStop(_ machine: Path) async {
+        activities[machine] = String(localized: "Force stopping…")
+        defer { activities[machine] = nil }
+        let holders = await Task.detached {
+            Self.diskHolders([machine])[machine, default: []].filter(\.runsMachine)
+        }.value
+        let refused = holders.filter { kill($0.pid, SIGKILL) != 0 && errno != ESRCH }
+        if !refused.isEmpty {
+            actionError = VPhoneLaunchpadError(
+                String(localized: "Unable to Force Stop \(machine.name)"),
+                detail: refused.map(\.description).joined(separator: "\n"),
+            )
+        }
+        launched[machine]?.terminate()
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline, await isMachineRunning(machine) {
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        await refresh()
     }
 
     /// How long a guest gets to shut down before `vm stop` takes over.
@@ -599,11 +771,11 @@ final class VPhoneLaunchpadMachineLibrary {
         do {
             _ = try await VPhoneLaunchpadGuestSocket.send(request, socketPath: socket, timeout: 10)
         } catch {
-            return await !isRunning(machine)
+            return await !isMachineRunning(machine)
         }
         let deadline = Date().addingTimeInterval(Self.guestShutdownTimeout)
         while Date() < deadline {
-            if await !isRunning(machine) {
+            if await !isMachineRunning(machine) {
                 return true
             }
             try? await Task.sleep(for: .seconds(1))
@@ -612,12 +784,13 @@ final class VPhoneLaunchpadMachineLibrary {
     }
 
     /// Whether the machine's virtual machine is still up: the process
-    /// Launchpad started, or for one started elsewhere, whoever holds its disk.
-    private func isRunning(_ machine: Path) async -> Bool {
+    /// Launchpad started, or for one started elsewhere, a VM process holding
+    /// its disk.
+    func isMachineRunning(_ machine: Path) async -> Bool {
         if let child = launched[machine] {
             return child.isRunning
         }
-        return await Task.detached { !Self.machinesHoldingDisks([machine]).isEmpty }.value
+        return await Task.detached { Self.diskHolders([machine])[machine, default: []].contains(where: \.runsMachine) }.value
     }
 
     // MARK: - Edits
@@ -632,6 +805,7 @@ final class VPhoneLaunchpadMachineLibrary {
         bridgeInterface: String?,
         networkArguments: [String] = [],
         unlocksAtStartup: Bool? = nil,
+        syncsHostLocation: Bool? = nil,
     ) async {
         var arguments = ["vm", "config", machine.name] + machine.libraryArguments
         if let cpu {
@@ -649,6 +823,9 @@ final class VPhoneLaunchpadMachineLibrary {
         arguments += networkArguments
         if let unlocksAtStartup {
             arguments += ["--unlock-at-startup", unlocksAtStartup ? "on" : "off"]
+        }
+        if let syncsHostLocation {
+            arguments += ["--sync-host-location", syncsHostLocation ? "on" : "off"]
         }
         await perform(String(localized: "Saving settings…"), on: machine, arguments)
     }
@@ -671,14 +848,289 @@ final class VPhoneLaunchpadMachineLibrary {
         }
     }
 
-    func clone(_ machine: Path, as newName: String) async {
-        if await perform(String(localized: "Cloning…"), on: machine, ["vm", "clone", machine.name, newName] + machine.libraryArguments) {
+    /// With `newIdentity` the clone gets its own ECID, UDID and MAC address,
+    /// so both machines can run at once; a plain clone is the same device.
+    func clone(_ machine: Path, as newName: String, newIdentity: Bool) async {
+        if await perform(String(localized: "Cloning…"), on: machine, machine.cloneArguments(as: newName, newIdentity: newIdentity)) {
             selection = [Path(libraryRoot: machine.libraryRoot, name: newName)]
         }
     }
 
+    /// Removing the folder needs nothing version-specific, so a machine whose
+    /// own bundle is gone or from an unsupported series is deleted with the
+    /// default one instead of having to be rebound first.
+    ///
+    /// When the machine was the last one cloned from a template, `vm delete`
+    /// says so and leaves the template; `templateNotice` passes that on.
     func delete(_ machine: Path) async {
-        await perform(String(localized: "Deleting…"), on: machine, ["vm", "delete", machine.name, "--force"] + machine.libraryArguments)
+        do {
+            let result = try await performChecked(
+                String(localized: "Deleting…"),
+                on: machine,
+                ["vm", "delete", machine.name, "--force"] + machine.libraryArguments,
+                anyBundle: true,
+            )
+            // A creation that stopped short goes with its machine; kept, it
+            // would still claim its IPSWs in Downloaded Firmware.
+            discardCreation(machine)
+            if let notice = VPhoneLaunchpadTemplateNotice.parse(result.lines, libraryRoot: machine.libraryRoot) {
+                templateNotice = notice
+            }
+        } catch {
+            if !(error is CancellationError) {
+                actionError = VPhoneLaunchpadError(actionFailure: error)
+            }
+        }
+    }
+
+    /// The template the last deleted machine was cloned from, now used by
+    /// no machine. The machine list shows it once.
+    var templateNotice: VPhoneLaunchpadTemplateNotice?
+
+    // MARK: - Disk use
+
+    /// What each listed machine takes on disk, measured off the main actor
+    /// at most every `diskUsageInterval` seconds.
+    private(set) var diskUsage: [Path: VPhoneLaunchpadDiskUsage] = [:]
+    private var diskUsageMeasured: Date?
+    private var isMeasuringDiskUsage = false
+    /// A forced measurement asked for while one ran.
+    private var isDiskUsageRequested = false
+    private let diskMeter = VPhoneLaunchpadDiskMeter()
+    private static let diskUsageInterval: TimeInterval = 30
+
+    /// Measures again when the last measurement is old, or a machine was
+    /// added. Every machine and template of every library is measured in one
+    /// pass, because a folder's exclusive size depends on all the others.
+    /// Only files that changed are mapped again, and never on every
+    /// five-second refresh.
+    private func refreshDiskUsage(force: Bool = false) {
+        let paths = machines.map(\.path)
+        let isNew = paths.contains { diskUsage[$0] == nil }
+        let isOld = diskUsageMeasured.map { Date().timeIntervalSince($0) > Self.diskUsageInterval } ?? true
+        guard !isMeasuringDiskUsage else {
+            isDiskUsageRequested = isDiskUsageRequested || force
+            return
+        }
+        guard force || isNew || isOld else {
+            return
+        }
+        isMeasuringDiskUsage = true
+        let machineFolders = machines.map { machine in
+            VPhoneLaunchpadDiskMeter.Folder(path: machine.path.url.path, mayOpen: diskAccess(of: machine.path).mayOpen)
+        }
+        let libraryRoots = roots.filter { $0 == libraryRoot || VPhoneLaunchpadMachineLocations.isAvailable($0) }
+        let meter = diskMeter
+        let templatesMayOpen = templatesMayOpen
+        let mayOpenNow: @Sendable (String) async -> Bool = { [weak self] folder in
+            await self?.mayOpenDisk(inFolder: folder) ?? false
+        }
+        Task {
+            let measured = await Self.measure(
+                machineFolders,
+                paths: paths,
+                libraryRoots: libraryRoots,
+                templatesMayOpen: templatesMayOpen,
+                meter: meter,
+                mayOpenNow: mayOpenNow,
+            )
+            diskUsage = measured.usage
+            templateUsage = measured.templates
+            hasTemplates = measured.hasTemplates
+            diskUsageMeasured = Date()
+            isMeasuringDiskUsage = false
+            if isDiskUsageRequested {
+                isDiskUsageRequested = false
+                refreshDiskUsage(force: true)
+            }
+        }
+    }
+
+    /// Whether the disk meter may open this machine's files now: only when
+    /// no `vm launch` of Launchpad's for it is still running (a start, a
+    /// run, a stop), the last `lsof` named no other process for its disk,
+    /// and Launchpad has no operation on it or on a whole library.
+    private func diskAccess(of machine: Path) -> VPhoneLaunchpadDiskAccess {
+        let isBusy = if case .busy = state(of: machine) {
+            true
+        } else {
+            false
+        }
+        return VPhoneLaunchpadDiskAccess(
+            isLaunched: launched[machine] != nil,
+            isHeld: diskHolders[machine]?.isEmpty == false,
+            isBusy: isBusy || creation(for: machine)?.isRunning == true || exports[machine] != nil,
+            isLibraryBusy: isImporting,
+        )
+    }
+
+    /// Whether the meter may open template files now: not while a
+    /// library-wide operation (a template deletion) runs, nor while a
+    /// creation saves a template or clones one, which `vm create --template`
+    /// refuses while another process holds the template open.
+    private var templatesMayOpen: Bool {
+        VPhoneLaunchpadDiskAccess.templatesMayOpen(
+            isLibraryBusy: isImporting,
+            creationSteps: creations.values.filter(\.isRunning).compactMap(\.current),
+        )
+    }
+
+    /// `diskAccess` for a measured folder, asked right before the meter
+    /// opens one of its files. A template folder may be opened while
+    /// `templatesMayOpen`; a folder that is neither a listed machine nor a
+    /// template is not opened.
+    private func mayOpenDisk(inFolder folder: String) -> Bool {
+        if let machine = machines.first(where: { $0.path.url.path == folder }) {
+            return diskAccess(of: machine.path).mayOpen
+        }
+        let isTemplate = URL(fileURLWithPath: folder).deletingLastPathComponent().lastPathComponent == ".templates"
+        return isTemplate && templatesMayOpen
+    }
+
+    @concurrent
+    private nonisolated static func measure(
+        _ machineFolders: [VPhoneLaunchpadDiskMeter.Folder],
+        paths: [Path],
+        libraryRoots: [String],
+        templatesMayOpen: Bool,
+        meter: VPhoneLaunchpadDiskMeter,
+        mayOpenNow: @escaping @Sendable (String) async -> Bool,
+    ) async -> (usage: [Path: VPhoneLaunchpadDiskUsage], templates: [String: VPhoneLaunchpadDiskUsage], hasTemplates: Bool) {
+        // Templates are keyed as `usage(of:)` looks them up.
+        var templateKeys: [String: String] = [:]
+        var hasBuilds = false
+        for root in libraryRoots {
+            for folder in VPhoneLaunchpadDiskMeter.templateFolders(in: root) {
+                templateKeys[folder] = URL(fileURLWithPath: folder).lastPathComponent + "@" + root
+            }
+            hasBuilds = hasBuilds || VPhoneLaunchpadDiskMeter.hasTemplateBuilds(in: root)
+        }
+        let folders = machineFolders + templateKeys.keys.sorted().map { VPhoneLaunchpadDiskMeter.Folder(path: $0, mayOpen: templatesMayOpen) }
+        let measured = await meter.measure(folders, mayOpenNow: mayOpenNow)
+        var usage: [Path: VPhoneLaunchpadDiskUsage] = [:]
+        for path in paths {
+            usage[path] = measured[path.url.path]
+        }
+        var templates: [String: VPhoneLaunchpadDiskUsage] = [:]
+        for (folder, key) in templateKeys {
+            templates[key] = measured[folder]
+        }
+        return (usage, templates, !templateKeys.isEmpty || hasBuilds)
+    }
+
+    // MARK: - Templates
+
+    /// Every library's templates, from `vm template list --json` with the
+    /// default bundle. Nil until read.
+    private(set) var templates: [VPhoneLaunchpadTemplate]?
+    /// Template builds a create left behind (or is running), by library.
+    private(set) var templateBuilds: [(libraryRoot: String, build: VPhoneLaunchpadTemplateList.Building)] = []
+    private(set) var templatesError: String?
+    /// Each template's disk use, by `<identifier>@<library root>`, measured
+    /// with the machines.
+    private(set) var templateUsage: [String: VPhoneLaunchpadDiskUsage] = [:]
+
+    /// Whether any library holds a template or a left-over build, from the
+    /// disk meter's scan of `.templates` and from `refreshTemplates`. The
+    /// Templates menu item is shown only then.
+    private(set) var hasTemplates = false
+
+    func refreshTemplates() async {
+        guard let commandLine = bundles.commandLine() else {
+            templatesError = String(localized: "No Core Bundle version is installed. Install one in Core Bundle.")
+            return
+        }
+        var found: [VPhoneLaunchpadTemplate] = []
+        var builds: [(libraryRoot: String, build: VPhoneLaunchpadTemplateList.Building)] = []
+        var errors: [String] = []
+        for root in roots where root == libraryRoot || VPhoneLaunchpadMachineLocations.isAvailable(root) {
+            do {
+                let result = try await commandLine.run(VPhoneLaunchpadTemplateCommands.list + ["--library-root", root], recordInHistory: false)
+                guard result.succeeded, let data = result.jsonData else {
+                    errors.append(result.tail)
+                    continue
+                }
+                let list = try VPhoneLaunchpadTemplateList.decode(data, libraryRoot: root)
+                found += list.templates
+                builds += list.building.map { (root, $0) }
+            } catch {
+                errors.append(error.localizedDescription)
+            }
+        }
+        templates = found.sorted { $0.created > $1.created }
+        templateBuilds = builds
+        templatesError = errors.first
+        if errors.isEmpty {
+            hasTemplates = !found.isEmpty || !builds.isEmpty
+        }
+        refreshDiskUsage(force: true)
+    }
+
+    func usage(of template: VPhoneLaunchpadTemplate) -> VPhoneLaunchpadDiskUsage? {
+        templateUsage[template.id + "@" + template.libraryRoot]
+    }
+
+    /// Deletes a template, or a left-over build by its `.building-…` name.
+    /// Machines cloned from it keep working.
+    func deleteTemplate(_ identifier: String, in root: String) async throws {
+        try await performChecked(
+            String(localized: "Deleting template…"),
+            on: nil,
+            VPhoneLaunchpadTemplateCommands.delete(identifier) + ["--library-root", root],
+        )
+        await refreshTemplates()
+    }
+
+    // MARK: - Guest
+
+    /// One vphoned call over the running machine's `vphone.sock`, as
+    /// `vphone-launchpad-cli guest rpc` makes it. The reply's `result`.
+    func guestCall(_ machine: Path, _ method: String, _ params: [String: Any] = [:], timeout: Int = 120) async throws -> [String: Any] {
+        let request: [String: Any] = ["t": "rpc", "method": method, "params": params, "screen": false]
+        let reply = try await VPhoneLaunchpadGuestSocket.send(
+            request,
+            socketPath: machine.url.appendingPathComponent("vphone.sock").path,
+            timeout: timeout,
+        )
+        return (reply as? [String: Any])?["result"] as? [String: Any] ?? [:]
+    }
+
+    // MARK: - Guest restarts
+
+    /// Service profile changes waiting for their guest to restart, by
+    /// machine. Kept for this Launchpad session, so the Guest System sheet
+    /// shows them when it opens again.
+    private(set) var pendingGuestRestarts: [Path: VPhoneLaunchpadPendingRestart] = [:]
+
+    /// The guest's current boot, launchd's start time; nil when the guest
+    /// does not answer.
+    func guestBoot(_ machine: Path) async -> Double? {
+        guard let result = try? await guestCall(machine, "processes.list", ["filter": "launchd"], timeout: 20) else {
+            return nil
+        }
+        return VPhoneLaunchpadPendingRestart.boot(fromProcesses: result)
+    }
+
+    /// Keeps what `services.profile.apply` left waiting for a restart.
+    func recordServiceProfileApply(_ machine: Path, result: [String: Any], boot: Double?) {
+        pendingGuestRestarts[machine] = VPhoneLaunchpadPendingRestart.afterApply(result, pending: pendingGuestRestarts[machine], boot: boot)
+    }
+
+    /// Whether a change still waits for the guest to restart. Forgets it once
+    /// the guest answers from a later boot.
+    func isGuestRestartPending(_ machine: Path) async -> Bool {
+        guard let pending = pendingGuestRestarts[machine] else {
+            return false
+        }
+        if await pending.hasRestarted(currentBoot: guestBoot(machine)) {
+            pendingGuestRestarts[machine] = nil
+            return false
+        }
+        return true
+    }
+
+    func forgetPendingRestart(_ machine: Path) {
+        pendingGuestRestarts[machine] = nil
     }
 
     // MARK: - Export
@@ -698,7 +1150,7 @@ final class VPhoneLaunchpadMachineLibrary {
 
     /// Exports each machine to its destination file, one at a time: each
     /// export reads a whole disk image.
-    func export(_ items: [(machine: Path, destination: URL)], densest: Bool, includeIPSW: Bool) async {
+    func export(_ items: [(machine: Path, destination: URL)]) async {
         for item in items {
             exports[item.machine] = Export()
         }
@@ -708,7 +1160,7 @@ final class VPhoneLaunchpadMachineLibrary {
                 continue
             }
             let task = Task {
-                await runExport(item.machine, to: item.destination, densest: densest, includeIPSW: includeIPSW)
+                await runExport(item.machine, to: item.destination)
             }
             exports[item.machine]?.task = task
             await task.value
@@ -728,14 +1180,10 @@ final class VPhoneLaunchpadMachineLibrary {
         }
     }
 
-    private func runExport(_ machine: Path, to destination: URL, densest: Bool, includeIPSW: Bool) async {
-        var arguments = ["vm", "export", machine.name, "--out", destination.path] + machine.libraryArguments
-        if densest {
-            arguments.append("--max")
-        }
-        if includeIPSW {
-            arguments.append("--include-ipsw")
-        }
+    private func runExport(_ machine: Path, to destination: URL) async {
+        // zstd, the default: Launchpad does not offer xz. Never
+        // --include-ipsw: the restore IPSWs stay in the IPSW cache.
+        let arguments = ["vm", "export", machine.name, "--out", destination.path] + machine.libraryArguments
         await perform(String(localized: "Exporting…"), on: machine, arguments) { [weak self] fraction in
             Task { @MainActor in self?.exports[machine]?.fraction = fraction }
         }
@@ -746,12 +1194,137 @@ final class VPhoneLaunchpadMachineLibrary {
         }
     }
 
+    /// What Import accepts: `.vpea`, and the `.tzst` and `.txz` names exports
+    /// had before it. `vm import` detects the compressor, not the name.
+    static var importableTypes: [UTType] {
+        [.vphoneExportedArchive] + ["tzst", "txz"].compactMap { UTType(filenameExtension: $0) }
+    }
+
+    // MARK: - Import
+
+    /// An import queued or under way, listed as a row of its own until the
+    /// machine it brings appears. `fraction` is nil until the command reports
+    /// progress; `task` is nil while the import waits its turn.
+    struct Import: Identifiable {
+        let id = UUID()
+        let archive: URL
+        /// The default library, which every import writes to.
+        let libraryRoot: String
+        var fraction: Double?
+        fileprivate var task: Task<Void, Never>?
+
+        var isWaiting: Bool {
+            task == nil
+        }
+
+        /// The archive's name without its extension, which is the machine's
+        /// name unless the export was renamed.
+        var name: String {
+            archive.deletingPathExtension().lastPathComponent
+        }
+
+        /// The row's identity in the machine table. No machine has it: a
+        /// machine name cannot start with a dot.
+        var row: Path {
+            Path(libraryRoot: libraryRoot, name: ".import-\(id.uuidString)")
+        }
+    }
+
+    private(set) var imports: [Import] = []
+    /// The last import queued; each one waits for the one before.
+    private var lastImport: Task<Void, Never>?
+
+    /// True while an import unpacks into the library.
+    var isImporting: Bool {
+        imports.contains { !$0.isWaiting }
+    }
+
+    func importItem(_ row: Path) -> Import? {
+        imports.first { $0.row == row }
+    }
+
+    /// Imports one archive after those already queued: each import writes a
+    /// whole disk image.
     func importArchive(_ archive: URL) async {
-        await perform(
-            String(localized: "Importing \(archive.lastPathComponent)"),
-            on: nil,
-            ["vm", "import", archive.path, "--library-root", libraryRoot],
-        )
+        let item = Import(archive: archive, libraryRoot: libraryRoot)
+        imports.append(item)
+        // So the inspector shows the import as it runs.
+        selection = [item.row]
+        let previous = lastImport
+        let queued = Task {
+            await previous?.value
+            await runImport(item.id)
+        }
+        lastImport = queued
+        await queued.value
+    }
+
+    private func runImport(_ id: UUID) async {
+        // Cancelled while it waited.
+        guard let index = imports.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        let item = imports[index]
+        let arguments = ["vm", "import", item.archive.path, "--library-root", libraryRoot]
+        let task = Task {
+            do {
+                let result = try await performChecked(String(localized: "Importing…"), on: nil, arguments) { fraction in
+                    Task { @MainActor in
+                        guard let index = self.imports.firstIndex(where: { $0.id == id }) else {
+                            return
+                        }
+                        self.imports[index].fraction = fraction
+                    }
+                }
+                // `imported → <name>`: the import's row gives way to the
+                // machine, selected in its place.
+                if let name = result.lines.last(where: { $0.hasPrefix("imported → ") })?.dropFirst("imported → ".count),
+                   selection == [item.row]
+                {
+                    selection = [Path(libraryRoot: libraryRoot, name: String(name))]
+                }
+            } catch {
+                if !(error is CancellationError) {
+                    actionError = VPhoneLaunchpadError(actionFailure: error)
+                }
+            }
+        }
+        imports[index].task = task
+        await task.value
+        imports.removeAll { $0.id == id }
+        selection.remove(item.row)
+    }
+
+    /// Stops an import under way, or takes a waiting one out of the queue.
+    /// `vm import` removes what it had unpacked.
+    func cancelImport(_ id: UUID) {
+        guard let item = imports.first(where: { $0.id == id }) else {
+            return
+        }
+        if let task = item.task {
+            task.cancel()
+        } else {
+            imports.removeAll { $0.id == id }
+        }
+    }
+
+    /// True while an import or an export is queued or under way.
+    var hasActiveTransfer: Bool {
+        !imports.isEmpty || !exports.isEmpty
+    }
+
+    /// Stops every import and export and waits for their commands to exit,
+    /// so none is left running, or half written, when Launchpad quits.
+    func stopTransfers() async {
+        let running = imports.compactMap(\.task) + exports.values.compactMap(\.task)
+        imports.removeAll { $0.isWaiting }
+        exports = exports.filter { !$0.value.isWaiting }
+        for task in running {
+            task.cancel()
+        }
+        for task in running {
+            await task.value
+        }
     }
 
     /// Runs one command with `activity` shown as the machine's state. False
@@ -761,43 +1334,130 @@ final class VPhoneLaunchpadMachineLibrary {
         _ activity: String,
         on machine: Path?,
         _ arguments: [String],
+        anyBundle: Bool = false,
         onProgress: (@Sendable (Double) -> Void)? = nil,
     ) async -> Bool {
-        guard let commandLine = machine.map(commandLine(for:)) ?? bundles.commandLine() else {
-            if let machine {
-                actionError = VPhoneLaunchpadError(
-                    String(localized: "Unable to Complete Action"),
-                    detail: String(localized: "The Core Bundle of \(machine.name) is not installed. Choose another Core Bundle for it."),
-                )
+        do {
+            try await performChecked(activity, on: machine, arguments, anyBundle: anyBundle, onProgress: onProgress)
+            return true
+        } catch {
+            if !(error is CancellationError) {
+                actionError = VPhoneLaunchpadError(actionFailure: error)
             }
             return false
         }
+    }
+
+    /// `perform` for a sheet that reports its own errors: throws what failed,
+    /// or `CancellationError` when the command was cancelled.
+    @discardableResult
+    private func performChecked(
+        _ activity: String,
+        on machine: Path?,
+        _ arguments: [String],
+        anyBundle: Bool = false,
+        onProgress: (@Sendable (Double) -> Void)? = nil,
+    ) async throws -> VPhoneLaunchpadCommandResult {
+        // A machine's commands run with its own bundle; `anyBundle` lets one
+        // that needs no particular version fall back to the default.
+        let commandLine: VPhoneLaunchpadCommandLine? = if let machine {
+            self.commandLine(for: machine) ?? (anyBundle ? bundles.commandLine() : nil)
+        } else {
+            bundles.commandLine()
+        }
+        guard let commandLine else {
+            if let machine {
+                throw Self.missingBundle(machine)
+            }
+            throw CancellationError()
+        }
+        // Without a machine, the caller shows the activity itself: Import
+        // shows a row of its own.
         if let machine {
             activities[machine] = activity
-        } else {
-            globalActivity = activity
         }
         defer {
             if let machine {
                 activities[machine] = nil
-            } else {
-                globalActivity = nil
             }
         }
         do {
-            try await commandLine.runChecked(arguments, onProgress: onProgress)
+            let result = try await commandLine.runChecked(arguments, onProgress: onProgress)
             await refresh()
-            return true
+            return result
         } catch {
-            if error is CancellationError || Task.isCancelled {
-                await refresh()
-                return false
-            }
-            actionError = error as? VPhoneLaunchpadError
-                ?? VPhoneLaunchpadError(String(localized: "Unable to Complete Action"), detail: error.localizedDescription)
             await refresh()
-            return false
+            if error is CancellationError || Task.isCancelled {
+                throw CancellationError()
+            }
+            throw error
         }
+    }
+
+    private static func missingBundle(_ machine: Path) -> VPhoneLaunchpadError {
+        VPhoneLaunchpadError(
+            String(localized: "Unable to Complete Action"),
+            detail: String(localized: "The Core Bundle of \(machine.name) is not installed. Choose another Core Bundle for it."),
+        )
+    }
+
+    // MARK: - Snapshots
+
+    /// The machine's snapshots, oldest first, from its own bundle's
+    /// `vm snapshot list --json`. Errors go to the caller, the Snapshots
+    /// sheet, which shows them itself.
+    func snapshots(of machine: Path) async throws -> [VPhoneLaunchpadMachineSnapshot] {
+        guard let commandLine = commandLine(for: machine) else {
+            throw Self.missingBundle(machine)
+        }
+        let result = try await commandLine.run(machine.snapshotListArguments, recordInHistory: false)
+        guard result.succeeded, let data = result.jsonData else {
+            throw VPhoneLaunchpadError(String(localized: "Unable to List Snapshots"), detail: result.tail)
+        }
+        return try VPhoneLaunchpadMachineSnapshot.list(from: data)
+    }
+
+    /// Takes a snapshot of a stopped machine, then saves its binding with it
+    /// so a revert can tell which bundles built what the snapshot holds.
+    func createSnapshot(of machine: Path, name: String, note: String?) async throws {
+        try await performChecked(
+            String(localized: "Taking snapshot…"),
+            on: machine,
+            machine.snapshotCreateArguments(name, note: note),
+        )
+        // The snapshot is taken either way; without the copy a revert can
+        // only mark the guest environment and boot chain unknown.
+        if let binding = currentBinding(of: machine) {
+            try? binding.save(to: machine, snapshot: name)
+        }
+    }
+
+    /// Puts a snapshot's disk, SEP storage and NVRAM back in place of the
+    /// machine's own. What was there is gone unless it was snapshotted too.
+    func revertSnapshot(of machine: Path, to name: String) async throws {
+        try await performChecked(
+            String(localized: "Reverting to snapshot…"),
+            on: machine,
+            machine.snapshotRevertArguments(name),
+        )
+        // The guest environment and the boot chain are on the disk and in
+        // the NVRAM the revert just replaced, so the binding takes them from
+        // the copy saved with the snapshot, or become unknown when there is
+        // none to read (a snapshot taken with vphone-cli, or a copy that was
+        // not written). The bundle is not on the disk: the machine keeps
+        // running with the one chosen now.
+        if let current = currentBinding(of: machine) {
+            let saved = VPhoneLaunchpadMachineBinding.load(machine, snapshot: name)
+            try? bind(machine, current.reverted(to: saved))
+        }
+    }
+
+    func deleteSnapshot(of machine: Path, name: String) async throws {
+        try await performChecked(
+            String(localized: "Deleting snapshot…"),
+            on: machine,
+            machine.snapshotDeleteArguments(name),
+        )
     }
 
     // MARK: - Create
@@ -828,10 +1488,13 @@ final class VPhoneLaunchpadMachineLibrary {
         func applyPreview(creation: VPhoneLaunchpadCreationPipeline) {
             machines = VPhoneLaunchpadPreview.machines
             hasListed = true
-            externallyRunning = [VPhoneLaunchpadPreview.path("research-01")]
+            diskHolders = [VPhoneLaunchpadPreview.path("research-01"): [
+                VPhoneLaunchpadDiskHolder(pid: 4101, executablePath: "/Library/Application Support/vphone-launchpad/Bundles/2.9.0/VPhone.bundle/Contents/MacOS/vphone-vm"),
+            ]]
             startedAt = [VPhoneLaunchpadPreview.path("research-01"): Date().addingTimeInterval(-6130)]
             creations = [creation.machine: creation]
             selection = [VPhoneLaunchpadPreview.path("research-01")]
+            applyPreviewDiskUsage()
             // One machine on an older bundle whose guest environment was not
             // updated with it, so the inspector shows mixed versions.
             let current = VPhoneLaunchpadPreview.releases[1].version
@@ -842,6 +1505,32 @@ final class VPhoneLaunchpadMachineLibrary {
                     : VPhoneLaunchpadMachineBinding(bundle: current, bootChain: current, guestEnvironment: current)
                 return (machine.path, binding)
             })
+        }
+
+        /// Disk use for the mock machines.
+        func applyPreviewDiskUsage() {
+            let research = VPhoneLaunchpadPreview.path("research-01")
+            diskUsage = [
+                research: VPhoneLaunchpadDiskUsage(allocated: 17_812_000_000, exclusive: 612_000_000),
+                VPhoneLaunchpadPreview.labMachine: VPhoneLaunchpadDiskUsage(allocated: 21_406_000_000, exclusive: 3_240_000_000),
+            ]
+            diskUsageMeasured = Date()
+        }
+
+        func applyPreviewTemplates() {
+            templates = VPhoneLaunchpadPreview.templates
+            templateBuilds = (VPhoneLaunchpadPreview.templateList?.building ?? []).map { (VPhoneLaunchpadMachineLocations.defaultRoot, $0) }
+            templatesError = nil
+            templateUsage = [
+                "52b1fcc75e0c@\(libraryRoot)": VPhoneLaunchpadDiskUsage(allocated: 17_580_000_000, exclusive: 106_000_000),
+                "9d04a7c3e1b2@\(libraryRoot)": VPhoneLaunchpadDiskUsage(allocated: 19_310_000_000, exclusive: 19_310_000_000),
+                "2246f982776c@\(libraryRoot)": VPhoneLaunchpadDiskUsage(allocated: 18_920_000_000, exclusive: 15_700_000_000),
+            ]
+        }
+
+        /// What deleting the last machine of a template leaves to say.
+        func applyPreviewNotice() {
+            templateNotice = VPhoneLaunchpadTemplateNotice(id: "9d04a7c3e1b2", size: "19.31 GB", libraryRoot: libraryRoot)
         }
 
         /// The mock list without one machine, as a refresh leaves it after

@@ -8,12 +8,15 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
     private var vm: VPhoneVirtualMachine?
     private var control: VPhoneGuestControl?
     private var windowController: VPhoneVirtualMachineWindowController?
+    private var homePodDisplayTask: Task<Void, Never>?
     private var menuController: VPhoneMenuController?
+    private var shellWindowController: VPhoneShellWindowController?
     private var fileWindowController: VPhoneFileWindowController?
     private var keychainWindowController: VPhoneKeychainWindowController?
     private var appWindowController: VPhoneAppWindowController?
     private var locationProvider: VPhoneLocationProvider?
     private var timeZoneSync: VPhoneTimeZoneSync?
+    private var clockSync: VPhoneClockSync?
     private var hostAudioLatencySync: VPhoneHostAudioLatencySync?
     private var hostAutomationServer: VPhoneHostAutomationServer?
     private var cameraServer: VPhoneCameraServer?
@@ -26,6 +29,13 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
     /// from `vm stop` or Launchpad, which must not wait for an answer.
     private var stopConfirmed = false
     private var isConfirmingStop = false
+    /// The guest was asked to shut down and the process waits for it to stop.
+    private var isShuttingDownGuest = false
+    /// The next quit ends the process, and the virtual machine with it.
+    private var powersOffOnQuit = false
+    /// How long a quit waits for the guest to shut down before turning it
+    /// off. `vm stop` sends SIGKILL after 20 s by default, so it stays below.
+    private static let guestShutdownTimeout: Duration = .seconds(15)
 
     init(command: VPhoneBootCommand) {
         self.command = command
@@ -51,7 +61,7 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
             self?.stopConfirmed = true
             if self?.isConfirmingStop == true {
                 // A quit is waiting on the question; this answers it.
-                NSApp.reply(toApplicationShouldTerminate: true)
+                self?.answerStopQuestion()
             } else {
                 NSApp.terminate(nil)
             }
@@ -103,9 +113,13 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
         try await vm.start(forceDFU: command.dfu)
 
         let control = VPhoneGuestControl()
+        control.isHomePodGuest = options.isHomePodGuest
         self.control = control
         if !command.dfu {
             control.unlocksAtStartup = vm.unlocksAtStartup
+            control.syncsGuestEnvironment = !options.isTVGuest && !options.isHomePodGuest
+            control.syncsHostLocation = vm.syncsHostLocation
+            control.guestDeviceName = Self.guestDeviceName(forConfig: options.configURL)
             startNetworkServices(vm: vm, control: control)
             let vphonedURL = URL(fileURLWithPath: command.vphonedBin)
             if FileManager.default.fileExists(atPath: vphonedURL.path) {
@@ -115,6 +129,7 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
             let provider = VPhoneLocationProvider(control: control)
             locationProvider = provider
             timeZoneSync = VPhoneTimeZoneSync(control: control)
+            clockSync = VPhoneClockSync(control: control)
             hostAudioLatencySync = VPhoneHostAudioLatencySync(control: control)
 
             let camServer = VPhoneCameraServer()
@@ -124,7 +139,17 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
                 control.connect(device: device)
                 camServer.connect(device: device)
                 if let listen = command.apiListen {
-                    let proxy = try VPhoneAPIProxy(device: device, listen: listen)
+                    let hostScreen = VPhoneHostScreenService(
+                        scale: options.screenScale,
+                        display: { [weak vm] in vm?.virtualMachine.graphicsDevices.first?.displays.first },
+                        interfaceDegrees: { [weak control] in
+                            guard let control, control.isConnected,
+                                  let result = try? await control.call("display.orientation")
+                            else { return nil }
+                            return (result["degrees"] as? NSNumber)?.intValue
+                        },
+                    )
+                    let proxy = try VPhoneAPIProxy(device: device, listen: listen, hostScreen: hostScreen)
                     let (url, token) = try await proxy.start()
                     apiProxy = proxy
                     print("[api] HTTP/WebSocket API: \(url.absoluteString)")
@@ -154,9 +179,47 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
                     .standardizedFileURL
                     .resolvingSymlinksInPath()
                     .path,
+                homePodGuest: options.isHomePodGuest,
             )
-            wc.captureView?.escapeIsBackGesture = !options.isPadGuest
+            wc.captureView?.escapeIsBackGesture = !options.isPadGuest && !options.isTVGuest
+            wc.captureView?.isTVGuest = options.isTVGuest
+            wc.homeButtonHoldsInGuest = options.isTVGuest
             windowController = wc
+            if options.isHomePodGuest {
+                homePodDisplayTask = Task { [weak wc, weak control] in
+                    // One snapshot in flight, with no queue of stale animation
+                    // frames. A slow guest reduces the rate instead of lagging.
+                    while !Task.isCancelled {
+                        guard let wc, let control else { return }
+                        guard let window = wc.displayWindow, window.isVisible, !window.isMiniaturized else {
+                            try? await Task.sleep(for: .milliseconds(250))
+                            continue
+                        }
+                        if control.isConnected, control.guestCapabilities.contains("homepod_display") {
+                            do {
+                                let snapshot = try await control.homePodDisplaySnapshot()
+                                guard !Task.isCancelled else { return }
+                                if let snapshot {
+                                    wc.updateHomePodDisplay(geometry: snapshot.geometry, frame: snapshot.frame)
+                                } else {
+                                    wc.clearHomePodDisplay()
+                                    try? await Task.sleep(for: .seconds(1))
+                                }
+                            } catch {
+                                wc.clearHomePodDisplay()
+                                try? await Task.sleep(for: .seconds(1))
+                            }
+                        } else {
+                            wc.clearHomePodDisplay()
+                            try? await Task.sleep(for: .milliseconds(250))
+                        }
+                        try? await Task.sleep(for: .milliseconds(16))
+                    }
+                }
+            }
+
+            let shellWC = VPhoneShellWindowController()
+            shellWindowController = shellWC
 
             let fileWC = VPhoneFileWindowController()
             fileWindowController = fileWC
@@ -172,6 +235,7 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
             }
 
             let mc = VPhoneMenuController(keySender: keySender, control: control)
+            mc.guestPanelsWindowController.displayWindow = wc.displayWindow
             mc.vm = vm
             mc.onHardwareKeyboardChange = { [weak self] enabled in
                 guard let self else { return }
@@ -185,8 +249,19 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
                 try manifest.updating(unlocksAtStartup: enabled).write(to: config)
                 try VPhoneHostFilePermissions.makeAccessible(at: config)
             }
+            mc.onHostLocationSyncChange = { [config = command.config] enabled in
+                let manifest = try VPhoneVirtualMachineManifest.load(from: config)
+                try manifest.updating(syncsHostLocation: enabled).write(to: config)
+                try VPhoneHostFilePermissions.makeAccessible(at: config)
+            }
             mc.captureView = wc.captureView
+            mc.showsTVControls = options.isTVGuest
+            mc.showsWatchControls = options.isWatchGuest
             mc.touchIDMonitor = wc.touchIDMonitor
+            mc.onSessionPressed = { [weak shellWC, weak control] in
+                guard let shellWC, let control else { return }
+                shellWC.showWindow(control: control)
+            }
             mc.onFilesPressed = { [weak fileWC, weak control] in
                 guard let fileWC, let control else { return }
                 fileWC.showWindow(control: control)
@@ -220,6 +295,13 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
                     )
                     alert.runModal()
                 }
+                provider.onGuestLocationServicesOff = {
+                    VPhoneAlert.present(
+                        title: "Location Services Are Off in the Guest",
+                        message: "Turn on Location Services in the guest's Settings > Privacy & Security > Location Services. Until then, apps in the guest get no location; the Mac's location is sent again once they are on.",
+                        style: .informational,
+                    )
+                }
             }
             if let camServer = cameraServer {
                 mc.cameraServer = camServer
@@ -234,7 +316,7 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
             menuController = mc
 
             // Wire location toggle through onConnect/onDisconnect
-            control.onConnect = { [weak self, weak mc, weak provider = locationProvider, weak timeZoneSync, weak hostAudioLatencySync] caps in
+            control.onConnect = { [weak self, weak mc, weak provider = locationProvider, weak timeZoneSync, weak clockSync, weak hostAudioLatencySync] caps in
                 mc?.updateConnectAvailability(available: true)
                 mc?.updateInstallAvailability(available: caps.contains("ipa_install"))
                 mc?.updateBootstrapAvailability(available: caps.contains("bootstrap_install"))
@@ -262,6 +344,9 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
                 if caps.contains("timezone") {
                     timeZoneSync?.start()
                 }
+                if caps.contains("clock") {
+                    clockSync?.start()
+                }
                 if caps.contains("audio_host_latency") {
                     hostAudioLatencySync?.start()
                 }
@@ -269,7 +354,7 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
                     await self?.installPackageIfRequested(caps: caps)
                 }
             }
-            control.onDisconnect = { [weak mc, weak provider = locationProvider, weak timeZoneSync, weak hostAudioLatencySync] in
+            control.onDisconnect = { [weak mc, weak provider = locationProvider, weak timeZoneSync, weak clockSync, weak hostAudioLatencySync] in
                 mc?.updateConnectAvailability(available: false)
                 mc?.updateInstallAvailability(available: false)
                 mc?.updateBootstrapAvailability(available: false)
@@ -287,18 +372,22 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
                 provider?.stopForwarding()
                 mc?.updateLocationCapability(available: false)
                 timeZoneSync?.stop()
+                clockSync?.stop()
                 hostAudioLatencySync?.stop()
             }
         } else if !command.dfu {
-            // Headless mode: auto-start location as before (no menu exists)
-            control.onConnect = { [weak self, weak provider = locationProvider, weak timeZoneSync, weak hostAudioLatencySync] caps in
-                if caps.contains("location") {
-                    provider?.startForwarding()
-                } else {
+            // Headless mode: no menu, so the machine's setting alone decides.
+            control.onConnect = { [weak self, weak control, weak provider = locationProvider, weak timeZoneSync, weak clockSync, weak hostAudioLatencySync] caps in
+                if !caps.contains("location") {
                     print("[location] guest does not support location simulation")
+                } else if control?.syncsHostLocation == true {
+                    provider?.startForwarding()
                 }
                 if caps.contains("timezone") {
                     timeZoneSync?.start()
+                }
+                if caps.contains("clock") {
+                    clockSync?.start()
                 }
                 if caps.contains("audio_host_latency") {
                     hostAudioLatencySync?.start()
@@ -307,10 +396,11 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
                     await self?.installPackageIfRequested(caps: caps)
                 }
             }
-            control.onDisconnect = { [weak provider = locationProvider, weak timeZoneSync, weak hostAudioLatencySync] in
+            control.onDisconnect = { [weak provider = locationProvider, weak timeZoneSync, weak clockSync, weak hostAudioLatencySync] in
                 provider?.stopReplay()
                 provider?.stopForwarding()
                 timeZoneSync?.stop()
+                clockSync?.stop()
                 hostAudioLatencySync?.stop()
             }
         }
@@ -329,6 +419,20 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
         )
         server.virtualMachine = vm
         hostAutomationServer = server
+    }
+
+    /// The guest shows the VM's name, the folder holding config.plist, as its
+    /// device name. A VM name that cannot be one is not used, and the guest
+    /// keeps its own.
+    private static func guestDeviceName(forConfig config: URL) -> String? {
+        let name = VPhoneDockName.name(forConfig: config)
+        do {
+            try VPhoneGuestDeviceName.validate(name)
+            return name
+        } catch {
+            print("[device] the VM name is not used as the device name: \(error)")
+            return nil
+        }
     }
 
     /// Hold the guest to its configured address and open its forwarded ports.
@@ -411,6 +515,9 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func stopControlServices() {
+        homePodDisplayTask?.cancel()
+        homePodDisplayTask = nil
+        windowController?.clearHomePodDisplay()
         hostAutomationServer?.stop()
         portForwarder?.stop()
         apiProxy?.stop()
@@ -433,9 +540,12 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
         locationProvider?.stopForwarding()
         locationProvider?.stopReplay()
         timeZoneSync?.stop()
+        clockSync?.stop()
         hostAudioLatencySync?.stop()
         cameraServer?.disconnect()
         menuController?.stopBatteryMonitoring()
+        menuController?.guestPanelsWindowController.closeAttitudeDials()
+        menuController?.tvRemoteWindowController.close()
         windowController?.closeForRestart()
         // Tool windows belong to the old guest connection too.
         for window in NSApp.windows {
@@ -449,6 +559,7 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
         appWindowController = nil
         locationProvider = nil
         timeZoneSync = nil
+        clockSync = nil
         hostAudioLatencySync = nil
         cameraServer = nil
         hostAutomationServer = nil
@@ -492,23 +603,87 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
         stopControlServices()
     }
 
-    /// Quitting turns the guest off at once, so a quit from the window or ⌘Q
-    /// asks first while the VM runs. A SIGINT stop, a headless VM and a VM
-    /// that never started quit straight away.
+    /// Quitting shuts the guest down first and turns the virtual machine off
+    /// once it has, or when it has not within `guestShutdownTimeout`. A guest
+    /// that cannot be asked (in DFU, still starting up, or a vphoned without
+    /// `system.shutdown`) is turned off at once. A quit from the window or ⌘Q
+    /// asks first while the VM runs; a SIGINT stop and a headless VM do not.
+    /// A second SIGINT while the guest shuts down, as a second Control-C,
+    /// turns it off without waiting.
     func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
-        guard !command.noGraphics, !stopConfirmed, vm != nil else { return .terminateNow }
+        guard !powersOffOnQuit, vm != nil else { return .terminateNow }
+        if isShuttingDownGuest {
+            return stopConfirmed ? .terminateNow : .terminateCancel
+        }
+        guard !command.noGraphics, !stopConfirmed else { return stopGuest() }
         guard !isConfirmingStop else { return .terminateCancel }
         isConfirmingStop = true
         VPhoneAlert.present(
             title: "Stop the Virtual Machine?",
-            message: "Quitting turns the guest off at once, as pulling the power would. Anything not saved in the guest is lost.",
+            message: canShutDownGuest
+                ? "The guest shuts down, then the virtual machine stops. A guest still running after 15 seconds is turned off, as pulling the power would."
+                : "Quitting turns the guest off at once, as pulling the power would. Anything not saved in the guest is lost.",
             style: .warning,
             buttons: ["Stop", "Cancel"],
         ) { [weak self] response in
-            self?.isConfirmingStop = false
-            NSApp.reply(toApplicationShouldTerminate: response == .alertFirstButtonReturn)
+            // A SIGINT that came while the question was up has answered it.
+            guard let self, isConfirmingStop else { return }
+            isConfirmingStop = false
+            guard response == .alertFirstButtonReturn else {
+                NSApp.reply(toApplicationShouldTerminate: false)
+                return
+            }
+            NSApp.reply(toApplicationShouldTerminate: stopGuest() == .terminateNow)
         }
         return .terminateLater
+    }
+
+    /// Answers a quit waiting on the stop question, as a SIGINT does.
+    @MainActor
+    private func answerStopQuestion() {
+        isConfirmingStop = false
+        if let window = VPhoneAlert.hostWindow, let sheet = window.attachedSheet {
+            window.endSheet(sheet)
+        }
+        NSApp.reply(toApplicationShouldTerminate: stopGuest() == .terminateNow)
+    }
+
+    @MainActor
+    private var canShutDownGuest: Bool {
+        guard !command.dfu, let control else { return false }
+        return control.isConnected && control.guestCapabilities.contains("system_shutdown")
+    }
+
+    /// Asks the guest to shut down and cancels the quit, or turns the guest off
+    /// now when it cannot be asked. `guestDidStop` exits the process once the
+    /// guest has stopped.
+    @MainActor
+    private func stopGuest() -> NSApplication.TerminateReply {
+        guard canShutDownGuest, let control else { return .terminateNow }
+        isShuttingDownGuest = true
+        print("[vphone] Asking the guest to shut down")
+        Task { @MainActor [weak self] in
+            do {
+                try await control.shutDownGuest()
+            } catch let VPhoneGuestControl.ControlError.guestError(message) {
+                print("[vphone] Guest refused to shut down: \(message); turning it off")
+                self?.powerOff()
+            } catch {
+                // The guest can stop before it replies, so the connection drops.
+            }
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.guestShutdownTimeout)
+            print("[vphone] Guest still running after \(Self.guestShutdownTimeout); turning it off")
+            self?.powerOff()
+        }
+        return .terminateCancel
+    }
+
+    @MainActor
+    private func powerOff() {
+        powersOffOnQuit = true
+        NSApp.terminate(nil)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {

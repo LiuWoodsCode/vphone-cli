@@ -18,11 +18,14 @@ struct VPhoneVirtualMachineCommand: ParsableCommand {
             VPhoneVirtualMachineRenameCommand.self,
             VPhoneVirtualMachineDeleteCommand.self,
             VPhoneVirtualMachineCloneCommand.self,
+            VPhoneVirtualMachineRebaseCommand.self,
+            VPhoneVirtualMachineSnapshotCommand.self,
             VPhoneVirtualMachineExportCommand.self,
             VPhoneVirtualMachineImportCommand.self,
             VPhoneVirtualMachineLaunchCommand.self,
             VPhoneVirtualMachineStopCommand.self,
             VPhoneVirtualMachineCreateCommand.self,
+            VPhoneVirtualMachineTemplateCommand.self,
             VPhoneVirtualMachineWriteManifestCommand.self,
         ],
     )
@@ -159,8 +162,17 @@ struct VPhoneVirtualMachineInfoCommand: ParsableCommand {
             print("disk:  \(report.diskSizeBytes) bytes")
             print("net:   \(describeNetwork(report.network))")
             print("unlock: \(report.unlocksAtStartup ? "on" : "off")")
+            print("location: \(report.syncsHostLocation ? "on" : "off")")
+            print("rom:   \(VPhoneBootROMOption.describe(bundle))")
+            print("seprom: \(VPhoneSEPROMOption.describe(bundle))")
+            if let snapshots = try? VPhoneMachineSnapshots.list(of: bundle), !snapshots.isEmpty {
+                print("snapshots: \(snapshots.count)")
+            }
             if let udid = report.udid {
                 print("udid:  \(udid)")
+            }
+            if let template = report.template {
+                print("template: \(template)")
             }
             if let info = report.restoreInfo {
                 print("iOS:     \(info.ios.version) (\(info.ios.build))")
@@ -186,8 +198,8 @@ struct VPhoneVirtualMachineNewCommand: ParsableCommand {
     @Option(name: .shortAndLong, help: "CPU cores") var cpu: UInt = 8
     @Option(name: .shortAndLong, help: "Memory (MB)") var memory: UInt64 = 8192
     @Option(name: .shortAndLong, help: "Disk size (GB)") var diskSize: UInt64 = 64
-    @Option(name: .shortAndLong, help: "AVPBooter ROM (default: framework built-in)") var rom: String?
-    @Option(name: .shortAndLong, help: "AVPSEPBooter ROM (default: framework built-in)") var seprom: String?
+    @Option(name: .shortAndLong, help: VPhoneBootROMOption.help) var rom: String?
+    @Option(name: .shortAndLong, help: VPhoneSEPROMOption.help) var seprom: String?
 
     func run() throws {
         let spec = VPhoneBundleOperations.NewBundleConfiguration(
@@ -195,8 +207,8 @@ struct VPhoneVirtualMachineNewCommand: ParsableCommand {
             cpuCount: cpu,
             memoryMB: memory,
             diskSizeGB: diskSize,
-            romSource: rom.map { URL(fileURLWithPath: $0) } ?? VPhoneBundleOperations.defaultROMSource(),
-            sepromSource: seprom.map { URL(fileURLWithPath: $0) } ?? VPhoneBundleOperations.defaultSEPROMSource(),
+            romSource: VPhoneBootROMOption.source(for: rom),
+            sepromSource: VPhoneSEPROMOption.source(for: seprom),
         )
         let bundle = try VPhoneBundleOperations.create(spec, in: lib.library)
         print("created \(bundle.url.path)")
@@ -208,7 +220,7 @@ struct VPhoneVirtualMachineNewCommand: ParsableCommand {
 struct VPhoneVirtualMachineConfigCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "config",
-        abstract: "Edit VM manifest fields (cpu/memory/network/startup)",
+        abstract: "Edit VM manifest fields (cpu/memory/network/startup/rom/seprom)",
         discussion: """
         Network settings are read when the VM starts, so a change applies from the next launch.
 
@@ -230,9 +242,27 @@ struct VPhoneVirtualMachineConfigCommand: ParsableCommand {
         bridged: the Mac's address on that interface), instead of racing mDNS answers. \
         --mac-name off withdraws it. Applied each time vphone-vm connects to the guest.
 
+        --nat-peers (on by default) lets a nat guest and the other nat machines on this Mac \
+        reach each other, as a watch and the phone it pairs with must. --nat-peers off keeps \
+        the guest isolated: it reaches only this Mac and beyond. Applies from the next launch.
+
         --unlock-at-startup on has vphone-vm wake the guest and dismiss its Lock Screen each time \
         vphoned starts in it: after the VM starts and after the guest reboots. Applies from the \
         next connect.
+
+        --sync-host-location on has vphone-vm forward this Mac's location to the guest while it \
+        runs, as a simulated location; macOS asks once for permission. The guest's own Location \
+        Services switch is left alone: with it off, apps in the guest get no location. Applies \
+        from the next start; in a VM window, Location > Sync Host Location changes it at once.
+
+        --rom openavb makes the bundle's OpenAVB the boot ROM, --rom apple Virtualization.framework's \
+        AVPBooter (the machine's own patched copy when it has one), --rom <file> any other ROM. \
+        Applies from the next start, without a restore: both ROMs load the same patched LLB. \
+        Restoring a machine that boots OpenAVB needs a bundle with OpenAVB support.
+
+        --seprom opensep makes the bundle's OpenSEP the SEP ROM, --seprom apple Virtualization.framework's \
+        AVPSEPBooter, --seprom <file> any other SEP ROM. Applies from the next start, without a \
+        restore: both load the SEP firmware the restore installed.
         """,
     )
 
@@ -261,13 +291,22 @@ struct VPhoneVirtualMachineConfigCommand: ParsableCommand {
     var mdns: String?
     @Option(name: .long, help: "Have the guest resolve this Mac's .local name locally: on (default) | off")
     var macName: String?
+    @Option(name: .long, help: "Let this nat guest and the other nat machines reach each other: on (default) | off")
+    var natPeers: String?
     @Option(name: .long, help: "Unlock the guest when it starts: on | off (default)")
     var unlockAtStartup: String?
+    @Option(name: .long, help: "Forward this Mac's location to the guest: on | off (default)")
+    var syncHostLocation: String?
+    @Option(name: .long, help: VPhoneBootROMOption.help)
+    var rom: String?
+    @Option(name: .long, help: VPhoneSEPROMOption.help)
+    var seprom: String?
 
     func run() throws {
         let name = try VPhoneVirtualMachineSelection.resolveExisting(name, in: lib.library)
         let edit = try networkEdit(vmName: name)
         let unlocks = try unlockAtStartup.map { try Self.parseSwitch($0, option: "--unlock-at-startup") }
+        let syncsLocation = try syncHostLocation.map { try Self.parseSwitch($0, option: "--sync-host-location") }
         let updated = try VPhoneBundleOperations.updateConfig(
             bundleNamed: name,
             in: lib.library,
@@ -275,7 +314,17 @@ struct VPhoneVirtualMachineConfigCommand: ParsableCommand {
             memoryMB: memory,
             networkEdit: edit,
             unlocksAtStartup: unlocks,
+            syncsHostLocation: syncsLocation,
         )
+        var current = updated
+        if let rom {
+            current = try VPhoneBootROMOption.install(rom, in: current)
+            print("boot ROM: \(VPhoneBootROMOption.describe(current)), from the next start")
+        }
+        if let seprom {
+            current = try VPhoneSEPROMOption.install(seprom, in: current)
+            print("SEP ROM: \(VPhoneSEPROMOption.describe(current)), from the next start")
+        }
         let m = updated.manifest
         print(
             "updated \(updated.name): \(m.cpuCount) CPU, \(m.memorySize / (1024 * 1024)) MB, "
@@ -321,6 +370,12 @@ struct VPhoneVirtualMachineConfigCommand: ParsableCommand {
         case "off": edit.resolvesMacName = false
         default: throw ValidationError("--mac-name takes on or off.")
         }
+        switch natPeers?.lowercased() {
+        case nil: break
+        case "on": edit.reachesPeers = true
+        case "off": edit.reachesPeers = false
+        default: throw ValidationError("--nat-peers takes on or off.")
+        }
         switch mdns?.lowercased() {
         case nil: break
         case "off": edit.localHostName = .some(nil)
@@ -330,7 +385,7 @@ struct VPhoneVirtualMachineConfigCommand: ParsableCommand {
         return edit
     }
 
-    private static func parseSwitch(_ value: String, option: String) throws -> Bool {
+    static func parseSwitch(_ value: String, option: String) throws -> Bool {
         switch value.lowercased() {
         case "on": return true
         case "off": return false
@@ -338,7 +393,7 @@ struct VPhoneVirtualMachineConfigCommand: ParsableCommand {
         }
     }
 
-    private static func parseMode(_ s: String)
+    static func parseMode(_ s: String)
         throws -> VPhoneVirtualMachineManifest.NetworkConfig.NetworkMode
     {
         switch s.lowercased() {
@@ -379,6 +434,9 @@ func describeNetwork(_ net: VPhoneVirtualMachineManifest.NetworkConfig) -> Strin
     if net.resolvesMacName == false {
         parts.append("mac-name off")
     }
+    if net.mode == .nat, !VPhoneNetworking.reachesPeers(net) {
+        parts.append("nat-peers off")
+    }
     return parts.joined(separator: ", ")
 }
 
@@ -417,7 +475,15 @@ struct VPhoneVirtualMachineDeleteCommand: ParsableCommand {
                 return
             }
         }
+        let source = try VPhoneMachineTemplates.readSource(inBundle: lib.library.bundle(named: name).url)
         try VPhoneBundleOperations.delete(bundleNamed: name, in: lib.library)
         print("deleted \(name)")
+        // Never deleted here: another create may want it, and rebuilding it
+        // takes a restore.
+        if let template = VPhoneMachineTemplates.unusedTemplate(after: source, in: lib.library) {
+            let size = VPhoneSystemTrim.formatBytes(VPhoneMachineTemplates.allocatedBytes(of: template.url))
+            print("note: template \(template.identifier) (~\(size)) is no longer used by any machine; "
+                + "remove it with `vphone-cli vm template delete \(template.identifier)`")
+        }
     }
 }

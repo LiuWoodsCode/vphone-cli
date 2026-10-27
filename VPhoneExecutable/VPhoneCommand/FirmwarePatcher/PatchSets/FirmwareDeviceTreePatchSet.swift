@@ -63,11 +63,6 @@ public enum FirmwareDeviceTreePatchSet {
                 "Sets the guest's model number from the device tree patch catalogue.",
             ),
             property(
-                "devicetree-cfw-watch_companion",
-                "Watch companion",
-                "Enables Apple Watch companion support.",
-            ),
-            property(
                 "devicetree-cfw-assistant",
                 "Assistant",
                 "Enables Siri assistant support.",
@@ -238,6 +233,35 @@ public enum FirmwareDeviceTreePatchSet {
                 "devicetree-cfw-ipad_audio",
                 "iPad audio configuration",
                 "Takes the audio node from the iPad's tree, so its acoustic ID names tunings the iPad image ships.",
+            ),
+
+            property(
+                "devicetree-cfw-homepod_product",
+                "HomePod product capabilities",
+                "Copies the HomePod mini's horseman, siri-hub and app architecture properties from its own board tree, retaining the VM's product-id token. Audio routing uses an audio-only preference. Other boards and the restore tree are unchanged.",
+            ),
+
+            // MARK: TV Guest
+
+            property(
+                "devicetree-cfw-tv_app_architecture",
+                "TV app architecture",
+                "Copies app-macho-architecture from a TV board's own device tree into the installed tree, so its userland sees the donor's architecture. Restore, iPhone and iPad trees are unchanged.",
+            ),
+            property(
+                "devicetree-cfw-watch_companion",
+                "Watch companion",
+                "Sets /product/watch-companion to 1 on an iPhone guest. vphone600 takes it from syscfg, which has no waco on a VM, so the phone would pair with no watch and the Watch app would stay hidden.",
+            ),
+            property(
+                "devicetree-cfw-watch_presentation",
+                "Watch display and gestalt variant",
+                "Copies a watch board's display gamut, display mode and framebuffer identifier, and rewrites the gestalt variant tags MobileGestalt reads in place of syscfg from the board's values, so the watch UI finds its screen class.",
+            ),
+            property(
+                "devicetree-cfw-watch_driverkit",
+                "Watch DriverKit",
+                "Sets supports-driverkit on a watch guest, so launchd starts driverkitd for the dext that drives the VM's USB touch screen.",
             ),
         ],
         provides: ["vphone.devicetree"],

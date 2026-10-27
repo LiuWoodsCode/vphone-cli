@@ -35,6 +35,7 @@ struct FirmwarePatchDriftTests {
             patch("kernel-a", .firmware(.kernelcache)),
             patch("kernel-b", .firmware(.kernelcache)),
             patch("txm", .firmware(.txm)),
+            patch("ramdisk", .firmware(.restoreRamDisk)),
             patch("dyld", .dyldSharedCache),
             patch("dt", .prebootDeviceTree),
             patch("tree-node", .firmware(.deviceTree)),
@@ -49,12 +50,13 @@ struct FirmwarePatchDriftTests {
             enabledPatches: ["avp", "ibss", "kernel-b", "kernel-a", "dyld"],
             declarations: declarations,
         )
-        #expect(Set(parts.keys) == [.iBSS, .iBEC, .llb, .txm, .kernelcache, .deviceTree])
+        #expect(Set(parts.keys) == [.iBSS, .iBEC, .llb, .txm, .restoreRamDisk, .kernelcache, .deviceTree, .sep])
         #expect(parts[.iBSS] == ["ibss"])
         #expect(parts[.kernelcache] == ["kernel-a", "kernel-b"])
         // Off in the plan, or declaring nothing: recorded empty, not unknown.
         #expect(parts[.llb] == [])
         #expect(parts[.iBEC] == [])
+        #expect(parts[.restoreRamDisk] == [])
         #expect(parts[.deviceTree] == [])
         // AVPBooter never leaves the VM folder, and guest patches are written
         // by cfw install, not by a restore.
@@ -147,7 +149,7 @@ struct FirmwarePatchDriftTests {
         // kernel-b was turned off after the restore put it in.
         #expect(result["kernel-b"]?.applied == true)
         #expect(result["kernel-b"]?.isPending == true)
-#expect(result["kernel-b"]?.delivery == .updateKernel)
+        #expect(result["kernel-b"]?.delivery == .updateKernel)
         #expect(result["kernel-a"]?.isPending == false)
         #expect(result["avp"]?.isPending == false)
         // No Guest part in the receipt: the plan says what the install wrote.
@@ -219,7 +221,7 @@ struct FirmwarePatchDriftTests {
     func `Each target is delivered by the step that owns its bytes`() {
         #expect(FirmwarePatchDelivery(target: .firmware(.avpBooter)) == .firmwarePatch)
         #expect(FirmwarePatchDelivery(target: .firmware(.kernelcache)) == .updateKernel)
-        for component in [VPhoneFirmwareComponent.iBSS, .iBEC, .llb, .txm, .deviceTree] {
+        for component in [VPhoneFirmwareComponent.iBSS, .iBEC, .llb, .txm, .deviceTree, .sep] {
             #expect(FirmwarePatchDelivery(target: .firmware(component)) == .restore)
         }
         let guest: [VPhonePatchTarget] = [

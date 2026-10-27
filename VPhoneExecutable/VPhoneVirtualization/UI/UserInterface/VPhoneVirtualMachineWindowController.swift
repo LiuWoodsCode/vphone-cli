@@ -8,8 +8,15 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     private var windowController: NSWindowController?
     private weak var control: VPhoneGuestControl?
     private weak var virtualMachineView: VPhoneVirtualMachineView?
+    private(set) var homePodDisplayView: VPhoneHomePodDisplayView?
+    private var homePodGuest = false
     private(set) var touchIDMonitor: VPhoneTouchIDMonitor?
     private var homeButton: NSButton?
+    /// An Apple TV's TV button: holding the titlebar button holds it in the
+    /// guest, so a click goes Home and a hold opens Control Center.
+    var homeButtonHoldsInGuest = false {
+        didSet { applyHomeButtonHold() }
+    }
     private var subtitleLabel: NSTextField?
     private var timers: [Timer] = []
     private var keyStateObservers: [NSObjectProtocol] = []
@@ -22,6 +29,8 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         virtualMachineView
     }
 
+    var displayWindow: NSWindow? { windowController?.window }
+
     func showWindow(
         for vm: VZVirtualMachine,
         screenWidth: Int,
@@ -32,27 +41,54 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         control: VPhoneGuestControl,
         name: String,
         sceneIdentifier: String,
+        homePodGuest: Bool = false,
     ) {
         self.control = control
+        self.homePodGuest = homePodGuest
+        homeButton = nil
 
         let view = VPhoneVirtualMachineView()
         view.virtualMachine = vm
         view.hardwareKeyboardEnabled = hardwareKeyboardEnabled
-        view.capturesSystemKeys = hardwareKeyboardEnabled
+        view.capturesSystemKeys = hardwareKeyboardEnabled && !homePodGuest
         view.keySender = keySender
         view.control = control
+        view.screenScale = CGFloat(screenScale)
         view.clipboardSync = VPhoneClipboardSync(control: control)
         virtualMachineView = view
-        let container = VPhoneDisplayContainerView(displayView: view)
-        displayContainer = container
-
         let scale = CGFloat(screenScale)
-        let windowSize = NSSize(
+        let windowSize = homePodGuest ? VPhoneHomePodDisplayView.defaultContentSize : NSSize(
             width: CGFloat(screenWidth) / scale,
             height: CGFloat(screenHeight) / scale,
         )
         panelSize = windowSize
-        container.panelSize = windowSize
+        let container: NSView
+        if homePodGuest {
+            let cap = VPhoneHomePodDisplayView()
+            cap.onControlChange = { [weak self] event in
+                guard let control = self?.control else { return }
+                if event.down {
+                    guard control.isConnected else { return }
+                    control.sendHIDDown(page: 0x0C, usage: event.control.usage, longPress: event.longPress)
+                } else {
+                    control.sendHIDUp(page: 0x0C, usage: event.control.usage, minimumHold: event.minimumHold, longPress: event.longPress)
+                }
+            }
+            // Keep the diagnostic framebuffer attached for host automation,
+            // while the HomePod's visible output is its physical LED surface.
+            view.frame = NSRect(origin: .zero, size: windowSize)
+            view.isHidden = true
+            cap.addSubview(view, positioned: .below, relativeTo: nil)
+            homePodDisplayView = cap
+            displayContainer = nil
+            container = cap
+        } else {
+            let display = VPhoneDisplayContainerView(displayView: view)
+            display.panelSize = windowSize
+            displayContainer = display
+            homePodDisplayView = nil
+            container = display
+        }
 
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: windowSize),
@@ -79,9 +115,6 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         }
         window.setFrameAutosaveName(sceneName)
         observeKeyState(of: window)
-        // A frame saved while the guest was sideways is turned back: the guest
-        // boots in portrait, and the orientation poll turns it again if not.
-        applyOrientation(.portrait, to: window, force: true)
 
         // An empty unified toolbar gives the title bar its full height. The Home
         // button is a titlebar accessory rather than a toolbar item so that a
@@ -91,25 +124,37 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         toolbar.allowsDisplayModeCustomization = false
         window.toolbar = toolbar
         window.toolbarStyle = .unified
-        let homeAccessory = makeHomeAccessory()
-        window.addTitlebarAccessoryViewController(homeAccessory)
-        updateHomeButton(connected: false)
+        var trailingInset: CGFloat = 0
+        if !homePodGuest {
+            let homeAccessory = makeHomeAccessory()
+            window.addTitlebarAccessoryViewController(homeAccessory)
+            updateHomeButton(connected: false)
+            trailingInset = homeAccessory.view.frame.width
+        }
         pinWindowButtons(in: window)
-        installTitle(name, in: window, trailingInset: homeAccessory.view.frame.width)
+        installTitle(name, in: window, trailingInset: trailingInset)
 
         let controller = NSWindowController(window: window)
         controller.showWindow(nil)
         windowController = controller
+        // AppKit constrains the initial frame when showing it. Fit the panel
+        // after the toolbar and actual screen are known, including a wide TV
+        // panel whose saved frame may otherwise be clamped out of proportion.
+        // The guest starts unturned; the orientation poll follows it later.
+        if !homePodGuest { applyOrientation(.portrait, to: window, force: true) }
 
         keySender.window = window
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         placeWindowButtons()
-        window.makeFirstResponder(view)
-
-        let monitor = VPhoneTouchIDMonitor()
-        monitor.start(control: control, window: window)
-        touchIDMonitor = monitor
+        if let homePodDisplayView {
+            homePodDisplayView.focusControls()
+        } else {
+            window.makeFirstResponder(view)
+            let monitor = VPhoneTouchIDMonitor()
+            monitor.start(control: control, window: window)
+            touchIDMonitor = monitor
+        }
 
         // Poll vphoned status for the Home button and the subtitle
         timers.append(Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -123,14 +168,26 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
 
         // The menu sets the orientation before the guest turns, and the poll
         // after; either way the window follows it.
-        control.observeInterfaceOrientation { [weak self, weak window] orientation in
-            guard let self, let window else { return }
-            applyOrientation(orientation ?? .portrait, to: window)
+        if !homePodGuest {
+            control.observeInterfaceOrientation { [weak self, weak window] orientation in
+                guard let self, let window else { return }
+                applyOrientation(orientation ?? .portrait, to: window)
+            }
+            timers.append(Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.pollOrientation() }
+            })
         }
-        timers.append(Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.pollOrientation() }
-        })
         setFrameRateDisplay(VPhoneFrameRateDisplay.isEnabled)
+    }
+
+    // MARK: - HomePod Display
+
+    func updateHomePodDisplay(geometry: VPhoneHomePodDisplayGeometry, frame: VPhoneHomePodDisplayFrame) {
+        homePodDisplayView?.update(geometry: geometry, frame: frame)
+    }
+
+    func clearHomePodDisplay() {
+        homePodDisplayView?.clearDisplay()
     }
 
     // MARK: - Close
@@ -139,12 +196,14 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     /// same question as ⌘Q, with the window still up, instead of closing
     /// first. `closeForRestart` closes without asking.
     func windowShouldClose(_: NSWindow) -> Bool {
+        homePodDisplayView?.releaseControls()
         NSApp.terminate(nil)
         return false
     }
 
     /// Disconnect the old display and input devices before rebuilding the VM.
     func closeForRestart() {
+        clearHomePodDisplay()
         timers.forEach { $0.invalidate() }
         timers.removeAll()
         frameRateTimer?.invalidate()
@@ -160,6 +219,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         captureView?.clipboardSync = nil
         windowController?.close()
         windowController = nil
+        homePodDisplayView = nil
         VPhoneHostHotKeys.shared.resume()
     }
 
@@ -215,7 +275,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         let center = NotificationCenter.default
         keyStateObservers.append(center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
-                if self?.captureView?.hardwareKeyboardEnabled == true {
+                if self?.homePodGuest == false, self?.captureView?.hardwareKeyboardEnabled == true {
                     VPhoneHostHotKeys.shared.suspend()
                 }
             }
@@ -225,7 +285,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
                 MainActor.assumeIsolated { VPhoneHostHotKeys.shared.resume() }
             })
         }
-        if window.isKeyWindow, captureView?.hardwareKeyboardEnabled == true {
+        if window.isKeyWindow, !homePodGuest, captureView?.hardwareKeyboardEnabled == true {
             VPhoneHostHotKeys.shared.suspend()
         }
 
@@ -328,14 +388,15 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         ])
     }
 
-    /// `iOS <version> - <address>` from vphoned's health report, which picks
+    /// OS version and address from vphoned's health report, which picks
     /// the IPv4 address first and falls back to IPv6; hidden until it connects.
     private func updateSubtitle(control: VPhoneGuestControl) {
         guard let window = windowController?.window else { return }
         var parts: [String] = []
         if control.isConnected {
             if let version = control.guestIOSVersion, !version.isEmpty {
-                parts.append("iOS \(version)")
+                let osName = homePodGuest ? "HomePod" : homeButtonHoldsInGuest ? "tvOS" : "iOS"
+                parts.append("\(osName) \(version)")
             }
             if let address = control.guestIPAddress, !address.isEmpty {
                 parts.append(address)
@@ -359,7 +420,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         frameRateTimer?.invalidate()
         frameRateTimer = nil
         frameRate = nil
-        if enabled, VPhoneFrameRateMeter.isAvailable {
+        if enabled, !homePodGuest, VPhoneFrameRateMeter.isAvailable {
             _ = VPhoneFrameRateMeter.takeFrameCount()
             frameRateSampledAt = CACurrentMediaTime()
             frameRate = 0
@@ -415,7 +476,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     }()
 
     private func makeHomeAccessory() -> NSTitlebarAccessoryViewController {
-        let button = NSButton(image: Self.homeImage, target: self, action: #selector(homePressed))
+        let button = VPhoneHomeButton(image: Self.homeImage, target: self, action: #selector(homePressed))
         if #available(macOS 26.0, *) {
             button.bezelStyle = .glass
             button.borderShape = .circle
@@ -426,6 +487,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         button.toolTip = VPhoneLocalization.text("Home Button")
         button.translatesAutoresizingMaskIntoConstraints = false
         homeButton = button
+        applyHomeButtonHold()
 
         // A titlebar accessory takes its width from the view's frame, so the
         // container is sized explicitly; otherwise the button collapses to 0.
@@ -462,6 +524,38 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     // MARK: - Actions
 
     @objc private func homePressed() {
+        // A held button already sent its press and release.
+        guard !homeButtonHoldsInGuest else { return }
         control?.sendHIDPress(page: 0x0C, usage: 0x40)
+    }
+
+    private func applyHomeButtonHold() {
+        (homeButton as? VPhoneHomeButton)?.onHold = homeButtonHoldsInGuest
+            ? { [weak self] down in
+                if down {
+                    self?.control?.sendHIDDown(page: 0x0C, usage: 0x40)
+                } else {
+                    self?.control?.sendHIDUp(page: 0x0C, usage: 0x40)
+                }
+            }
+            : nil
+    }
+}
+
+// MARK: - Home Button
+
+/// Reports the press and the release around AppKit's tracking loop, which
+/// returns only when the mouse is released, inside the button or not.
+private final class VPhoneHomeButton: NSButton {
+    var onHold: ((Bool) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled, let onHold else {
+            super.mouseDown(with: event)
+            return
+        }
+        onHold(true)
+        super.mouseDown(with: event)
+        onHold(false)
     }
 }

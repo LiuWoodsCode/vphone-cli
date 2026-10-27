@@ -10,18 +10,27 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     /// Whether Esc replays the back gesture (an iPhone, which has no Esc key)
     /// or reaches the guest as Esc (an iPad). See `VPhoneApplication`.
     var escapeIsBackGesture = true
+    var isTVGuest = false
     var hardwareKeyboardEnabled = true
+    /// Guest pixels per interface point, to turn trackpad travel into the
+    /// guest's points for a native scroll.
+    var screenScale: CGFloat = 3
 
     /// Whether trackpad scroll/pinch gestures are replayed as guest touches.
     var trackpadGesturesEnabled = VPhoneTrackpadGestures.isEnabled {
         didSet {
             guard !trackpadGesturesEnabled else { return }
             finishScrollTouch()
+            endNativeScroll()
             endPinch()
         }
     }
 
     private var currentTouchSwipeAim: Int = 0
+    /// The touch in flight started at a screen edge and goes through vphoned,
+    /// which can mark it as an edge touch. Decided when the finger goes down and
+    /// kept until it lifts, so one touch never switches injection path.
+    private var edgeTouchViaGuest = false
     private var isDragHighlightVisible = false
 
     /// Synthetic guest finger driven by an in-flight trackpad scroll gesture.
@@ -41,6 +50,36 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     /// Center and half-gap of the two synthetic fingers used for pinch gestures.
     private var pinchTouchCenter: NSPoint?
     private var pinchTouchRadius: CGFloat = 0
+
+    /// A native scroll (`input.scroll`) is under way: `began` has gone out and
+    /// `ended` not yet.
+    private var nativeScrollActive = false
+    /// `ended` waiting to see whether AppKit's momentum follows the lift.
+    private var nativeScrollEndWork: DispatchWorkItem?
+    /// A click ended the scroll; the rest of its momentum is dropped until the
+    /// fingers start a new one.
+    private var nativeScrollMomentumDropped = false
+    /// The timestamp of the scroll's first momentum event, which the fade
+    /// counts from.
+    private var nativeScrollMomentumStart: TimeInterval?
+    private var pointerTrackingArea: NSTrackingArea?
+
+    /// How long after the fingers lift a scroll waits for AppKit's momentum
+    /// before it ends. Momentum starts on the next frame when it starts at all.
+    private static let nativeScrollMomentumWait: TimeInterval = 0.05
+    /// Half-life of the fade laid over AppKit's own deceleration. The guest
+    /// takes momentum as more travel of a scroll that is still open, so at
+    /// the content's edge the rubber band went on stretching for the second
+    /// or more AppKit's momentum lasts, and sprang back only after it.
+    private static let nativeScrollMomentumHalfLife: TimeInterval = 0.03
+    /// Faded momentum travel, in guest points per event, below which the
+    /// scroll ends and the rest of the momentum is dropped.
+    private static let nativeScrollMomentumStop: CGFloat = 3
+    /// How long a scroll from a wheel without gesture phases stays open after
+    /// its last event, as the web console does.
+    private static let nativeScrollIdleEnd: TimeInterval = 0.12
+    /// Points per line of a wheel that scrolls in lines (no precise deltas).
+    private static let nativeScrollLine: CGFloat = 16
 
     /// Guest points travelled per point of trackpad delta. Above 1 because a
     /// single trackpad swipe produces far less travel than a finger covers on a
@@ -73,6 +112,17 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     /// of where the pointer happens to sit.
     private static let scrollRebaseLandingInset: CGFloat = 0.12
     private static let minPinchRadius: CGFloat = 8
+
+    /// Where the finger a right click put down is, while it is down.
+    private var secondaryPressPoint: NSPoint?
+    /// Uptime at which that finger was pressed.
+    private var secondaryPressStart: TimeInterval = 0
+    /// Release waiting for the hold to register after the button came up.
+    private var secondaryReleaseWork: DispatchWorkItem?
+    /// How long a right click holds the finger down. Long enough for the
+    /// guest's touch-and-hold (about half a second) to fire, short of the
+    /// longer hold that starts Home Screen editing.
+    private static let secondaryClickHoldDuration: TimeInterval = 0.6
 
     // MARK: - Private API Accessors
 
@@ -111,14 +161,69 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
         registerForDraggedTypes([.fileURL])
     }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area = pointerTrackingArea {
+            removeTrackingArea(area)
+        }
+        // Always, not only in the key window: a VM window opened behind
+        // another app, or not yet clicked, should still show hover.
+        let area = NSTrackingArea(
+            rect: .zero, options: [.mouseMoved, .cursorUpdate, .activeAlways, .inVisibleRect], owner: self,
+        )
+        addTrackingArea(area)
+        pointerTrackingArea = area
+    }
+
+    /// On a guest that scrolls natively the guest has a pointer of its own;
+    /// it follows the mouse, so the guest sees hover as an iPad with a
+    /// trackpad does.
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        guard guestPointerFollowsMouse, let control else { return }
+        if hidesHostCursor {
+            Self.hiddenCursor.set()
+        }
+        control.movePointer(to: interfacePoint(convert(event.locationInWindow, from: nil)))
+    }
+
+    /// The guest's pointer stands in for the Mac's over the display, so the
+    /// Mac's is hidden there, as Universal Control hides it on the iPad.
+    override func cursorUpdate(with event: NSEvent) {
+        if hidesHostCursor {
+            Self.hiddenCursor.set()
+        } else {
+            super.cursorUpdate(with: event)
+        }
+    }
+
+    private var guestPointerFollowsMouse: Bool {
+        trackpadGesturesEnabled && control?.supportsPointerScroll == true
+    }
+
+    /// Only in the key window: over a window in the background the Mac's
+    /// cursor is the one the user is steering with.
+    private var hidesHostCursor: Bool {
+        guestPointerFollowsMouse && window?.isKeyWindow == true
+    }
+
+    /// A cursor with nothing to draw. `NSCursor.hide()` is counted and
+    /// app-wide, so it would have to be balanced on every way out of the view.
+    private static let hiddenCursor = NSCursor(image: NSImage(size: NSSize(width: 1, height: 1)), hotSpot: .zero)
+
     override func mouseDown(with event: NSEvent) {
         // Clicking the VM display should always restore keyboard focus.
         window?.makeFirstResponder(self)
-        // A synthetic trackpad finger would fight this touch for the same slot.
-        finishScrollTouch()
         let localPoint = convert(event.locationInWindow, from: nil)
-        currentTouchSwipeAim = hitTestEdge(at: localPoint)
-        if sendTouchEvent(phase: 0, localPoint: localPoint, timestamp: event.timestamp) {
+        if pressPointer(Self.primaryPointerButton, at: localPoint) {
+            return
+        }
+        // A click is a touch, and iPadOS hides its pointer under a finger: the
+        // Mac's shows where the drag is until the mouse moves freely again.
+        if guestPointerFollowsMouse {
+            NSCursor.arrow.set()
+        }
+        if beginTouch(at: localPoint, timestamp: event.timestamp) {
             return
         }
         super.mouseDown(with: event)
@@ -126,7 +231,7 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
 
     override func mouseDragged(with event: NSEvent) {
         let localPoint = convert(event.locationInWindow, from: nil)
-        if sendTouchEvent(phase: 1, localPoint: localPoint, timestamp: event.timestamp) {
+        if dragPointer(to: localPoint) || sendTouchEvent(phase: 1, localPoint: localPoint, timestamp: event.timestamp) {
             return
         }
         super.mouseDragged(with: event)
@@ -134,15 +239,163 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
 
     override func mouseUp(with event: NSEvent) {
         let localPoint = convert(event.locationInWindow, from: nil)
-        if !sendTouchEvent(phase: 3, localPoint: localPoint, timestamp: event.timestamp) {
+        if releasePointer(Self.primaryPointerButton, at: localPoint) {
+            if hidesHostCursor {
+                Self.hiddenCursor.set()
+            }
+            return
+        }
+        if !endTouch(at: localPoint, timestamp: event.timestamp) {
             super.mouseUp(with: event)
         }
-        currentTouchSwipeAim = 0
+        // Bring the guest's pointer back where the finger lifted.
+        if guestPointerFollowsMouse, let control {
+            if hidesHostCursor {
+                Self.hiddenCursor.set()
+            }
+            control.movePointer(to: interfacePoint(localPoint))
+        }
     }
 
-    override func rightMouseDown(with _: NSEvent) {
-        guard let keySender else { return }
-        keySender.sendHome()
+    // MARK: - Secondary Click
+
+    /// A right click is iPadOS's secondary click: the context menu under the
+    /// pointer. Where the guest's pointer follows the mouse it is that
+    /// pointer's secondary button. Elsewhere the guest has a touchscreen and
+    /// no pointer, so it is replayed as a touch-and-hold, which is what opens
+    /// the same menu by finger. A click released before the hold registers is
+    /// kept down until it has. Holding and dragging carries on as a drag, as a
+    /// finger would.
+    override func rightMouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        let localPoint = convert(event.locationInWindow, from: nil)
+        if pressPointer(Self.secondaryPointerButton, at: localPoint) {
+            return
+        }
+        finishScrollTouch()
+        releaseSecondaryPress()
+        // A hold is never an edge swipe, wherever it lands.
+        currentTouchSwipeAim = 0
+        guard sendTouchEvent(phase: 0, localPoint: localPoint, timestamp: event.timestamp) else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        secondaryPressPoint = localPoint
+        secondaryPressStart = ProcessInfo.processInfo.systemUptime
+    }
+
+    override func rightMouseDragged(with event: NSEvent) {
+        if dragPointer(to: convert(event.locationInWindow, from: nil)) {
+            return
+        }
+        guard secondaryPressPoint != nil, secondaryReleaseWork == nil else {
+            super.rightMouseDragged(with: event)
+            return
+        }
+        let localPoint = convert(event.locationInWindow, from: nil)
+        secondaryPressPoint = localPoint
+        sendTouchEvent(phase: 1, localPoint: localPoint, timestamp: event.timestamp)
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        if releasePointer(Self.secondaryPointerButton, at: convert(event.locationInWindow, from: nil)) {
+            return
+        }
+        guard secondaryPressPoint != nil, secondaryReleaseWork == nil else {
+            super.rightMouseUp(with: event)
+            return
+        }
+        secondaryPressPoint = convert(event.locationInWindow, from: nil)
+        let held = ProcessInfo.processInfo.systemUptime - secondaryPressStart
+        let remaining = Self.secondaryClickHoldDuration - held
+        guard remaining > 0 else {
+            releaseSecondaryPress()
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            self?.releaseSecondaryPress()
+        }
+        secondaryReleaseWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: work)
+    }
+
+    /// Lift the finger a right click put down. A new touch calls this first,
+    /// so it never shares the slot with a hold still waiting to finish.
+    private func releaseSecondaryPress() {
+        secondaryReleaseWork?.cancel()
+        secondaryReleaseWork = nil
+        guard let point = secondaryPressPoint else { return }
+        secondaryPressPoint = nil
+        sendTouchEvent(phase: 3, localPoint: point, timestamp: ProcessInfo.processInfo.systemUptime)
+    }
+
+    // MARK: - Pointer Clicks
+
+    private static let primaryPointerButton = 1
+    private static let secondaryPointerButton = 2
+
+    /// The buttons Mac clicks hold down on the guest's pointer.
+    private var pointerButtons = 0
+
+    /// On a guest whose pointer follows the mouse a click is that pointer's,
+    /// as on an iPad with a trackpad. A touch is the wrong input there: iPadOS
+    /// ignores a touch on an alert's button while the pointer hovers it, until
+    /// the pointer hides itself a few seconds after it last moved.
+    private var clicksWithGuestPointer: Bool {
+        guestPointerFollowsMouse && control?.supportsPointerButtons == true
+    }
+
+    /// Presses `button` on the guest's pointer at `localPoint`, ending any
+    /// scroll or touch first. False when a click is a touch on this guest.
+    private func pressPointer(_ button: Int, at localPoint: NSPoint) -> Bool {
+        guard clicksWithGuestPointer, let control else { return false }
+        finishScrollTouch()
+        if nativeScrollActive {
+            endNativeScroll()
+            nativeScrollMomentumDropped = true
+        }
+        releaseSecondaryPress()
+        pointerButtons |= button
+        control.setPointer(interfacePoint(localPoint), buttons: pointerButtons)
+        return true
+    }
+
+    /// Moves the guest's pointer with its buttons held. False when none is.
+    private func dragPointer(to localPoint: NSPoint) -> Bool {
+        guard pointerButtons != 0, let control else { return false }
+        control.setPointer(interfacePoint(localPoint), buttons: pointerButtons)
+        return true
+    }
+
+    /// Releases `button`. False when the guest's pointer is not holding it, so
+    /// a release whose press was a touch lifts the finger instead.
+    private func releasePointer(_ button: Int, at localPoint: NSPoint) -> Bool {
+        guard pointerButtons & button != 0, let control else { return false }
+        pointerButtons &= ~button
+        control.setPointer(interfacePoint(localPoint), buttons: pointerButtons)
+        return true
+    }
+
+    // MARK: - Touches
+
+    /// Puts a finger down at `localPoint`, after ending every other input that
+    /// would fight it for the same slot. False when there is no touch path.
+    @discardableResult
+    private func beginTouch(at localPoint: NSPoint, timestamp: TimeInterval) -> Bool {
+        finishScrollTouch()
+        if nativeScrollActive {
+            endNativeScroll()
+            nativeScrollMomentumDropped = true
+        }
+        releaseSecondaryPress()
+        currentTouchSwipeAim = hitTestEdge(at: localPoint)
+        return sendTouchEvent(phase: 0, localPoint: localPoint, timestamp: timestamp)
+    }
+
+    @discardableResult
+    private func endTouch(at localPoint: NSPoint, timestamp: TimeInterval) -> Bool {
+        defer { currentTouchSwipeAim = 0 }
+        return sendTouchEvent(phase: 3, localPoint: localPoint, timestamp: timestamp)
     }
 
     // MARK: - Trackpad Gestures
@@ -150,6 +403,10 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     /// Replay a trackpad scroll as a guest finger that presses under the pointer
     /// and follows the physical direction of the gesture.
     override func scrollWheel(with event: NSEvent) {
+        if trackpadGesturesEnabled, let control, control.supportsPointerScroll {
+            scrollNatively(event, control: control)
+            return
+        }
         guard trackpadGesturesEnabled, event.hasPreciseScrollingDeltas else {
             super.scrollWheel(with: event)
             return
@@ -197,6 +454,98 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
         }
     }
 
+    /// Scroll the guest the way an iPad with a trackpad scrolls: the view under
+    /// its pointer moves by the gesture's travel, and AppKit's momentum is sent
+    /// as more travel, since the guest does not decelerate after `ended`. The
+    /// momentum is faded, so a swipe runs on for a shorter way than in a Mac
+    /// app and the scroll ends soon after the fingers lift.
+    private func scrollNatively(_ event: NSEvent, control: VPhoneGuestControl) {
+        nativeScrollEndWork?.cancel()
+        nativeScrollEndWork = nil
+        let momentum = !event.momentumPhase.isEmpty
+        if momentum, nativeScrollMomentumDropped {
+            return
+        }
+        if event.phase == .began {
+            // A new gesture: whatever was still running on is over.
+            nativeScrollMomentumDropped = false
+            endNativeScroll()
+        }
+        var delta = nativeScrollDelta(of: event)
+        if momentum {
+            let start = nativeScrollMomentumStart ?? event.timestamp
+            nativeScrollMomentumStart = start
+            let fade = pow(0.5, (event.timestamp - start) / Self.nativeScrollMomentumHalfLife)
+            delta = CGVector(dx: delta.dx * fade, dy: delta.dy * fade)
+            if delta != .zero, hypot(delta.dx, delta.dy) < Self.nativeScrollMomentumStop {
+                endNativeScroll()
+                nativeScrollMomentumDropped = true
+                return
+            }
+        }
+        if !nativeScrollActive, delta != .zero {
+            nativeScrollActive = true
+            control.sendScroll(phase: "began", pointer: interfacePoint(convert(event.locationInWindow, from: nil)))
+        }
+        if nativeScrollActive, delta != .zero {
+            control.sendScroll(phase: "changed", delta: delta)
+        }
+        if momentum {
+            if event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled) {
+                endNativeScroll()
+            }
+        } else if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
+            scheduleNativeScrollEnd(after: Self.nativeScrollMomentumWait)
+        } else if event.phase.isEmpty {
+            // A wheel without gesture phases never says when it stops.
+            scheduleNativeScrollEnd(after: Self.nativeScrollIdleEnd)
+        }
+    }
+
+    private func scheduleNativeScrollEnd(after delay: TimeInterval) {
+        guard nativeScrollActive else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.endNativeScroll()
+        }
+        nativeScrollEndWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func endNativeScroll() {
+        nativeScrollEndWork?.cancel()
+        nativeScrollEndWork = nil
+        nativeScrollMomentumStart = nil
+        guard nativeScrollActive else { return }
+        nativeScrollActive = false
+        control?.sendScroll(phase: "ended")
+    }
+
+    /// The event's travel in guest interface points, with a browser wheel
+    /// event's signs (positive y toward the end of the content), which is the
+    /// opposite of AppKit's. Natural scrolling is already in both. The travel
+    /// is the window's, and the window shows the interface upright, so it
+    /// needs no turning; one window point is as many guest points as the drawn
+    /// display is smaller than the guest's.
+    private func nativeScrollDelta(of event: NSEvent) -> CGVector {
+        let unit = event.hasPreciseScrollingDeltas ? 1 : Self.nativeScrollLine
+        let geometry = displayGeometry
+        let pixels = recordingGraphicsDisplay?.sizeInPixels ?? .zero
+        var scale: CGFloat = 1
+        if pixels.width > 0, geometry.displayRect.width > 0, screenScale > 0 {
+            scale = pixels.width / screenScale / geometry.displayRect.width
+        }
+        return CGVector(dx: -event.scrollingDeltaX * unit * scale, dy: -event.scrollingDeltaY * unit * scale)
+    }
+
+    /// A view point as `input.pointer` takes it: 0...1 of the interface as the
+    /// window shows it, from the top-left corner.
+    private func interfacePoint(_ localPoint: NSPoint) -> CGPoint {
+        let panel = normalizeCoordinate(localPoint)
+        let unit = CGSize(width: 1, height: 1)
+        let screen = screenOrientation.screenPoint(fromPanel: CGPoint(x: panel.x, y: 1 - panel.y), panel: unit)
+        return CGPoint(x: min(max(screen.x, 0), 1), y: min(max(1 - screen.y, 0), 1))
+    }
+
     /// Replay a trackpad pinch as two guest fingers spreading or closing around
     /// the pointer position.
     override func magnify(with event: NSEvent) {
@@ -204,6 +553,8 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
             super.magnify(with: event)
             return
         }
+        // A native scroll and a pinch never overlap, like a synthetic drag and one.
+        endNativeScroll()
         // A synthetic drag owns the touch surface; ignoring the pinch keeps the
         // guest from seeing one- and two-finger touches interleaved.
         guard scrollTouchPoint == nil else { return }
@@ -240,7 +591,8 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
             }
             let carry = scrollPending
             scrollPending = .zero
-            beginScrollTouch(at: scrollStartPoint(for: pointer, travel: carry))
+            let start = scrollStartPoint(for: pointer, travel: carry)
+            beginScrollTouch(at: start.point, swipeAim: start.swipeAim)
             if scrollTouchPoint != nil {
                 moveScrollTouch(by: carry)
             }
@@ -292,20 +644,29 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     ///
     /// Up and the bottom strip are the window's, which is the interface's: on
     /// a sideways guest the Home indicator runs along a long side of the panel.
-    private func scrollStartPoint(for pointer: NSPoint, travel: CGPoint) -> NSPoint {
+    ///
+    /// The snapped touch is also marked as starting at the bottom edge
+    /// (`swipeAim`): the guest's edge-pan recognizers ignore a touch that
+    /// begins at the edge but does not carry the edge flags.
+    private func scrollStartPoint(for pointer: NSPoint, travel: CGPoint) -> (point: NSPoint, swipeAim: Int) {
         let orientation = screenOrientation
         let screenTravel = orientation.screenVector(fromPanel: travel)
         let screenPointer = orientation.screenPoint(fromPanel: pointer, panel: bounds.size)
         let screenHeight = orientation.displayedSize(panel: bounds.size).height
         guard screenTravel.y > abs(screenTravel.x),
               screenPointer.y <= screenHeight * Self.homeEdgeSnapFraction
-        else { return pointer }
-        return orientation.panelPoint(fromScreen: CGPoint(x: screenPointer.x, y: 0), panel: bounds.size)
+        else { return (pointer, 0) }
+        let point = orientation.panelPoint(fromScreen: CGPoint(x: screenPointer.x, y: 0), panel: bounds.size)
+        // The interface's bottom is a panel edge; on a sideways guest it is a
+        // long side of the panel, which is what the digitizer reports.
+        return (point, hitTestEdge(at: clampedTouchPoint(point)))
     }
 
     /// Press the synthetic finger down at `point`, so the drag starts where the
     /// user is pointing.
-    private func beginScrollTouch(at point: NSPoint) {
+    private func beginScrollTouch(at point: NSPoint, swipeAim: Int = 0) {
+        releaseSecondaryPress()
+        currentTouchSwipeAim = swipeAim
         let start = clampedTouchPoint(point)
         scrollTouchPoint = start
         scrollLastSend = 0
@@ -387,6 +748,8 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
             phase: 3, localPoint: clampedTouchPoint(current),
             timestamp: ProcessInfo.processInfo.systemUptime,
         )
+        // The re-press lands inside the window: an ordinary touch.
+        currentTouchSwipeAim = 0
     }
 
     private func hasScrollRebaseGapElapsed() -> Bool {
@@ -419,10 +782,12 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
             phase: 3, localPoint: point, allowOutside: true,
             timestamp: ProcessInfo.processInfo.systemUptime,
         )
+        currentTouchSwipeAim = 0
     }
 
     private func beginPinch(at center: NSPoint) {
         endPinch()
+        releaseSecondaryPress()
         pinchTouchCenter = clampedTouchPoint(center)
         pinchTouchRadius = Self.initialPinchRadius(in: bounds)
         sendPinchTouch(phase: 0)
@@ -581,22 +946,9 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
         ))
     }
 
-    /// Synthesize an NSEvent at a given window point.
-    private func synthesizeMouseEvent(type: NSEvent.EventType, at windowPoint: NSPoint) -> NSEvent? {
-        NSEvent.mouseEvent(
-            with: type,
-            location: windowPoint,
-            modifierFlags: [],
-            timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: window?.windowNumber ?? 0,
-            context: nil,
-            eventNumber: 0,
-            clickCount: type == .leftMouseUp ? 0 : 1,
-            pressure: type == .leftMouseUp ? 0.0 : 1.0,
-        )
-    }
-
     /// Inject a tap at pixel coordinates (matching screenshot image dimensions).
+    /// Always a touch, even where a Mac click is the guest pointer's: a tap
+    /// stands for a finger, and the pointer shows only once the mouse moves.
     func injectTap(pixelX: Double, pixelY: Double, screenWidth: Int, screenHeight: Int) {
         let localPoint = pixelToLocal(
             pixelX: pixelX,
@@ -604,20 +956,13 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
             screenWidth: screenWidth,
             screenHeight: screenHeight,
         )
-        let windowPoint = convert(localPoint, to: nil)
-
-        if let downEvent = synthesizeMouseEvent(type: .leftMouseDown, at: windowPoint) {
-            mouseDown(with: downEvent)
-        }
+        beginTouch(at: localPoint, timestamp: ProcessInfo.processInfo.systemUptime)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-            guard let self else { return }
-            if let upEvent = synthesizeMouseEvent(type: .leftMouseUp, at: windowPoint) {
-                mouseUp(with: upEvent)
-            }
+            self?.endTouch(at: localPoint, timestamp: ProcessInfo.processInfo.systemUptime)
         }
     }
 
-    /// Inject a swipe from one pixel coordinate to another.
+    /// Inject a swipe from one pixel coordinate to another, as a finger.
     func injectSwipe(
         fromX: Double,
         fromY: Double,
@@ -634,36 +979,25 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
             screenHeight: screenHeight,
         )
         let endLocal = pixelToLocal(pixelX: toX, pixelY: toY, screenWidth: screenWidth, screenHeight: screenHeight)
-        let startWindow = convert(startLocal, to: nil)
-        let endWindow = convert(endLocal, to: nil)
 
         let steps = max(10, durationMs / 16)
         let stepInterval = Double(durationMs) / Double(steps) / 1000.0
 
-        if let downEvent = synthesizeMouseEvent(type: .leftMouseDown, at: startWindow) {
-            mouseDown(with: downEvent)
-        }
+        beginTouch(at: startLocal, timestamp: ProcessInfo.processInfo.systemUptime)
 
         for i in 1 ... steps {
             let t = Double(i) / Double(steps)
-            let x = startWindow.x + (endWindow.x - startWindow.x) * t
-            let y = startWindow.y + (endWindow.y - startWindow.y) * t
-            let pt = NSPoint(x: x, y: y)
-            let delay = stepInterval * Double(i)
-
-            if i < steps {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                    guard let self else { return }
-                    if let dragEvent = synthesizeMouseEvent(type: .leftMouseDragged, at: pt) {
-                        mouseDragged(with: dragEvent)
-                    }
-                }
-            } else {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                    guard let self else { return }
-                    if let upEvent = synthesizeMouseEvent(type: .leftMouseUp, at: pt) {
-                        mouseUp(with: upEvent)
-                    }
+            let pt = NSPoint(
+                x: startLocal.x + (endLocal.x - startLocal.x) * t,
+                y: startLocal.y + (endLocal.y - startLocal.y) * t,
+            )
+            DispatchQueue.main.asyncAfter(deadline: .now() + stepInterval * Double(i)) { [weak self] in
+                guard let self else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                if i < steps {
+                    sendTouchEvent(phase: 1, localPoint: pt, timestamp: now)
+                } else {
+                    endTouch(at: pt, timestamp: now)
                 }
             }
         }
@@ -680,16 +1014,20 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     ///
     /// The touch starts a hair inside the left edge on purpose: the system only
     /// reads a drag as the back gesture when the touch *begins* in the
-    /// screen-edge zone. It goes through `injectSwipe`, which synthesises
-    /// ordinary mouse events, so the touch follows whichever injection path the
-    /// running base uses (vphoned on iOS 18, the native VZ multitouch path on
-    /// 26 and later).
+    /// screen-edge zone. It goes through `injectSwipe`, which is always a
+    /// touch, even where a Mac click is the guest pointer's, and follows
+    /// whichever injection path the running base uses (vphoned on iOS 18, the
+    /// native VZ multitouch path on 26 and later).
     /// True while a back swipe is in flight. A second press during one cannot
     /// stack another gesture on top of it, which is what made a double press
     /// look like nothing happened.
     private var backGestureInFlight = false
 
     func performBackGesture() {
+        if isTVGuest {
+            keySender?.sendTVBack()
+            return
+        }
         guard !backGestureInFlight, let display = recordingGraphicsDisplay else { return }
         let size = display.sizeInPixels
         guard size.width > 0, size.height > 0 else { return }
@@ -747,10 +1085,24 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
         guard !localPoints.isEmpty else { return false }
         let normalized = localPoints.map { normalizeCoordinate($0, allowOutside: allowOutside) }
 
+        // A single finger that starts at a screen edge goes through vphoned
+        // when the guest can flag it as an edge touch. The native path cannot:
+        // VZ forwards `swipeAim` to its USB touchscreen, whose HID report has
+        // no field for it, so UIKit's edge-pan recognizers (SpringBoard's home
+        // gesture) never begin. The choice is made on the down and kept until
+        // the lift.
+        if phase == 0 {
+            edgeTouchViaGuest = localPoints.count == 1 && swipeAim != 0
+                && control?.supportsEdgeTouch == true
+        }
+        defer {
+            if phase == 3 { edgeTouchViaGuest = false }
+        }
+
         // iOS 18 bases: the VZ USB touchscreen dext emits no digitizer events on
         // the 26.x kernel, so route touches through vphoned's guest-side HID
         // injection. 26.x bases fall through to the native VZ multitouch path.
-        if let control, control.useGuestTouchInjection {
+        if let control, control.useGuestTouchInjection || edgeTouchViaGuest {
             if normalized.count >= 2, control.supportsMultiTouch {
                 control.sendTouch2(
                     phase: phase,
@@ -758,8 +1110,22 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
                     x2: Double(normalized[1].x), y2: Double(normalized[1].y),
                 )
             } else {
+                var point = normalized[0]
+                // UIKit only accepts an edge touch that begins within a few
+                // points of the edge; the 32pt mouse zone rarely gets there.
+                // Start it on the edge, like a finger sliding in.
+                if phase == 0, control.supportsEdgeTouch {
+                    let inset: CGFloat = 0.001
+                    switch swipeAim {
+                    case VPhoneDisplayGeometry.Edge.top.rawValue: point.y = inset
+                    case VPhoneDisplayGeometry.Edge.bottom.rawValue: point.y = 1 - inset
+                    case VPhoneDisplayGeometry.Edge.right.rawValue: point.x = 1 - inset
+                    case VPhoneDisplayGeometry.Edge.left.rawValue: point.x = inset
+                    default: break
+                    }
+                }
                 control.sendTouch(
-                    phase: phase, x: Double(normalized[0].x), y: Double(normalized[0].y),
+                    phase: phase, x: Double(point.x), y: Double(point.y), edge: swipeAim,
                 )
             }
             return true

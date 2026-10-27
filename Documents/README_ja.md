@@ -4,6 +4,9 @@
 
 Apple Silicon Mac で仮想 iPhone を実行します。
 
+> [!WARNING]
+> 本プロジェクトは、暗号資産やトークンを発行したことも、その発行を許可したこともありません。また、暗号資産による支払いや寄付は受け付けていません。本プロジェクトの名をかたって発行・宣伝されるものや、本プロジェクトとの関係をうたう暗号資産・トークンは、すべて詐欺です。
+
 ![macOS 上で動作する仮想 iPhone](demo.jpeg)
 
 vphone-cli は Apple の Virtualization.framework と PCC 研究用仮想マシンを使って iOS を実行します。セキュリティ研究、リバースエンジニアリング、デバッグに適しています。
@@ -111,6 +114,24 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8765/v1/health
 
 token は起動のたびに新しく生成されます。token を固定するには、環境変数 `VPHONE_API_TOKEN` を設定してください。token のないリクエストと Web ページからのリクエストは、どちらも拒否されます。インターフェースの説明は [API ドキュメント](../Research/vphoned_http_api.md)をご覧ください。
 
+## ブート ROM
+
+新しく作成した仮想マシンは、Virtualization.framework に含まれるクローズドな ROM ではなく、2 つのオープンソース ROM から起動します。
+
+- [OpenAVB](https://github.com/owngoal-dev/OpenAVB) はブート ROM の AVPBooter の代わりです。パッチが不要なので、`fw patch` は変更しません。
+- [OpenSEP](https://github.com/owngoal-dev/OpenSEP) は SEP ブート ROM の AVPSEPBooter の代わりです。
+
+両方を使うと、iBoot と SEPOS より前に実行されるコードに Apple が書いたものはなくなります。どちらもビルド済みの状態で `VPhone.bundle` に含まれており、固定した上流のコミットからビルドされています。それぞれの説明（[OpenAVB](../VPhoneExecutable/VPhoneVirtualization/Resources/OpenAVB/README.md)、[OpenSEP](../VPhoneExecutable/VPhoneVirtualization/Resources/OpenSEP/README.md)）に、ソースからビルドし直してバイト単位で照合する方法があります。
+
+以前のバージョンで作成した仮想マシンは Apple の ROM のままです。どちらの ROM にも、システムを復元し直さずに切り替えられます。次回の起動から反映されます。
+
+```sh
+vphone-cli vm config myphone --rom openavb --seprom opensep   # オープンソース ROM
+vphone-cli vm config myphone --rom apple --seprom apple       # Apple の ROM
+```
+
+`vphone-cli vm info myphone` で仮想マシンが使っている ROM を確認できます。OpenAVB で起動する仮想マシンを復元するには、`VPhone.bundle` 2.10.1 以降が必要です。詳しくは研究記録の [OpenAVB](../Research/Firmware/openavb_boot_rom.md) と [OpenSEP](../Research/Firmware/opensep_sep_rom.md) をご覧ください。
+
 ## 問題が起きたら
 
 まず[トラブルシューティング](Guides/troubleshooting.md)をご覧ください。仮想マシン用プログラムがシステムに拒否される、復元に失敗する、「Press home to continue」で止まる、といった状況を扱っています。それでも解決しない場合は、[issue を送信](https://github.com/Lakr233/vphone-cli/issues)してください。
@@ -148,3 +169,4 @@ token は起動のたびに新しく生成されます。token を固定する�
 ## 謝辞
 
 - [wh1te4ever/super-tart-vphone-writeup](https://github.com/wh1te4ever/super-tart-vphone-writeup)
+- [owngoal-dev/OpenAVB](https://github.com/owngoal-dev/OpenAVB) と [owngoal-dev/OpenSEP](https://github.com/owngoal-dev/OpenSEP)：新しい仮想マシンが起動に使うブート ROM

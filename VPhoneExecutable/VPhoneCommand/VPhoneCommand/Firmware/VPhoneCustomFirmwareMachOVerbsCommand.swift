@@ -42,6 +42,32 @@ import VPhonePatchKit
 /// Where these verbs send patcher progress: stdout, like the Python.
 private let machOVerbLog: @Sendable (String) -> Void = { print($0) }
 
+struct VPhoneCustomFirmwarePatchArm64eX1Command: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "patch-arm64e-x1",
+        abstract: "Lower X1 instructions in a boot-critical executable",
+        discussion: "Supports dyld, launchd, fsck and mount. Later userland instructions are handled on demand. Re-attests modified code pages.",
+    )
+    @Argument(transform: URL.init(fileURLWithPath:)) var binary: URL
+    func run() throws {
+        try requireUntruncatedMachO(at: binary)
+        let identifier: String
+        switch binary.lastPathComponent {
+        case "dyld": identifier = FirmwareGuestSystemPatchSet.arm64eX1DyldBootstrap
+        case "launchd": identifier = FirmwareGuestSystemPatchSet.arm64eX1LaunchdBootstrap
+        case "fsck": identifier = FirmwareGuestSystemPatchSet.arm64eX1FsckBootstrap
+        case "mount": identifier = FirmwareGuestSystemPatchSet.arm64eX1MountBootstrap
+        default:
+            throw ValidationError("X1 static lowering is limited to the measured boot roots: dyld, launchd, fsck and mount")
+        }
+        try CustomFirmwareArm64eX1.patch(
+            fileAt: binary,
+            identifier: identifier,
+            log: machOVerbLog,
+        )
+    }
+}
+
 // MARK: - Truncation guard
 
 /// Refuse a file whose Mach-O header promises more than the file holds.
@@ -508,6 +534,39 @@ struct VPhoneCustomFirmwarePatchVirtualAudioCommand: ParsableCommand {
     }
 }
 
+// MARK: - patch-paravirt-gpu-index-offset
+
+struct VPhoneCustomFirmwarePatchParavirtGPUIndexOffsetCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "patch-paravirt-gpu-index-offset",
+        abstract: "Send every indexed draw from the paravirtual GPU driver with 64-bit offsets",
+        discussion: """
+        The cloudOS 26.4 AppleParavirtGPUMetalIOGPUFamily picks a compact
+        drawIndexedPrimitives command when indexBufferOffset fits in 16 bits,
+        then stores the index buffer's heap offset plus indexBufferOffset in
+        that 16-bit field. An index buffer 64 KiB or more into an MTLHeap is
+        read from the wrong address, and meshes draw with another mesh's
+        indices. Each selecting cbz/cbnz becomes a b to the full command.
+
+        Each site is found by the compact command's mov w2/mov w3 setup, which
+        is unique in __text, and the branch must lead to the full command's
+        setup. Nothing is written unless all four resolve.
+
+        Idempotent: a site already branching to the full command is reported
+        and the file is not rewritten.
+        """,
+    )
+
+    @Argument(help: "Path to the AppleParavirtGPUMetalIOGPUFamily Mach-O, patched in place", transform: URL.init(fileURLWithPath:))
+    var binary: URL
+
+    func run() throws {
+        try requireUntruncatedMachO(at: binary)
+        // No re-attestation: the caller re-signs.
+        try CustomFirmwareParavirtGPUIndexOffset.patch(fileAt: binary, log: machOVerbLog)
+    }
+}
+
 enum VPhoneCustomFirmwareMachOVerbs {
     /// Registered into `vphone-cli cfw` by `VPhoneCustomFirmwareCommand`.
     ///
@@ -515,16 +574,19 @@ enum VPhoneCustomFirmwareMachOVerbs {
     /// Python's usage block read in the same order.
     static var all: [ParsableCommand.Type] {
         [
+            VPhoneCustomFirmwarePatchSettingsRootRowsCommand.self,
             VPhoneCustomFirmwarePatchSeputilCommand.self,
             VPhoneCustomFirmwarePatchLaunchdCacheLoaderCommand.self,
             VPhoneCustomFirmwarePatchMobileactivationdCommand.self,
             VPhoneCustomFirmwarePatchLaunchdJetsamCommand.self,
+            VPhoneCustomFirmwarePatchArm64eX1Command.self,
             VPhoneCustomFirmwarePatchWatchdogdCommand.self,
             VPhoneCustomFirmwarePatchDiskimagesiodCommand.self,
             VPhoneCustomFirmwarePatchVirtualAudioCommand.self,
             VPhoneCustomFirmwarePatchVirtualAudioMuteCommand.self,
             VPhoneCustomFirmwarePatchVirtualAudioSPGateCommand.self,
             VPhoneCustomFirmwarePatchVirtualAudioVolumeGateCommand.self,
+            VPhoneCustomFirmwarePatchParavirtGPUIndexOffsetCommand.self,
         ]
     }
 }

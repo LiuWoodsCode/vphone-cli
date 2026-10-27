@@ -3,12 +3,14 @@
 // Historical note: derived from the legacy Python firmware patcher during the Swift migration.
 //
 // Strategy:
-//   1. Parse the flat device tree binary into a node/property tree.
+//   1. Parse the flat device tree binary into a node/property tree, and
+//      convert a research board tree into vphone600 (DeviceTreeResearchBoardConversion.swift).
 //   2. Apply a fixed set of property patches (serial-number, home-button-type,
 //      artwork-device-subtype, island-notch-location).
 //   3. Serialize the modified tree back to flat binary.
 
 import Foundation
+import Img4tool
 import VPhoneCoreKit
 import VPhonePatchKit
 
@@ -19,6 +21,11 @@ public final class DeviceTreePatcher: BufferedPatcher {
 
     /// Which patches the resolved preset turned on. Unrestricted by default.
     public var gate: VPhonePatchGate = .unrestricted
+
+    /// Whether a research board tree is converted into vphone600 first. Off when
+    /// the preset leaves out `FirmwareResearchBoardPatchSet`, whose patch would
+    /// otherwise be declared by nothing and apply regardless.
+    public var convertsResearchBoard = true
 
     /// Whether to apply the 8 identity-rewrite property patches (Tier 1b + 1c)
     /// that flip device identity towards iPhone17,3 / D47AP. Enabled for
@@ -115,6 +122,40 @@ public final class DeviceTreePatcher: BufferedPatcher {
 
     public var patchedData: Data {
         rebuiltData ?? buffer.data
+    }
+
+    /// Extract the donor board's MiniDisplay geometry without grafting its
+    /// physical dock-channel hardware into the VM's virtual device tree.
+    /// Both the retained IM4P and an already-decoded flat payload are accepted.
+    public static func homePodDisplayProperties(from data: Data) throws -> [String: Data] {
+        let payload: Data
+        if let im4p = try? IM4P(data) {
+            guard im4p.fourcc == "dtre", !im4p.isEncrypted else {
+                throw PatcherError.invalidFormat("HomePod display: expected an unencrypted dtre IM4P")
+            }
+            payload = try im4p.payload()
+        } else {
+            payload = data
+        }
+        let parser = DeviceTreePatcher(data: payload, verbose: false)
+        let root = try parser.parsePayload(payload)
+        let display = try parser.resolveNode(root, path: [
+            "device-tree", "arm-io", "dockchannel-rtp", "rtp-transport", "display",
+        ])
+        let names = ["MDXCoords", "MDYCoords", "MDRingCoords", "MDBitDepth", "MDHWVersion"]
+        var properties: [String: Data] = [:]
+        for name in names {
+            let matches = display.properties.filter { $0.name == name }
+            guard matches.count == 1, let property = matches.first, property.flags == 0 else {
+                throw PatcherError.invalidFormat("HomePod display: missing, duplicate or unresolved \(name)")
+            }
+            properties[name] = property.value
+        }
+        let geometry = try VPhoneHomePodDisplayGeometry(deviceTreeProperties: properties)
+        guard geometry.bitDepth == 12, geometry.hardwareVersion == 3 else {
+            throw PatcherError.invalidFormat("HomePod display: unsupported MiniDisplay bit depth or hardware version")
+        }
+        return properties
     }
 
     // MARK: - Parsing
@@ -321,6 +362,10 @@ public final class DeviceTreePatcher: BufferedPatcher {
     /// other variants leave the device's identity properties untouched.
     /// `/product/haptics` is removed from every tree, whatever the variant.
     private func applyPatches(root: DTNode) throws {
+        // Before everything else, whatever the selection: every patch below is
+        // written against vphone600 paths and values.
+        try applyResearchBoardConversion(root: root)
+
         var patchesToApply = Self.basePropertyPatches
         if includeIdentityPatches {
             patchesToApply.append(contentsOf: Self.identityPropertyPatches)
@@ -331,6 +376,26 @@ public final class DeviceTreePatcher: BufferedPatcher {
         let presentsGuest = device.presentsBoard && role == .installed
         if presentsGuest {
             patchesToApply.removeAll { !Self.deviceNeutralPatches.contains($0.patchID) }
+        }
+        // An XS-family userland has its own artwork and no Dynamic Island: the
+        // artwork patch writes its subtype, and the island patch removes the
+        // property instead of setting it.
+        if let subtype = device.notchedArtworkSubtype {
+            patchesToApply = patchesToApply.compactMap { patch in
+                switch patch.patchID {
+                case Self.islandNotchLocationPatch:
+                    return nil
+                case "devicetree-cfw-artwork_device_subtype":
+                    return PropertyPatch(
+                        nodePath: patch.nodePath, property: patch.property, length: patch.length, flags: patch.flags,
+                        value: .integer(UInt64(subtype)), patchID: patch.patchID,
+                        description: "Set artwork device subtype to \(subtype) (\(device.productName))",
+                    )
+                default:
+                    return patch
+                }
+            }
+            try removeIslandNotchLocation(root: root)
         }
         for patch in patchesToApply {
             // Before the property is rewritten, not after: the tree is serialised
@@ -393,6 +458,8 @@ public final class DeviceTreePatcher: BufferedPatcher {
         if presentsGuest {
             try applyGuestEdits(root: root)
         }
+        // After the board edits, which remove a placeholder the board has too.
+        applyWatchCompanion(root: root)
 
         // Every guest, every tree: no VM has the haptics the node promises.
         applyHapticsRemoval(root: root)

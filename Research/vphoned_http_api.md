@@ -7,7 +7,9 @@ upgrade at `/v1/events` uses the same port. `vphone-vm` can expose that byte
 stream on a host TCP address. After it admits a connection's first request
 head with the API token (see [Access control](#access-control)), it opens one
 VSOCK connection for that TCP connection and forwards bytes in both
-directions; it does not translate HTTP or WebSocket messages. The host
+directions; it does not translate HTTP or WebSocket messages. The one
+exception is `GET /v1/host/screen`, which `vphone-vm` answers itself (see
+[Host screen](#host-screen)). The host
 listener is absent unless boot receives `--api-listen host:port`. Port `0`
 asks the OS for an available host port and the actual address is printed
 after the VM starts. The API is also usable from guest and host code that
@@ -79,17 +81,36 @@ command-line executable remains unentitled and still launches `vphone-vm`.
 The guest links IcliKit directly. App registration refresh is available through
 `POST /v1/apps/refresh` or the WebSocket method `apps.refresh`. An optional
 `directory` selects a bundle directory; omitted, it uses `/Applications` under
-the bootstrap vphoned installed (vphoned runs from the system volume, so
-IcliKit cannot find the bootstrap itself). `system.uicache` is the same call.
+the bootstrap vphoned installed (vphoned runs from the system volume, and
+knows which install it completed). `system.uicache` is the same call.
 IcliKit verifies registrations by reading them back; a bundle it could not
-register or verify is named in the error message.
+register or verify is named in the error message. Since icli 0.7.17 a
+registration builds the record uicache builds (entitlements, containerization,
+data and group containers, plug-ins), a refresh registers again any app whose
+record differs from it and leaves a matching one running, and Apple's apps and
+other installers' apps are listed under `skipped`. `apps.register` refuses
+those apps.
+Since icli 0.8.0 a `PlugIns` entry that is not an app extension (a
+`.bundle`, a `.framework`, or an `.appex` without `NSExtension`) no longer
+stalls `apps.register` or `apps.refresh` and fails them with "did not record
+the plug-ins"; a `refresh_incomplete` message names the app and the field.
+Since icli 0.8.4 a refresh lists apps from LaunchServices' application
+records and reads a registration only for the apps it plans to change: one
+with nothing to do took 0.03 s on an iOS 26.6.2 guest, 0.53 s before.
 `screen.screenshot` uses IcliKit's native screen capture and returns a base64
 JPEG with `mime_type`, `width`, and `height`; the current VM produces 1290×2796.
 The host's Save/Copy Screenshot menu decodes this guest image. It omits the
 notch and cutout drawn by the host VM window.
+Since icli 0.8.4 a native-resolution screenshot taken while SpringBoard is
+not running (the boot logo, the respring spinner) is captured through the
+render server at its real size; UIKit's capture came out magnified by the
+screen scale.
 `apps.install` accepts IPA and TIPA archives. IcliKit 0.6.8 validates and
 extracts the archive, then calls vphone's signer on the temporary app bundle
 before IcliKit copies it into a container, registers it, and owns rollback.
+Since icli 0.7.18 an archive may expand to 8 GiB, in one entry or in all,
+across up to 400,000 entries; a larger one is refused with the size it
+expands to.
 `apps.uninstall` delegates removal to IcliKit and requires `force=true`.
 `POST /v1/bootstrap/install` (or RPC method `bootstrap.install`) accepts
 `{"layout":"rootless"}` or `{"layout":"roothide"}` and installs the latest
@@ -120,15 +141,29 @@ menu item retains the verified latest-release download.
 Rootless uses `/var/jb`. RootHide reuses the sole valid `.jbroot-<16 hex>` under
 `/var/containers/Bundle/Application`, or creates
 `.jbroot-000114514191980C` when none exists. The selected stem is zero padded
-and its final byte carries RootHide's XOR checksum. Missing bootstrap directories are created.
+and its final byte carries RootHide's XOR checksum. Missing bootstrap directories are created,
+an empty `Applications` among them, which the package watcher's app refresh reads.
+A guest whose vphoned dyld runs as tvOS (`vphoned-tvos`: every Apple TV and
+HomePod guest) has one layout, `roothide`, and one package, Irisin's
+`appletvos-arm64e`; `rootless` is refused before anything is created
+(`GuestBootstrapPlatform`). That package carries no app, so vphoned checks its
+daemon, helper and plist, makes no data directory, registers nothing
+(`registration` and `app_path` are null) and loads the daemon as on iOS. The
+Apple TV HD's plain-arm64 userland takes the same package: Irisin's tvOS
+binaries are arm64.
 It selects the matching architecture, verifies the release
 asset's GitHub SHA-256 digest and Debian control fields, then uses IcliKit to
 extract the `.deb` into a temporary directory. It copies the full payload
 into the bootstrap, creates Irisin's mobile-owned data directory, registers
-the app with IcliKit, and loads the daemon through IcliKit. mobile owns
-`/var/mobile/Documents`, so vphoned opens it and `wiki.qaq.irisin` without
-following a symlink. It refuses an entry that is not a real directory and sets
-the owner and mode through the directory descriptor. It also attempts
+the app with IcliKit, and loads the daemon through IcliKit. The data directory
+is `Documents/wiki.qaq.irisin` in the app's home: the system's `/var/mobile`
+on rootless, the jbroot's `var/mobile` on RootHide, where an uncontained
+bootstrap app gets that as HOME (`CFFIXED_USER_HOME`) and dpkg puts package
+data. mobile owns the home and `Documents`, so vphoned opens each level
+relative to its parent without following a symlink, creates a missing level
+owned by mobile (a missing jbroot `var` root-owned), refuses an entry that is
+not a real directory, and sets the owner and mode through the directory
+descriptor. It also attempts
 to start the daemon; a launchd start error is returned as
 `service_start_warning` while the installed bootstrap remains available.
 On the iOS 26.6.2 RootHide test VM, launchd returned service-configure status
@@ -154,6 +189,11 @@ The launchd and SystemHook spawn bridges also create a missing `.jbroot`
 beside a bootstrap executable and its in-root dependencies just before it
 starts, when the spawning process may write there. See
 `Research/roothide_loader_links.md`.
+In either layout, the same `Library/dpkg` change, and vphoned's start, also
+refresh the bootstrap's `/Applications` as `apps.refresh` does. A package's
+postinst and uikittools' trigger run `uicache`, which cannot register an app on
+iOS 27, so an app installed by Irisin, apt or dpkg otherwise stays unregistered
+until `apps.refresh` is called.
 `POST /v1/bootstrap/firmware` (RPC `bootstrap.firmware`)
 repairs the record for a bootstrap already identified by the completion marker
 without running another install. The reply includes the tag,
@@ -191,6 +231,52 @@ installed record remains so the operation can be retried. Irisin's mobile
 Documents data outside the bootstrap is retained. Apps > Uninstall Bootstrap…
 shows every path in a destructive confirmation alert before sending the request.
 
+## Host screen
+
+`GET /v1/host/screen` on the host proxy is a WebSocket that `vphone-vm`
+serves itself; it never reaches vphoned. It is admitted with the same token
+as every other request, and a `vphone-token.<token>` subprotocol is selected
+in the 101 reply as vphoned does. A plain GET gets `426 Upgrade Required`.
+
+Frames come from the VM display that Virtualization keeps for its window
+(`_takeScreenshotWithCompletionHandler:`), with or without a window, so the
+guest does no work for them: no screenshot, no JPEG, no base64. The guest is
+asked only for `display.orientation`, at most once a second while a client is
+connected; the first frame waits up to 0.5 s for that answer. `vphone-vm`
+turns the frame upright, fits it into the requested box (the screen helper's
+own rule: no enlarging, short side at least 240, even sides) and encodes it
+with the hardware encoder in its own process: real time, low-latency rate
+control, no frame reordering, key frames only on request, Display P3
+primaries with the sRGB transfer and the BT.709 matrix in video range.
+
+The client pulls one frame per text message:
+
+```json
+{"id":7,"codec":"hevc","box":[1280,1280],"fps":60,"bitrate":4000000,"key":false}
+```
+
+`codec` is `hevc` or `h264`; `box` is 1 to 8192 on each side, `fps` 1 to
+240, `bitrate` 1 to 100 000 000. Each request gets one binary answer, in the
+order the requests came: a 4-byte little-endian header length, the JSON
+header, then the payload. The header always has `id` and then either
+`error` (`{code, message}`, no payload) or `status`:
+
+| `status` | Payload | Meaning |
+| --- | --- | --- |
+| `frame` | one access unit, 4-byte length-prefixed NAL units, no parameter sets | `key`, and on a key frame `record`: the `hvcC` / `avcC`, base64 |
+| `unchanged` | none | every pixel is what the last frame encoded showed, and no key frame was asked for |
+| `dropped` | none | the rate controller skipped the frame |
+
+Every header with a `status` also has `session` (it changes with the codec,
+the output size or the orientation, and the first frame of a session is a
+key frame), `width` and `height` (the encoded size), `sourceWidth`,
+`sourceHeight` and `scale` (the upright display in pixels and its pixels per
+interface point, the VM's screen scale), and `captureUs` and `encodeUs`.
+Each connection has its own encoder; a new connection starts at session 1.
+Error codes: `bad_request`, `codec_unavailable` (no hardware encoder for that
+codec or size), `display_unavailable`, `encoder_failed` (the next request
+starts a new session) and `too_many_requests` (more than 16 waiting).
+
 ## HTTP and WebSocket contract
 
 JSON resource routes cover device state, apps, input, location, Developer Mode, low power
@@ -205,8 +291,14 @@ into memory.
 `jailbreak.source`. The layout is `roothide`, `rootless`, or `rootful` when
 detected. If there is no bootstrap and `/` is read-only, both `layout` and
 `jbroot` are JSON `null`; `/` alone is not evidence of a rootful bootstrap.
-The daemon checks a loaded RootHide `systemhook.dylib` export and `/var/jb`
-at request time so a bootstrap created after daemon startup can be reported.
+The daemon first reports the bootstrap it installed itself, from its
+completion record (`source` is `vphoned bootstrap`). The later probes look
+for a jailbreak's own traces, and a RootHide root vphoned made has none: a
+system-installed vphoned has no `.jbroot` link or libroot library beside it,
+and vphone's SystemHook exports no `get_jbroot`. It then checks a loaded
+RootHide `systemhook.dylib` export, icli's own detection and `/var/jb`. All
+of this runs at request time so a bootstrap created after daemon startup can
+be reported.
 
 For raw guest TCP ports, upgrade `GET /v1/ports/<port>` to WebSocket. Each
 binary WebSocket message carries an unmodified chunk of the TCP byte stream
@@ -222,11 +314,133 @@ WebSocket fragmentation is reassembled before forwarding. On disconnect, the
 guest tunnel and the host TCP-to-VSOCK proxy let their final queued write
 finish before closing the opposite socket, with a five-second drain limit.
 
+## Scripting sessions
+
+A guest has no shell, and the `tvos` preset has neither debugserver nor any
+Frida patch, so a script run with vphoned's own identity is the only way to
+reach what the guest keeps to itself. The engine is IcliKit's probe (icli
+0.10.0): its JavaScriptCore context, ObjC reflection bridge and REPL, run
+inside the session process. vphoned adds only what icli leaves to the process
+hosting the probe: `api()` answers with this catalog, and `proc.run` runs a
+program. IcliKit opens JavaScriptCore at run time instead of linking it,
+because iOS and tvOS ship it and watchOS does not, and vphoned reports
+`script_js` in `capabilities` only where it can be loaded. `shell` is reported
+everywhere, because the interactive route also runs a program from the
+bootstrap.
+
+Every session is a process of its own, spawned from vphoned's own executable
+(`--session`), so it carries the same signature and entitlements as the
+daemon and nothing else. A script that crashes, over-releases an object or
+never returns ends its own session and no more: the worker keeps serving, and
+`processes.list` shows nothing left behind. Each session leads its own
+process group, so a program a script started dies with it rather than
+outliving it as an orphan. None of the worker's startup has run in a session,
+which is the one thing a script cannot work around: methods that depend on
+state the worker set up at startup, such as the virtual camera or the
+preloaded HID symbols, are not available through a session's `api()`.
+
+`POST /v1/rpc` with `script.eval` takes `{source, timeout?}` and answers
+`{ok, result, output, crashed}`, or `{ok: false, error, output, crashed}`. A
+script that throws is an answer rather than a failed request, so its output
+comes back either way; `result` is the value described as text and `output`
+is everything the script printed. `timeout` defaults to 30 seconds and is
+clamped to 1 through 600; a script that outruns it is killed with its group
+and the request fails. `crashed` is true when the session died before it
+could answer, and `error` then names the signal. `script.info` reports
+`available`, `engine`, the globals below, and which of `bash`, `sh` and `zsh`
+this guest's bootstrap actually has.
+
+For an interactive session, upgrade `GET /v1/shell` to WebSocket. Admission
+is the same as `/v1/events`: no `Origin`, a loopback `Host`, and the host
+proxy's token in front of it. `program` selects what runs — unset or `repl`
+for the probe's REPL (prompt `probe>`), a bare name resolved from the bootstrap's
+`bin`, `usr/bin` and `usr/local/bin`, or an absolute path. `cols` and `rows`
+set the initial terminal size. Each binary frame is a chunk of the terminal's
+byte stream in either direction, so `^C` is simply byte 3 and the terminal
+driver turns it into a signal. Text frames from the client are control
+messages, `{"resize": [columns, rows]}` and `{"signal": "INT"}`; the server
+sends one text frame last, `{"exit": status}` or `{"signal": number}`, and a
+session that could not be opened at all sends `{"error": message}` and closes
+with 1011. The session is a session leader with the terminal as its
+controlling one, claimed by the child rather than by `posix_spawn`'s file
+actions so the order never depends on the kernel's. Closing the WebSocket
+hangs the terminal up, and a session still running three seconds later is
+killed with its group. Output is written one frame at a time and the next
+read waits for it, so a client that cannot keep up slows the session down
+instead of filling the worker's memory.
+
+Two things on the Mac open this route rather than asking a client to speak
+WebSocket itself. The VM window has **Diagnostics ▸ Debug Session** (⌥⌘T), a
+terminal view on a session of its own, closed with the window. And
+`{"t":"shell"}` on the machine's `vphone.sock` hands that connection to the
+terminal. The end of that client's input reaches the terminal as a `^D`
+rather than hanging it up, because `nc` and pipes shut their sending half as
+soon as their input runs out, so a pipe into `nc -U` runs as a script and
+still gets the session's last output; only a client gone altogether hangs the
+terminal up. See `Skills/vphone-guest-control/references/guest-socket.md`.
+Both go through the
+VM process's own VSOCK connection, so neither needs `--api-listen` or a token.
+
+A guest runs at most 8 interactive sessions and 16 scripts at once. Each one
+is a process, and a script holds its place in the concurrent queue the rest
+of the API shares for as long as its timeout allows, so the request past
+either limit is refused outright — `{"error": …}` and close 1011 for
+`/v1/shell`, `operation_failed` for `script.eval` — rather than answered
+slowly with everything else queued behind it.
+
+The session's globals are `ObjC`, `api`, `fs`, `proc`, `console`, `print`
+and `sleep`. `ObjC.use('NSProcessInfo')` and
+`ObjC.classes.NSProcessInfo` both give a class, and methods are called by
+name: an underscore stands for a colon (`setValue_forKey_(v, k)`), a bare
+name takes one colon per argument, and a name written with colons is used as
+it stands (`obj['setValue:forKey:'](v, k)`). Dispatch is `NSInvocation` over
+the method signature the runtime reports, so every method it can describe can
+be called and an `NSException` arrives as a JavaScript error rather than a
+crash. A string, a number and a date come back as themselves; everything
+else, collections included, stays an object, because converting an `NSArray`
+would hand back a copy of something a script asked for in order to mutate.
+`$value` converts one when that is what was wanted, `$class` names the class
+and `$isClass` says whether it is one. A JavaScript array or object passed
+where an object is expected is converted on the way in. Three things are
+deliberately not supported: struct arguments and returns, which would need
+the encoding's layout read out (`frame`, `bounds` and `operatingSystemVersion`
+raise a refusal that names the type), pointer arguments other than null, and
+variadic methods, which the runtime cannot describe. An `alloc` comes back as
+an object and never as a value, because an allocated `NSString` is a
+placeholder that raises on anything but an initializer.
+
+`api(method, params)` runs any method in this catalog in the session's own
+process and returns its result, raising `code: message` if it fails. `fs.ls`,
+`fs.read`, `fs.write` and `fs.stat` are the root-privileged file operations,
+`proc.run(path, args, input)` runs one program and collects
+`{status, signal, stdout, stderr}`, and `console.log` and `print` write to
+the terminal, or into `output` for `script.eval`. `proc.run` is vphoned's,
+not icli's: the probe launches nothing itself, so the session defines `proc`
+over `api('proc.run', {path, args, input})`, which only a session answers.
+There is no `exit()`; `.exit` leaves the REPL. In the REPL, `^C` abandons a
+half-finished statement while a line is being read; while a statement runs,
+it ends the session, which the WebSocket reports as `{"signal": 2}`.
+
+This opens no privilege the API did not already have: the same connection can
+already write any file as root and load a launch daemon. What it does change
+is how directly that privilege is reached, so the host proxy's token and the
+loopback checks are the whole of the protection, exactly as for every other
+method. Nothing in the daemon's entitlements is granted per session; a
+session is vphoned. The daemon does carry `dynamic-codesigning` so that
+JavaScriptCore can use its JIT, and JSC falls back to its interpreter by
+itself where that is refused, so a guest whose AMFI declines it still runs
+scripts, more slowly.
+
 `apps.launch` returns a PID and `frontmost_verified`. IcliKit 0.6.8 checks
 RunningBoard's live focal assertion and accepts it only when one real app owns
 it. iOS 26.6.2 uses `SuspendableRole-UIFocal`; older systems may use
 `Workspace-ForegroundFocal`. The Home screen's widget renderer can also hold
-`UIFocal`, so the Kit excludes it. `apps.foreground` reports the Kit's
+`UIFocal`, so the Kit excludes it. Since icli 0.8.5 it also leaves out every
+app tagged hidden (`SBAppTags`), view services SpringBoard hosts in its own
+interface such as the iPad Dock's folder stack, which made the Home screen
+report `com.apple.DocumentManager.DockFolderViewService`; when several apps
+hold the assertion, as with windows side by side in iOS 27, the one with the
+`ForegroundFocal` jetsam priority wins. `apps.foreground` reports the Kit's
 `verified` and `source` values. If no unique focal app can be confirmed,
 a newly started process is reported with `frontmost_verified=false` and a
 warning. A failed start or an already running app without foreground
@@ -248,9 +462,19 @@ the same response shape; requests may complete out of order, so clients
 correlate them by `id`. The socket also sends
 `{ "type": "event", "event": "...", "data": { ... } }`. The initial event is
 `connected`; changes to screen, frontmost app, or low power mode emit
-`device.state`, and completed operations emit `operation.completed`. Ping frames
+`device.state` (vphoned checks them every three seconds while an event socket
+is open, and not at all otherwise), and completed operations emit
+`operation.completed`. Ping frames
 receive pong frames. JSON WebSocket frames are limited to 1 MiB after
 fragment reassembly.
+
+A command that fails can add fields to the error object (`command_failed`
+from `apps.remove_system` carries `results`; `apfs.snapshot.delete` carries
+`reason`, `errno` and `retryable`). The machine's `vphone.sock` passes them on:
+its `rpc` verb answers `{"ok":true,"result":{…}}`, or `{"ok":false,
+"error":"<message>","guest_error":{…}}` with vphoned's error object
+unchanged in `guest_error`; `error` stays the message string. `vphone-launchpad-cli
+guest rpc` prints that object as JSON on the last stderr line.
 
 SwiftNIO handles parsing, upgrade, masking, and backpressure. IcliKit 0.7.0
 owns general device operations. Each HTTP or WebSocket request runs independently
@@ -290,25 +514,56 @@ request carries `"force": true`.
 
 | Area | Methods |
 | --- | --- |
-| Device | `device.snapshot`, `device.info` (snapshot plus network, screen, rotation, brightness, volume, low power, Developer Mode, agent), `device.screen`, `device.network`, `device.ioreg {plane}`, `device.environment`, `device.basebin {archive?}` |
-| Display, audio | `display.brightness {value?}`, `display.rotation {orientation?}`, `display.orientation` (`{degrees, source}`: SpringBoard's interface orientation without a screen capture, for polling; capability `display_orientation`), `display.rotation_lock {locked}`, `display.auto_lock` (`{auto_lock_seconds, never, lock_screen_minimum_seconds}`: Auto-Lock and the Lock Screen timeout vphoned keeps in step with it, see below; capability `display_auto_lock`), `screen.unlock {passcode?, timeout?}` (`{locked, screen_off, was_locked, was_screen_off}`: the display on and the Lock Screen passed, see below; capability `screen_unlock`), `audio.volume {value?, category?}`, `audio.state` |
-| Input | `input.touch`, `input.hid`, `input.button {name}`, `input.key {name}`, `input.type {text, delay_ms?}`, `input.paste {text}`, `input.tap`, `input.double_tap`, `input.long_press`, `input.swipe`, `input.drag {points}`, `input.touch_sequence {events}` — gesture coordinates are screen points |
+| Device | `device.snapshot`, `device.info` (snapshot plus network, screen, rotation, brightness, volume, low power, Developer Mode, agent, `device_name` `{name, own_name}`: the pinned name and the guest's own ComputerName), `device.screen`, `device.network`, `device.ioreg {plane}`, `device.environment`, `device.basebin {archive?}` |
+| Display, audio | `display.brightness {value?}`, `display.rotation {orientation?}`, `display.orientation` (`{degrees, source}`: SpringBoard's interface orientation without a screen capture, for polling; `degrees` is null while SpringBoard has no answer; capability `display_orientation`), `display.rotation_lock {locked}`, `display.auto_lock` (`{auto_lock_seconds, never, lock_screen_minimum_seconds}`), `display.auto_lock.set {seconds}` (writes the mobile UserSettings input through cfprefsd, posts profiled's effective-settings notification, and returns an immediate readback; the caller must verify the effective value), `screen.unlock {passcode?, timeout?}` (`{locked, screen_off, was_locked, was_screen_off}`: the display on and the Lock Screen passed, see below; capability `screen_unlock`), `audio.volume {value?, category?}`, `audio.state` |
+| Input | `input.touch`, `input.hid {page, usage, down?, long_press?}`, `input.button {name}`, `input.key {name}`, `input.type {text, delay_ms?}`, `input.paste {text}`, `input.tap`, `input.double_tap`, `input.long_press`, `input.swipe`, `input.drag {points}`, `input.touch_sequence {events}` — gesture coordinates are screen points; `input.pointer {x, y, seq?, buttons?}`, `input.scroll {phase, dx?, dy?, x?, y?}` (capabilities `pointer_scroll` and `pointer_buttons`, see below) |
 | UI | `ui.tree` (alias `accessibility.tree`), `ui.element_at`, `ui.tap_element`, `ui.wait`, `ui.wait_gone`, `ui.ocr {languages?, min_confidence?}`, `ui.describe`, `screen.screenshot` |
 | Processes | `processes.list {filter?}`, `processes.kill {pid, signal?}` **force**, `memory.jetsam`, `memory.pressure` (only the three kernel memory sysctls, for polling) |
-| launchd | `services.list`, `status`, `print`, `dump`, `disabled`, `start`, `enable`, `load`; `services.stop`, `disable`, `remove`, `signal`, `unload` **force**; `launchd.getenv`, `setenv`, `unsetenv` |
+| launchd | `services.list`, `status`, `print`, `dump`, `disabled`, `start`, `enable`, `load`, `profile` (see below), `kickstart {label, kill?}` (`launchctl kickstart`, capability `service_kickstart`, see below); `services.stop`, `disable`, `remove`, `signal`, `unload`, `profile.apply {profile, groups?, allow?}` **force**, and `kickstart` with `kill` **force**; `launchd.getenv`, `setenv`, `unsetenv`. On tvOS, which never enables user sessions, they read the system domain alone; before icli 0.8.6 the foreground-user lookup trapped there and killed vphoned |
 | Logs | `logs.syslog {seconds, process?, level?, max_lines?}` (a bounded capture of at most 60 s), `logs.crashes {bundle_id?}`, `logs.crash {path}` |
 | Darwin notifications | `notify.post {name, state?}` (`postDarwinNotification`; `state` is a UInt64, as a number or a decimal string, stored before the post), `notify.state {name}` (`darwinNotificationState`) |
-| Network, security | `network.capture {seconds, interface?, filter?}` (writes a pcap in the guest scratch directory and returns its path), `network.ipv4.get {interface?}`, `network.ipv4.set {interface?, method, address?, subnet_mask?, router?, dns?}`, `network.hostname.get`, `network.hostname.set {local_host_name?}`, `network.static_names.get`, `network.static_names.set {entries}`, `network.resolve {host, family?, port?, first_only?, timeout_ms?}` (see below), `security.ssl_killswitch` |
-| Apps | `apps.list`, `search`, `refresh`, `launch`, `terminate`, `foreground`, `open_url`, `install`, `info`, `binary`, `data_dir`, `url_schemes`, `handlers`, `registration`, `register`, `network_policy {repair?}`; `apps.uninstall`, `unregister`, `unregister_dir` **force** |
-| System | `system.uicache`, `system.system_apps {visible?}`, `system.respring` **force**, `system.reboot {userspace?}` **force**, `system.shutdown` **force**, `developer_mode.status`, `developer_mode.enable`, `power.low_power_mode`, `time.timezone {identifier?, automatic?}` (see below), `diagnostics.self_test` |
+| Network, security | `network.capture {seconds, interface?, filter?}` (writes a pcap in the guest scratch directory and returns its path), `network.ipv4.get {interface?}`, `network.ipv4.set {interface?, method, address?, subnet_mask?, router?, dns?}`, `network.hostname.get`, `network.hostname.set {local_host_name?}`, `device.name.get`, `device.name.set {name}` (see below), `network.static_names.get`, `network.static_names.set {entries}`, `network.resolve {host, family?, port?, first_only?, timeout_ms?}` (see below), `security.ssl_killswitch` |
+| Apps | `apps.list`, `search`, `refresh`, `launch`, `terminate`, `foreground`, `open_url`, `install`, `info`, `binary`, `data_dir`, `url_schemes`, `handlers`, `registration`, `register`, `network_policy {repair?}`; `apps.uninstall`, `unregister`, `unregister_dir` **force**; `apps.removed_system`, `apps.remove_system {bundle_ids, backup?, respring?}` **force**, `apps.restore_system {bundle_ids?, respring?}` **force** (removable system apps, see below) |
+| OTA Apple app programs | `ota.apps.status`, `ota.apps.apply {force:true, removed_bundle_ids?:[]}` (capability `ota_system_apps`; reconciles removed Apple app registrations including placeholders against valid removal backups, then updates retained programs from the installed 24A446 payload; no caller-selected paths or third-party IDs; result `{build, apps, pending, removed_bundle_ids, removed_pending}`; an omitted baseline infers only absent/placeholder apps, never installed apps; preserves user-data/group containers and original removal backups; see [the OTA runbook](Restore/data_preserving_full_ota.md#preserve-removed-system-apps-2026-10-25)) |
+| System | `system.uicache`, `system.system_apps {visible?}`, `system.respring` **force**, `system.reboot {userspace?}` **force**, `system.shutdown` **force**, `developer_mode.status`, `developer_mode.enable`, `power.low_power_mode`, `time.timezone {identifier?, automatic?}`, `time.clock {time?, automatic?}` (see below), `diagnostics.self_test` |
 | Files | `files.list`, `mkdir`, `remove`, `rename`, `read {binary?, limit?}`, `write`, `find`, `copy`, `symlink`, `chmod`, `chown`, `plist`, `plist_set {value \| remove}` |
+| APFS snapshots | `apfs.snapshots {mount?}`, `apfs.snapshot.delete {mount?, name? \| prefix?}` **force** (only `orig-fs.disabled.rn-*`, see below) |
 | Preferences, clipboard, location | `settings.get/set/delete`, `clipboard.get/set/clear`, `location.set/clear/current` |
+| Motion | `motion.gyroscope.get`, `motion.gyroscope.set {x,y,z,enabled?}`, `motion.gyroscope.clear` (capability `motion_gyroscope`; finite JSON numbers in [-1000,1000] rad/s, all axes required; `enabled` defaults to true and must be a JSON Boolean; capability `motion_gyroscope_toggle` supports disabling while retaining configured axes; returns configuration, `units`, `provider`, and `provider_running`; HID provider status is not proof of CoreMotion app delivery) |
 | Keychain | `keychain.list {class?}`, `add`, `delete`, `get`, `update`, `database` |
+| Device attitude | `motion.attitude.get`, `motion.attitude.set {roll,pitch,yaw,enabled?}`, `motion.attitude.clear` (capability `motion_attitude`; degrees: roll/yaw [-180,180], pitch [-90,90], all finite JSON numbers required; `enabled` defaults to true, false retains angles; clear disables and zeros; returns configuration, `units`, `reference_frame`, `provider_installed`; stationary XArbitraryZVertical Core Motion pose; library presence does not prove app delivery; see `Guest/virtual_attitude.md`) |
 | Packages (read-only) | `packages.list`, `status`, `info {path}`, `compare`, `tweaks`, `repos` |
 | Bootstrap | `bootstrap.install {layout}`, `bootstrap.status`, `bootstrap.inspect`, `bootstrap.uninstall {jbroot, force}`, `bootstrap.firmware` (see above) |
 | Environment | `environment.status` (SHA-256 of each vphone library in `/usr/lib`, or null when absent, plus the staging directory), `environment.install {libraries: [{name, sha256}]}` (see below) |
 | Profile UDID | `udid.get`, `udid.set {udid}`, `udid.clear` — each returns `{udid, path}`, the UDID the guest gives its profile checks and the host (null: the guest's own) and the settings file it came from; `set` and `clear` also return `restarted_pids`, `usb_serial` and `usb_reenumerated` (see below) |
-| Setup Assistant | `setup.status` (`{pending, running, pid, setup_done, setup_version, current_version}`), `setup.skip` **force** (sets `SetupDone`, `SetupFinishedAllSteps` and `SetupVersion` in `com.apple.purplebuddy`, restarts SpringBoard, returns the status plus `respring`); `/v1/health` carries `setup_pending` — see `Research/Guest/setup_assistant_skip.md` |
+| Scripting | `script.eval {source, timeout?}` (`{ok, result, output, crashed}`; evaluated in a session process, capability `script_js`), `script.info` (`{available, engine, globals, programs}`) — the interactive form is the `/v1/shell` WebSocket, see "Scripting sessions" |
+| Setup Assistant | `setup.status` (`{pending, running, pid, setup_done, setup_version, current_version, data_migration_done}`), `setup.skip` **force** (sets `SetupDone`, `SetupFinishedAllSteps` and `SetupVersion` in `com.apple.purplebuddy`, restarts SpringBoard, returns the status plus `respring`; while the first boot's data migration is still running it does not restart SpringBoard, which reads the keys when migration ends, and `respring` is `{restarted: false, reason: "data_migration_pending"}`; a restart FrontBoard ignored is refused with `reason: busy`, `retryable: true`, the keys already written); `setup.settle {timeout_s?, poll_s?, stable_polls?}` (read-only wait for first-boot work, see below); `/v1/health` carries `setup_pending` — see `Research/Guest/setup_assistant_skip.md` |
+
+`input.hid` sends a keyboard/consumer usage with 16-bit `page` and `usage`.
+Omitting `down` sends a 100 ms press; a Boolean `down` sends one transition.
+Optional Boolean `long_press: true` requires an explicit Boolean `down` and
+sets `KeyboardLongPress` on that transition. Send it on both the hold-down
+and hold-up events; it does not wait for or detect a hold. The HomePod top cap
+uses consumer page 12, usage 205 for Center, with ordinary down/up for taps
+and long-press transitions for holds. Older vphoned builds lack this flag;
+update the guest environment before testing center holds.
+
+`display.rotation` also reads `accelerometer`: its persisted `degrees`,
+`provider_running`, and the backboardd HID provider's status (enumeration,
+service ID, pid, report interval, dispatch/failure counts and last error).
+`orientation_sink` separately reports the native backboardd bridge's readiness,
+last device orientation and delivery count. This is distinct from raw HID
+dispatch, which by itself did not drive orientation on the research board.
+When the provider is running, setting rotation first publishes a stationary
+gravity pose matching the requested orientation. The existing SpringBoard
+request and interface-orientation readback still decide success; a running HID
+provider is not an acknowledgement that SpringBoard rotated. A refused request
+puts the previous pose back and asks again for the interface orientation from
+before it. A refused request still turns iPadOS's pointer: with the screen off,
+an upside-down request left the interface portrait and the pointer upside down,
+so the mouse moved backwards until a request for the current orientation. The selected
+`system-backboardd-cfw-accelerometer` patch installs this provider; older or
+disabled guests retain their existing rotation path.
 
 `display.auto_lock` reads Settings' Auto-Lock (`maxInactivity` in profiled's
 `EffectiveUserSettings.plist`) and SpringBoard's `SBMinimumLockscreenIdleTime`.
@@ -319,6 +574,20 @@ anything else (`VPhoneDaemon/Daemon/GuestLockScreenIdle.swift`), at startup
 and whenever the settings change. SpringBoard reads the key when it starts, so
 a newly written one holds from the next boot or respring. Measurements:
 `Research/Guest/lock_screen_idle_timer.md`.
+
+Since icli 0.8.4 `device.environment` and the package methods see a
+bootstrap vphoned installed. vphoned runs from the system volume, outside
+the bootstrap, and icli found no RootHide root from there: the report said
+no bootstrap, and `packages.list` and `packages.status` looked for
+`/var/lib/dpkg/status`. icli now finds the one `.jbroot-<16 hex digits>`
+directory in `/var/containers/Bundle/Application` (`jbroot_source` is
+`filesystem .jbroot`), and reads dpkg's database from the root's
+`Library/dpkg` when `var/lib/dpkg`, a link the dpkg package ships, is not
+there yet. Both methods answer in either layout as soon as
+`bootstrap.install` has written the `firmware` record. A RootHide root
+directory left by an install that did not finish is found the same way;
+`bootstrap.inspect` tells a completed install (`jbroot`) from a root that
+is only there (`roots`).
 
 `/v1/health` also carries `mobilegestalt_restart_pending`. At startup vphoned
 removes libMobileGestalt's cache,
@@ -357,6 +626,64 @@ so the host tells a start (guest boot, userspace reboot, a vphoned update) from
 a probe it lost and found again; only a new instance is unlocked. A guest still
 in Setup Assistant is left alone.
 
+A machine with `syncsHostLocation` in its `config.plist` (`vphone-cli vm config
+<name> --sync-host-location on`, Location > Sync Host Location in the VM window,
+or the Location section of a machine's Settings in Launchpad) has `vphone-vm`
+send each fix of the Mac's location as `location.set` while vphoned is
+connected. Absent means off, in a window and headless alike. When the guest
+answers `location_services_off`, the window says so once, and `vphone-vm`
+offers the last fix again every 10 s until the guest takes it, since the Mac
+sends a new one only when it moves. A preset or a replay pauses sync for that
+run without changing the setting.
+
+`input.pointer` and `input.scroll` (capabilities `pointer_scroll` and
+`pointer_buttons`, iPad guests only; REST `POST /v1/input/pointer`,
+`POST /v1/input/scroll`) point, click and scroll the way an iPad with a
+trackpad does, instead of with a finger. They drive IcliKit's virtual
+pointing device (`pointerMove`, `pointerScroll`; a HID user device with an
+absolute position, `Sources/IcliPrivate/Pointer.m` in icli), which vphoned
+creates on first use and keeps while it runs; iPadOS then shows a pointer,
+which hides itself after a few seconds without movement.
+
+- `input.pointer {x, y, seq?, buttons?}` puts the pointer at x, y: 0...1 from
+  the top-left corner of the interface as it is shown, in any orientation.
+  `buttons` are the buttons held from that move on, a whole number 0...7: bit
+  0 primary, bit 1 secondary, bit 2 middle; without it none are held. Holding
+  one is a pointer click, which iPadOS answers as a trackpad's, not as a
+  touch. Requests run concurrently, so a client that sends moves without
+  waiting for each answer numbers them with an increasing `seq` (a whole
+  number up to 2^53); a move that lands after a higher one is dropped,
+  buttons and all, and still answers. Without `seq` every move is applied. A
+  client therefore sends button changes in order, and no move numbered past
+  one until it has been answered.
+- `input.scroll {phase, dx?, dy?, x?, y?}` sends one scroll event to the view
+  under the pointer, after moving the pointer to x, y when they are given; the
+  buttons held stay as they are.
+  `phase` is `began`, `changed`, `ended` or `cancelled`: `began` first, a
+  `changed` per delta, then `ended`. `dx` and `dy` are interface points with a
+  browser wheel event's signs, positive `dy` toward the end of the content,
+  under the guest's natural scrolling setting (on by default); each is at most
+  10000.
+
+A click under a visible pointer has to be the pointer's. iPadOS ignores a
+touch on an alert's button while the pointer hovers it, until the pointer has
+hidden itself: on an iPadOS 26.6.2 guest a touch within 0.3 s of the pointer
+moving onto SpringBoard's Remove App Cancel button failed 6 times out of 6;
+with a Mac click sent as `buttons` the VM window closed it on the first
+click every time, after resting on the button. The window therefore sends a
+Mac click as `buttons` on a `pointer_buttons` guest, and keeps touches for
+`vphone.sock`'s `tap` and `swipe` and the back gesture. IcliKit sends a
+button change as a button event rather than a report bit: backboardd never
+releases a button that a report pressed, and a stuck button loses every
+later click of every pointing device.
+
+The view moves by the deltas and by nothing else: iPadOS does not run on
+after `ended`, so a client that wants a trackpad's momentum sends it as more
+`changed` deltas first. The first few points of a scroll start the gesture
+and do not move the view (about 15 points on iPadOS 26). Both answer with
+IcliKit's error, `unavailable` or `failed`, when the device cannot be made or
+is not ready yet.
+
 `time.timezone` (capability `timezone`; REST `GET/PUT /v1/timezone`) returns
 `{identifier, automatic, seconds_from_gmt}`: the Olson name
 `/var/db/timezone/localtime` points to under `/var/db/timezone/zoneinfo`, and
@@ -370,6 +697,22 @@ so SpringBoard's clock changes at once. `{automatic: true}` hands the zone
 back to timed. Both add `changed`. `vphone-vm` sends the Mac's zone after
 every connect and whenever the Mac's zone changes (`VPhoneTimeZoneSync`), so
 the guest's clock reads the same local time as the host.
+
+`time.clock` (capability `clock`; REST `GET/PUT /v1/clock`) returns
+`{time, automatic}`: the guest's clock in seconds since 1970 and whether timed
+sets it (CoreTime's `TMIsAutomaticTimeEnabled`). `{time}` is the Mac's time. A
+guest within a second of it is left alone, and so is one with automatic time
+off, whose clock was set by hand in Settings. Otherwise vphoned offers the
+time to timed as an NTP result (`TMSetSourceTime`, which timed takes only with
+`com.apple.timed` and `NTP` in `com.apple.timed.sources`), up to six times,
+and timed sets the clock and posts the time change itself. The answer adds
+`offset`, the Mac's time less the guest's before the offer, and `changed`. A
+clock that has not moved after six offers fails the request: timed holds a
+time it trusts more. `{automatic}` turns automatic time on or off
+(`TMSetAutomaticTimeEnabled`) and adds `changed`; with `time` it is applied
+first. `vphone-vm` sends the Mac's time after every connect, every minute,
+when the Mac wakes and when the Mac's clock is set (`VPhoneClockSync`). The
+analysis is in `Research/Guest/host_clock_sync.md`.
 
 `audio.host_latency` (capability `audio_host_latency`) reads or sets what the
 Mac's output device adds after its mixer, in seconds, which the guest's
@@ -408,6 +751,112 @@ replaced; `set` with none or null puts that one back. A name vphoned did not set
 is never changed by a null. `vphone-vm` calls `set` after every connect with the
 VM's `localHostName`, or null when it has none.
 
+`device.name.get` and `device.name.set` read and write the device name the
+guest is pinned to, the one Xcode, `devicectl` and Finder show
+(`VPhoneDaemon/Daemon/GuestAPI+Device.swift`). Both return `{name}`, null when
+the guest shows its own; `set` adds `changed`. `set` with a `name` (not blank,
+at most 255 UTF-8 bytes, no control character) stores it as `DeviceName` in
+`/var/db/vphone/devicename.plist`; with none or null it removes the file. On a
+change vphoned applies configd's preferences unchanged, so configd publishes
+again and `libdevicename.dylib` pins the new name at once, and posts
+`com.apple.mobile.lockdown.device_name_changed`. The file outlives a reboot.
+`vphone-vm` calls `set` after every connect with the VM's name. See
+`Research/Guest/device_name_pinning.md`. `set` also returns `reboot_required`,
+true after a change: lockdown readers (Finder, `ideviceinfo`, `idevicename`) follow
+at once, but CoreDevice (Xcode, `devicectl`) reads the name once per handshake
+and the DHCP lease keeps the host name it was requested with, so both show the
+new name after the guest restarts. A clone of a template boots with the
+template's pin until `vphone-vm` connects. `device.info` carries
+`device_name: {name, own_name}`: the pinned name (null when none) and the
+guest's own `System/System/ComputerName` in configd's preferences, which a
+clone inherits.
+
+`services.kickstart {label, kill?}` (capability `service_kickstart`, icli
+0.9.2) is `launchctl kickstart`: launchd spawns the job now, whether or not
+its launch conditions hold, and answers the new `pid`. A running instance is
+left alone and the answer says `unchanged`. With `"kill": true` (**force**)
+launchd kills the running instance, waits for it to exit and spawns a new
+one, which runs the program as it is on disk now. This is how a re-deployed
+daemon takes over: `services.load` of a label launchd already holds is a
+no-op, so a new binary would otherwise wait for the next reboot. Kickstarting
+vphoned's own label with `kill` ends the process answering the call; the
+caller sees the connection drop and reconnects to the new instance.
+On iOS 27 launchd allows kickstart only to a caller holding
+`com.apple.private.xpc.service-configure` and `service-attach`, which
+vphoned's entitlements carry; it answers success with the running pid
+rather than EALREADY when nothing changed, and icli reports that as
+`unchanged` too.
+
+`services.profile` (capability `service_profile`) reports the service profile
+and `services.profile.apply` **force** applies one
+(`VPhoneDaemon/Daemon/GuestAPI+ServiceProfile.swift`, lists in
+`GuestServiceProfile.swift`). A profile is a set of launchd jobs turned off
+with the same override as `services.disable`; launchd honors it from the next
+boot, so the guest has to restart. `apply {profile, groups?, allow?}`:
+
+- `profile: "trimmed"` disables the default groups of the list for the
+  guest's iOS major version (`base`, the 137 labels measured on iOS 27.0, or
+  on iOS 26 the 131 of them 26.6.2 loads;
+  `app_store`, appstored and itunesstored; `signin_followup`, followupd and
+  appleidsetupd), plus the optional groups named in `groups` (`accounts`:
+  akd, amsaccountsd, appleaccountd, after which the guest cannot sign in to an
+  Apple Account), minus the labels in `allow`. Only iOS 26 and 27 have a
+  list; on another version it fails with "No trimmed service list for iOS N".
+- `profile: "none"` turns back on only the labels the profile disabled, on any
+  version.
+- A label already disabled by somebody else (the OTA block, a user in the
+  Services panel) is skipped and never recorded, so `none` leaves it disabled.
+  A recorded label the profile no longer selects is turned back on. The jobs
+  in `GuestServiceProfile.neverDisable` (sleepd, CommCenter and its helpers,
+  cloudd, NanoRegistry, mobileassetd, storekitd, vphoned, and what vphone's
+  features use) are refused whatever names them.
+- The labels the profile owns go to `/var/db/vphoned/service-profile.plist`
+  (`Profile`, `ListVersion`, `iOSMajor`, `Groups`, `Allow`, `Labels`,
+  `Updated`). A second apply with the same arguments changes nothing.
+- It returns `{profile, ios_major, list_version, groups, disabled, enabled,
+  kept, skipped: [{label, reason}], allowed, failed: [{label, action, error}],
+  owned, reboot_required}`: `disabled` and `enabled` are what this call
+  changed, `kept` what was already the profile's, `owned` how many labels the
+  record holds. `reboot_required` is true when this call changed something or
+  a label the profile owns is still running. A failure on one label is listed
+  in `failed` and the others still apply.
+
+`services.profile` returns `{profile, ios_major, supported, supported_ios,
+list_version, groups: [{name, default, summary, labels}], never_disable,
+record, disabled, enabled_since, running, reboot_required}`: `disabled` are
+the recorded labels still disabled, `enabled_since` recorded labels somebody
+turned back on, `running` recorded labels still running until the next boot.
+See `Research/Guest/service_trimming.md`.
+
+`setup.settle` (capability `setup_settle`) waits until the guest's first-boot
+work has settled and returns, without changing anything
+(`VPhoneDaemon/Daemon/GuestAPI+FirstBoot.swift`, conditions in
+`GuestFirstBootSettle.swift`). It polls every `poll_s` seconds (default 5,
+1–30) and is settled when, over the last `stable_polls` polls (default 3,
+2–20), `/private/var/staged_system_apps` is empty or absent (installd expands
+the removable system apps from it on the first boot), the number of
+registered apps did not change, installd used less than 0.2 s of CPU
+between polls or was not running, and in the latest poll data migration is
+not running: `com.apple.migration` for user mobile records
+`kern.osversion` as `LastSystemVersion` or as `DMLastMigrationResults`'s
+`buildVersion`, or, with neither recorded, DataMigrator's XPC service
+(`com.apple.datamigrator`) is not running. The domain is empty until a fresh
+restore's first migration ends. `timeout_s` defaults to 90 and is capped at
+110, because the host waits at most 120 s for one answer; a caller that needs
+longer calls again. A timeout is not an error: it returns `{settled, elapsed_s,
+polls, timeout_s, poll_s, stable_polls, reasons, signals}` with `settled:
+false` and `reasons` naming the conditions still unmet; `signals` holds
+`staged_system_apps` (entries, null when unreadable), `app_count`,
+`app_counts` (the window), `installd_pid`, `installd_cpu_seconds`,
+`installd_cpu_delta`, `setup_pending` and `data_migration_done` (`false`
+while the record is missing and DataMigrator runs; null when the build is
+unknown, or nothing is recorded and DataMigrator is not running, which does
+not hold the verdict back).
+
+`VPhoneDaemon/Tests/run-logic-tests.sh` builds the guest-independent parts of
+these three (the lists and their bookkeeping, the settle verdict, the device
+name rule) for the Mac and checks them; it needs no guest.
+
 `network.static_names.set` replaces the names the guest resolves locally, given
 as `entries: [{address, names}]` (IPv4 only; an empty list withdraws them).
 vphoned registers each name as a LocalOnly, known-unique A record with the
@@ -431,10 +880,125 @@ Account passwords, boot logo rendering and package installation, removal and
 repository changes are deliberately not exposed. `/v1/health` lists the new
 areas in `capabilities` (`device_info`, `display`, `audio`, `input_gestures`,
 `ui_inspection`, `processes`, `services`, `logs`, `network_capture`,
-`app_details`, `system_control`, `system_shutdown`, `file_tools`, `packages`, `environment_update`, `udid_override`, `setup_skip`, `network_ipv4`, `network_hostname`, `network_static_names`, `network_resolve`, `display_auto_lock`, `screen_unlock`) so a host can hide
+`app_details`, `system_control`, `system_shutdown`, `file_tools`, `packages`, `environment_update`, `udid_override`, `setup_skip`, `setup_settle`, `service_profile`, `service_kickstart`, `network_ipv4`, `network_hostname`, `device_name`, `network_static_names`, `network_resolve`, `display_auto_lock`, `screen_unlock`) so a host can hide
 panels an older agent cannot serve. icli failures reach the caller with
 icli's own error `code` (`failed`, `unavailable`, `device_locked`, …) and
 message.
+
+## Removable system apps and APFS snapshots
+
+These methods trim a guest that will serve as a template; `/v1/health` lists
+them as `system_app_removal` and `apfs_snapshots`.
+
+**`apps.remove_system {bundle_ids: [...], backup?: true, respring?: true, force}`**
+(`VPhoneDaemon/Daemon/GuestAPI+SystemApps.swift`) removes Apple's removable
+apps durably. For each identifier it reads the app's current `bundle_path`
+from the live app list (the container UUID changes with every install, so
+nothing is cached) and requires a `com.apple.` app whose bundle is
+`/private/var/containers/Bundle/Application/<UUID>/<Name>.app`. An app under
+`/Applications` or `/System` (Phone, Settings) is refused, as is any other
+path shape (`GuestSystemAppPolicy.swift`). Then, in this order:
+
+1. the whole container is cloned to
+   `/private/var/db/vphoned/removed-system-apps/<bundle_id>.container` (root
+   only, mode 0700, on the Data volume with the bundle containers, so the clone
+   shares every block), with `<bundle_id>.manifest.json` beside it
+   (`bundle_id`, `container_uuid`, `app`, `container_path`, `removed_at`). If
+   the clone fails, a copy that keeps owners, modes, extended attributes and
+   flags is made instead; `backup_method` in the result says `clone` or
+   `copy`. A backup of the same app in the legacy directory (below) is removed
+   once the new removal is done. `backup: false` skips this;
+2. the app is unregistered from LaunchServices (icli's `unregisterApp`, as
+   `apps.unregister`). LaunchServices can list it for a moment longer, and
+   icli checks at once, so vphoned looks at the record again every 0.1 s for
+   up to 2.5 s before it believes "still lists the app", unregisters once
+   more if it is still listed, waits as long again, and only then fails the
+   app (`GuestAppUnregistration`); `unregister_attempts` in the app's result
+   says when a second unregistration was needed;
+3. the container is removed recursively, with `SerializedPlaceholder.ipa`,
+   `BundleMetadata.plist` and the container metadata.
+
+Unregistering first matters: a registered app whose bundle is missing is
+repaired by installd from the placeholder on the next boot
+(`Research/Guest/post_setup_signin_and_appstore.md`). SpringBoard restarts once
+at the end when anything was removed and `respring` is not false. The result
+is `{results: [{bundle_id, status, removed, container, app, backup,
+backup_method, unregistered, unregister_attempts?, error?}], removed, failed, backup_directory, respring}`.
+`status` is `removed`, `absent` (not installed: a no-op that succeeds; a
+removal an earlier call left half done, with its backup in place, is finished
+instead), `unregistered_stale` (LaunchServices listed a container that is
+gone) or `failed`. One app's failure does not stop the others; if any failed,
+the call returns error `command_failed` (`error: "remove_incomplete"`) whose
+body carries the same fields.
+
+```json
+{"method":"apps.remove_system","params":{"bundle_ids":["com.apple.news","com.apple.mobilephone"],"force":true}}
+→ error: {"code":"command_failed","message":"1 of 2 apps were not removed; see results","removed":1,"failed":1,
+   "results":[{"bundle_id":"com.apple.news","status":"removed","removed":true,"unregistered":true,
+               "container":"/private/var/containers/Bundle/Application/6EB8…55A1","app":"News.app",
+               "backup":"/private/var/db/vphoned/removed-system-apps/com.apple.news.container","backup_method":"clone"},
+              {"bundle_id":"com.apple.mobilephone","status":"failed","removed":false,
+               "error":"/Applications/MobilePhone.app is not in a bundle container under /private/var/containers/Bundle/Application; …"}],
+   "respring":{"method":"frontboard_relaunch",…}}
+```
+
+**`apps.restore_system {bundle_ids?, respring?: true, force}`** moves each
+backup container back to the UUID path its manifest names (validated as a
+removal is) and registers the app in it with LaunchServices as a deletable
+system app (`VPhoneDaemon/Native/vphoned_apps.m`: `registerApplication:`, then
+`registerApplicationDictionary:`, then the containerized interface, each read
+back). icli's `registerApp`, behind `apps.register`, refuses Apple's apps since
+0.7.17. Without `bundle_ids` every backup is restored. An app that is
+installed is reported `present` and its backup left alone; a restore that
+moved the container but could not register it keeps the manifest, so calling
+it again retries the registration. A backup in the backup directory goes back
+with `rename(2)` (`restore_method: "rename"`). The first version of this verb
+kept backups in `/private/var/mobile/Library/removed-system-apps`, on the User
+volume, where `rename(2)` answers EXDEV; a backup found there (`legacy: true`;
+the new directory is searched first) is copied back with owners, modes,
+extended attributes and flags to a staging name beside the destination, renamed
+into place and then removed (`restore_method: "copy"`; `warning` if the legacy
+copy could not be removed). Results mirror the removal (`status` `restored`,
+`present` or `failed`, plus `backup`, `legacy`, `restore_method` and
+`registration`, the call that worked; `error: "restore_incomplete"` when any
+failed). **`apps.removed_system`** lists the backups in both directories:
+`{directory, legacy_directory, backups: [{bundle_id, backup, legacy,
+container, container_uuid, app, removed_at, restorable}], other,
+legacy_other}`, where `other` and `legacy_other` name entries without a bundle
+identifier, such as `News.container` backups made by hand before this verb
+existed.
+
+**`apfs.snapshots {mount?: "/"}`** returns `{mount, snapshots: [name]}` from
+`fs_snapshot_list` (`VPhoneDaemon/Native/vphoned_apfs.m`).
+**`apfs.snapshot.delete {mount?: "/", name? | prefix?, force}`** deletes with
+`fs_snapshot_delete` only snapshots named `orig-fs.disabled.rn-*`, the sealed
+update snapshot CFW install renamed (`GuestSnapshotPolicy.swift`). A `name` or
+`prefix` that does not start with that is refused, `com.apple.os.update-*`
+included; with neither, every `orig-fs.disabled.rn-*` snapshot is selected.
+A selection that matches nothing succeeds with nothing deleted, and a snapshot
+already gone (ENOENT) is listed under `already_deleted`. The result is `{mount,
+before, deleted, already_deleted, after, remaining}`. A refusal from the
+kernel stops the call: EINVAL and ENOTSUP are invalid requests; EPERM or
+EACCES (`reason: "not_permitted"`: vphoned is not root or lacks
+`com.apple.private.vfs.snapshot`; `com.apple.developer.vfs.snapshot` alone is
+refused), EBUSY (`reason: "busy"`, `retryable:
+true`: mounted, or APFS is still merging an earlier deletion) and anything
+else return `command_failed` with `reason`, `retryable`, `errno`, `snapshot`
+and the `before`/`deleted`/`after` listings. Why and when to call it:
+`Research/Guest/template_snapshot_deletion.md`.
+
+```json
+{"method":"apfs.snapshot.delete","params":{"force":true}}
+→ {"mount":"/","before":["orig-fs.disabled.rn-4EC2…ECB9"],"deleted":["orig-fs.disabled.rn-4EC2…ECB9"],
+   "already_deleted":[],"after":[],"remaining":[]}
+```
+
+The path, identifier, manifest, snapshot-name and errno rules, and the
+`fs_snapshot_list` batch parser, are checked on the Mac without a guest:
+
+```sh
+VPhoneDaemon/Tests/run-system-maintenance-tests.sh
+```
 
 ## Nested accessibility snapshots
 
@@ -541,7 +1105,15 @@ switching back needs trusting again too. The VM window's Device › Set UDID… 
 accepts only 8 and 16 hex digits joined by a hyphen (sent upper-case) or 40 hex
 digits (sent lower-case).
 
-`location.set` is IcliKit's `simulateLocation`: it sends locationd's
+`location.set` and `location.current` first check
+`CLLocationManager.locationServicesEnabled()`. With the guest's Location
+Services switch off they fail with the code `location_services_off`, since
+locationd then gives no client a location, the simulated one included. The
+switch is turned on by Setup Assistant's Location Services pane, so a guest
+whose Setup Assistant was skipped has it off. vphoned never changes the switch;
+it belongs to the guest's Settings > Privacy & Security > Location Services.
+
+Past that check, `location.set` is IcliKit's `simulateLocation`: it sends locationd's
 `CLSimulationManager` the sequence Xcode uses (`stopLocationSimulation`,
 `clearSimulatedLocations`, `appendSimulatedLocation:`, `flush`,
 `startLocationSimulation`). locationd sends no reply and silently ignores a
@@ -613,6 +1185,16 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8765/v1/health
 curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
      -d '{"method":"device.snapshot","params":{}}' http://127.0.0.1:8765/v1/rpc
 websocat "ws://127.0.0.1:8765/v1/events?token=$TOKEN"
+
+# One script, with its value and whatever it printed.
+curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{"method":"script.eval","params":{"source":"api(\"device.snapshot\").name"}}' \
+     http://127.0.0.1:8765/v1/rpc
+
+# An interactive session. websocat sends what it reads as text frames, so pass
+# --binary; it has no window size to report, so the terminal starts at 80x24.
+websocat --binary "ws://127.0.0.1:8765/v1/shell?token=$TOKEN&cols=120&rows=40"
+websocat --binary "ws://127.0.0.1:8765/v1/shell?program=bash&token=$TOKEN"
 ```
 
 ```swift

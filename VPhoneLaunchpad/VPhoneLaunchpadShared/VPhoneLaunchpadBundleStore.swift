@@ -70,15 +70,9 @@ nonisolated struct VPhoneLaunchpadBundleReceipt: Codable, Equatable, Sendable {
 /// checks them to give an early message; the helper checks them because it
 /// must not trust the app.
 nonisolated enum VPhoneLaunchpadNames {
-    /// 2.2.0 renamed every patch to `{component}-{effect}-{name}` and dropped
-    /// `--force-dsc-maxslide` from `cfw install`, so an older bundle neither
-    /// reports the identifiers the patch table reads nor takes the arguments
-    /// the helper passes. 2.4.0 added the network options of `vm config`
-    /// (`--ip`, `--mac`, `--forward`, `--mdns`, `--mac-name`), which a
-    /// machine's Settings pass. 2.5.0 added `vm leases`, which Host Setup
-    /// lists and the helper runs to release orphaned DHCP leases. 2.6.0 added
-    /// `vm config --unlock-at-startup`, which a machine's Settings pass.
-    private static let minimumBundleComponents = (2, 6, 0)
+    /// Minimum bundle version for Launchpad's CLI and receipt contract.
+    /// Series 2.13 adds the AppleTV18,1 OTA pairing and its 4K preset default.
+    private static let minimumBundleComponents = (2, 13, 0)
     static let minimumBundleVersion =
         "\(minimumBundleComponents.0).\(minimumBundleComponents.1).\(minimumBundleComponents.2)"
 

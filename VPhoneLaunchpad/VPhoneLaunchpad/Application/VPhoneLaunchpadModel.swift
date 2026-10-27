@@ -12,6 +12,8 @@ final class VPhoneLaunchpadModel {
         case hostSetup
         case coreBundle
         case bundleInstall
+        case ipswCache
+        case templates
 
         var id: Self {
             self
@@ -22,6 +24,8 @@ final class VPhoneLaunchpadModel {
             case .hostSetup: String(localized: "Host Setup")
             case .coreBundle: String(localized: "Core Bundle")
             case .bundleInstall: String(localized: "Core Bundle Install")
+            case .ipswCache: String(localized: "Downloaded Firmware")
+            case .templates: String(localized: "Templates")
             }
         }
     }
@@ -33,6 +37,8 @@ final class VPhoneLaunchpadModel {
     let bundles: VPhoneLaunchpadCoreBundle
     let machines: VPhoneLaunchpadMachineLibrary
     let leases: VPhoneLaunchpadLeases
+    /// IPSWs dropped on the window or opened with Launchpad, copied into the cache.
+    let ipswImport = VPhoneLaunchpadIPSWImport()
 
     var panel: Panel?
     /// The panel to open once the sheet on screen has closed.
@@ -45,7 +51,7 @@ final class VPhoneLaunchpadModel {
         bundles = VPhoneLaunchpadCoreBundle(helper: helper, history: history)
         machines = VPhoneLaunchpadMachineLibrary(bundles: bundles, helper: helper)
         leases = VPhoneLaunchpadLeases(bundles: bundles, machines: machines, helper: helper)
-        bundles.boundMachines = { [machines] version in machines.machineNames(boundTo: version) }
+        bundles.activeMachines = { [machines] version in machines.activeMachineNames(boundTo: version) }
     }
 
     // MARK: - Panels
@@ -138,7 +144,6 @@ final class VPhoneLaunchpadModel {
             }
         }
         await bundles.fetchReleases()
-        await bundles.fetchArtifacts()
     }
 
     // MARK: - Command line
@@ -165,6 +170,13 @@ final class VPhoneLaunchpadModel {
         await leases.refresh()
     }
 
+    // MARK: - Machine requests
+
+    /// A sheet or a delete confirmation the shared actions menu asked for,
+    /// possibly from the menu bar. The machine list presents it and clears it.
+    var machineSheetRequest: VPhoneLaunchpadMachinesView.Sheet?
+    var deletionRequest: [VPhoneLaunchpadMachinePath] = []
+
     // MARK: - Bundle install
 
     /// An install shows its progress in a sheet of its own, which replaces
@@ -174,12 +186,6 @@ final class VPhoneLaunchpadModel {
     func installBundle(_ release: VPhoneLaunchpadRelease, keepsDefault: Bool = false) async {
         revealInstall()
         await bundles.install(release, keepsDefault: keepsDefault)
-        await machines.refresh()
-    }
-
-    func installArtifact(_ artifact: VPhoneLaunchpadArtifact) async {
-        revealInstall()
-        await bundles.installArtifact(artifact)
         await machines.refresh()
     }
 
@@ -197,10 +203,6 @@ final class VPhoneLaunchpadModel {
     private func revealInstall() {
         present(.bundleInstall)
     }
-
-    // MARK: - Inspector
-
-    var showsInspector = true
 
     /// Refused while a machine is bound to the version; the error lands in
     /// `bundles.actionError`.

@@ -15,6 +15,9 @@ import VPhonePatchKit
 public enum FirmwareKernelCustomFirmwarePatchSet {
     public static let identifier = "com.vphone.patchset.kernel.cfw"
 
+    public static let tvTPROPagers = "kernel-exp-tv_tpro_pagers"
+    public static let cssc = "kernel-boot-cssc_emulation"
+
     /// Only applies to an iOS 27 userland.
     private static let ios27 = VPhonePatchApplicability(iOSBase: .major(27))
 
@@ -23,6 +26,13 @@ public enum FirmwareKernelCustomFirmwarePatchSet {
         name: "Kernel Custom Firmware",
         summary: "Trust cache admission, writable root, task ports and the guest's extra syscall surface",
         patches: [
+            VPhonePatchDeclaration(
+                identifier: tvTPROPagers,
+                title: "TV TPRO pager compatibility",
+                summary: "Defaults sprr_tpro_pagers to zero so plain-arm64 tvOS dyld can make DATA_CONST writable. Pair with the TV dyld TPRO patch.",
+                target: .firmware(.kernelcache),
+                applicability: VPhonePatchApplicability(iOSBase: .major(26), cloudOS: .release(major: 26, minor: 4)),
+            ),
             // MARK: Trust Cache and Code Signing
 
             VPhonePatchDeclaration(
@@ -232,6 +242,24 @@ public enum FirmwareKernelCustomFirmwarePatchSet {
             // MARK: iOS 27 Userland
 
             VPhonePatchDeclaration(
+                identifier: cssc,
+                title: "CSSC instruction compatibility",
+                summary: "Emulates scalar CSSC instructions in user-mode exception handling, including before launchd starts, on hosts without native CSSC.",
+                target: .firmware(.kernelcache),
+                applicability: VPhonePatchApplicability(iOSBase: .major(27), cloudOS: .release(major: 26, minor: 4)),
+                bootEssential: true,
+            ),
+
+            VPhonePatchDeclaration(
+                identifier: "kernel-boot-arm64e_x1",
+                title: "ARM64E_X1 admission",
+                summary: "Admits subtype-12 binaries, enables exec PAC and selects the ARM64E authenticated shared region required by the iOS 27 userland.",
+                target: .firmware(.kernelcache),
+                applicability: ios27,
+                bootEssential: true,
+            ),
+
+            VPhonePatchDeclaration(
                 identifier: "kernel-boot-di2",
                 title: "DiskImages2 client ABI",
                 summary: "Matches the DiskImages2 client ABI a 27 userland calls with.",
@@ -271,6 +299,17 @@ public enum FirmwareKernelCustomFirmwarePatchSet {
                 applicability: ios27,
                 bootEssential: true,
             ),
+            VPhonePatchDeclaration(
+                identifier: "kernel-cfw-aks_unlock_bag",
+                title: "Keybag unlock arguments",
+                summary: "Accepts the five-argument keybag unlock an iOS 26.6-or-newer userland sends, so escrow unlock and encrypted backups work on the 26.4 kernel.",
+                target: .firmware(.kernelcache),
+                // iOS 26.6 is where Apple's keybag-unlock external method began
+                // sending inputScalarCount == 5 (26.5 and earlier send 4); the
+                // anchor self-guards on a kernel that already accepts 5, so no
+                // cloudOS bound is needed.
+                applicability: VPhonePatchApplicability(iOSBase: .atLeast(major: 26, minor: 6)),
+            ),
 
             VPhonePatchDeclaration(
                 identifier: FirmwarePatchSetCatalog.paravirtUserClientsPatch,
@@ -289,14 +328,32 @@ public enum FirmwareKernelCustomFirmwarePatchSet {
             // MARK: Display
 
             VPhonePatchDeclaration(
-                identifier: FirmwarePatchSetCatalog.displayRefreshPatch,
-                title: "120 Hz display timing",
+                identifier: FirmwarePatchSetCatalog.proMotionPatch,
+                title: "ProMotion",
                 summary: """
-                Makes the paravirtual display advertise 120 Hz instead of the host's fixed \
-                60 Hz mode. Off by default: the guest renders twice as often, and only a \
-                120 Hz host display shows it.
+                Makes the paravirtual display advertise 120 Hz, as a ProMotion panel does, \
+                instead of the host's fixed 60 Hz mode. While it animates the guest renders \
+                twice as often, so the host spends up to twice the CPU and GPU on it; turn it \
+                off to keep 60 Hz.
                 """,
                 target: .firmware(.kernelcache),
+            ),
+
+            // MARK: Paravirtual GPU
+
+            VPhonePatchDeclaration(
+                identifier: FirmwarePatchSetCatalog.paravirtTask3Patch,
+                title: "GPU Task3 shader cache",
+                summary: """
+                The guest GPU driver asks the host for binary version 252 \
+                (Task3) while keeping its own features, and writes the owning \
+                executable's code-signing hash into each task root. The host \
+                retains a separate shader cache for each executable across boots.
+                """,
+                target: .firmware(.kernelcache),
+                // The task initializer and owning-task anchors differ on the
+                // cloudOS 26.1–26.3 kernels; discovery fails there.
+                applicability: VPhonePatchApplicability(cloudOS: .release(major: 26, minor: 4)),
             ),
         ],
         requires: ["vphone.kernel.base"],

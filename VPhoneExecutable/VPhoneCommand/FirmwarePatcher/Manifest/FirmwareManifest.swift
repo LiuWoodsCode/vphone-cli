@@ -6,6 +6,7 @@
 // (device tree, SEP, kernel) and iPhone OS images into a single DFU erase-install
 // Build Identity.
 
+import CryptoKit
 import Foundation
 import VPhoneCoreKit
 
@@ -75,17 +76,21 @@ public enum FirmwareManifest {
         // per board it covers, so the userland one is picked by board.
         let device = chosen ?? VPhoneGuestDevice.detect(buildManifest: iPhoneBM) ?? .default
         let (prod, res) = try findCloudOS(cloudIdentities, deviceClass: "vresearch101ap")
-        let (vp, vpr) = try findCloudOS(cloudIdentities, deviceClass: "vphone600ap")
+        let (vp, vpr) = findRuntime(cloudIdentities, researchBoard: (prod, res))
         let iErase = try findIPhoneErase(iPhoneIdentities, deviceClass: device.deviceClass)
 
         if verbose {
             print("  cloudOS vresearch101ap: release=#\(prod), research=#\(res)")
-            print("  cloudOS vphone600ap:    release=#\(vp), research=#\(vpr)")
+            if (vp, vpr) == (prod, res) {
+                print("  cloudOS vphone600ap:    none, the research board stands in")
+            } else {
+                print("  cloudOS vphone600ap:    release=#\(vp), research=#\(vpr)")
+            }
             print("  \(device.productType) erase: #\(iErase)")
         }
 
         // Build the single DFU erase identity.
-        let buildIdentity = try buildEraseIdentity(
+        let sourceIdentity = try buildEraseIdentity(
             cloudIdentities: cloudIdentities,
             iPhoneIdentities: iPhoneIdentities,
             prod: prod,
@@ -93,6 +98,9 @@ public enum FirmwareManifest {
             vp: vp,
             vpr: vpr,
             iErase: iErase,
+        )
+        let buildIdentity = try normalizeGuestComponentDigests(
+            sourceIdentity, device: device, restoreDir: iPhoneDir,
         )
         let guestIdentity = try separateGuestDeviceTree(
             for: device,
@@ -176,6 +184,17 @@ public enum FirmwareManifest {
         return (rel, res)
     }
 
+    /// The identities the guest's device tree, SEP and kernel come from:
+    /// vphone600ap's, which only the 26.1–26.4 beta cloudOS releases carry, or
+    /// else the research board's, which `fw patch` converts
+    /// (FirmwareResearchBoardPatchSet).
+    static func findRuntime(
+        _ identities: [PlistDict],
+        researchBoard: (release: Int, research: Int),
+    ) -> (release: Int, research: Int) {
+        (try? findCloudOS(identities, deviceClass: "vphone600ap")) ?? researchBoard
+    }
+
     /// Return the index of the first iPhone erase identity.
     ///
     /// With `deviceClass`, an erase identity for that board wins; the first
@@ -209,7 +228,7 @@ public enum FirmwareManifest {
     public static let guestDeviceTreePath = "Firmware/all_flash/DeviceTree.vphone600ap.guest.im4p"
 
     /// Points the installed `DeviceTree` of a guest that presents its board
-    /// (an iPad, or an iPhone other than the iPhone17,3) at a copy of the
+    /// (an iPad, or an iPhone other than the XS Max) at a copy of the
     /// vphone600 tree, so `fw patch` can give that copy the board's identity.
     ///
     /// The DFU device restores with `RestoreDeviceTree`, and `restored_external`
@@ -218,7 +237,7 @@ public enum FirmwareManifest {
     /// installed `DeviceTree` is a separate manifest entry that restore only
     /// personalizes and writes to Preboot, so giving it its own file lets the
     /// board identity ride through restore without a root-only rewrite on the
-    /// host. An iPhone17,3 identity is returned unchanged.
+    /// host. An XS Max identity is returned unchanged.
     static func separateGuestDeviceTree(
         for device: VPhoneGuestDevice,
         identity: PlistDict,
@@ -255,6 +274,35 @@ public enum FirmwareManifest {
     }
 
     // MARK: - Build Identity Construction
+
+    /// J42d uses SHA-1 digests, but the PCC restore environment authenticates
+    /// Image4 payloads with SHA-384. Keeping the donor digest makes canonical
+    /// metadata execution fail with ENOEXEC before sealing. Hash the unchanged
+    /// guest components for the hybrid ticket; other guest families retain
+    /// their existing manifest entries and signature-bypass behavior.
+    static func normalizeGuestComponentDigests(
+        _ identity: PlistDict,
+        device: VPhoneGuestDevice,
+        restoreDir: URL,
+    ) throws -> PlistDict {
+        guard device.usesTVOS else { return identity }
+        guard var manifest = identity["Manifest"] as? PlistDict else {
+            throw ManifestError.missingKey("Manifest in the hybrid build identity")
+        }
+        for name in ["Ap,SystemVolumeCanonicalMetadata", "OS", "StaticTrustCache", "SystemVolume"] {
+            guard var component = manifest[name] as? PlistDict,
+                  let info = component["Info"] as? PlistDict,
+                  let path = info["Path"] as? String,
+                  CustomFirmwareDaemons.isPlainRelativePath(path)
+            else { throw ManifestError.missingKey("Safe Path for \(name) in the hybrid build identity") }
+            let data = try Data(contentsOf: restoreDir.appending(path: path), options: .mappedIfSafe)
+            component["Digest"] = Data(SHA384.hash(data: data))
+            manifest[name] = component
+        }
+        var normalized = identity
+        normalized["Manifest"] = manifest
+        return normalized
+    }
 
     /// Deep-copy a single Manifest entry from a build identity.
     static func entry(
@@ -348,8 +396,10 @@ public enum FirmwareManifest {
         m["KernelCache"] = try entry(C, vpr, "KernelCache") // research
         m["RestoreKernelCache"] = try entry(C, vp, "RestoreKernelCache") // release
 
-        // Recovery mode (vphone600ap carries this entry).
-        m["RecoveryMode"] = try entry(C, vp, "RecoveryMode")
+        // Recovery mode, which vphone600ap carries and the research board may not.
+        if let recoveryMode = try? entry(C, vp, "RecoveryMode") {
+            m["RecoveryMode"] = recoveryMode
+        }
 
         // CloudOS erase ramdisk.
         m["RestoreRamDisk"] = try entry(C, prod, "RestoreRamDisk")

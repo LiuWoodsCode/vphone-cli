@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import VPhoneCoreKit
 
 /// Requests to a running VM's control socket, `vphone.sock`. `vm create` pings
 /// through it instead of parsing the VM process's buffered stdout, and
@@ -9,23 +10,35 @@ enum VPhoneHostAutomationProbe {
         send(["t": "ping", "screen": false], socketPath: socketPath)?["ok"] as? Bool == true
     }
 
-    /// One request, one reply line. Nil when the socket is not there or the
-    /// reply is not JSON.
-    static func send(_ request: [String: Any], socketPath: String, timeout seconds: Int = 2) -> [String: Any]? {
-        let path = socketPath.utf8CString
-        var address = sockaddr_un()
-        guard path.count <= MemoryLayout.size(ofValue: address.sun_path) else { return nil }
-        address.sun_family = sa_family_t(AF_UNIX)
-        withUnsafeMutablePointer(to: &address.sun_path) { pointer in
-            pointer.withMemoryRebound(to: CChar.self, capacity: path.count) { destination in
-                for (index, byte) in path.enumerated() {
-                    destination[index] = byte
-                }
-            }
+    /// One vphoned RPC through the VM process. A refusal from vphoned carries
+    /// its error object as `detail`; anything else is a transport failure.
+    static func rpc(_ method: String, params: [String: Any], socketPath: String, timeout: Int) throws -> [String: Any] {
+        let request: [String: Any] = ["t": "rpc", "method": method, "params": params, "screen": false]
+        guard let reply = send(request, socketPath: socketPath, timeout: timeout, maximumReply: 64 << 20) else {
+            throw VPhoneGuestCallError(kind: .transport, message: "no answer from vphone.sock")
         }
+        if reply["ok"] as? Bool == true {
+            return reply["result"] as? [String: Any] ?? [:]
+        }
+        let message = reply["error"] as? String ?? "refused"
+        if let detail = reply["guest_error"] as? [String: Any] {
+            throw VPhoneGuestCallError(kind: .refused, message: message, detail: detail)
+        }
+        // The VM answered for the guest: not connected yet, or the request
+        // to vphoned failed on the way.
+        throw VPhoneGuestCallError(kind: .transport, message: message)
+    }
 
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { return nil }
+    /// One request, one reply line. Nil when the socket is not there or the
+    /// reply is not JSON. `timeout` bounds each read; `maximumReply` the
+    /// reply (an `apps.list` or `processes.list` runs to a few hundred KB).
+    static func send(
+        _ request: [String: Any],
+        socketPath: String,
+        timeout seconds: Int = 2,
+        maximumReply: Int = 1 << 20,
+    ) -> [String: Any]? {
+        guard case let .success(fd) = VPhoneUnixSocket.connect(to: socketPath) else { return nil }
         defer { close(fd) }
 
         var timeout = timeval(tv_sec: seconds, tv_usec: 0)
@@ -36,14 +49,7 @@ enum VPhoneHostAutomationProbe {
         _ = withUnsafePointer(to: &noSigPipe) {
             setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, $0, socklen_t(MemoryLayout<Int32>.size))
         }
-        let connected = withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
-            }
-        }
-        guard connected == 0,
-              var request = try? JSONSerialization.data(withJSONObject: request)
-        else { return nil }
+        guard var request = try? JSONSerialization.data(withJSONObject: request) else { return nil }
         request.append(0x0A)
         let written = request.withUnsafeBytes { bytes in
             Darwin.write(fd, bytes.baseAddress, bytes.count)
@@ -51,8 +57,8 @@ enum VPhoneHostAutomationProbe {
         guard written == request.count else { return nil }
 
         var reply = Data()
-        var buffer = [UInt8](repeating: 0, count: 512)
-        while reply.count < 1 << 20 {
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        while reply.count < maximumReply {
             let count = buffer.withUnsafeMutableBytes { bytes in
                 Darwin.read(fd, bytes.baseAddress, bytes.count)
             }

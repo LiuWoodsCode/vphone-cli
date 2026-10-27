@@ -19,7 +19,7 @@ extension FirmwarePipeline {
 
     /// Find the `*Restore*` subdirectory inside the VM directory.
     /// Mirrors Python `find_restore_dir`.
-    func findRestoreDirectory() throws -> URL {
+    public func findRestoreDirectory() throws -> URL {
         let fm = FileManager.default
         let contents = try fm.contentsOfDirectory(
             at: vmDirectory,
@@ -35,6 +35,27 @@ extension FirmwarePipeline {
         return restoreDir
     }
 
+    /// The research board kernelcache the VM's mix is built from, as shipped:
+    /// its `RestoreKernelCache`, from the originals once `fw patch` has put it
+    /// aside. Nil when the restore tree has vphone600 components.
+    public func researchBoardKernelcache() throws -> KernelCacheMixer.Input? {
+        let restoreDir = try findRestoreDirectory()
+        guard Self.researchBoardStandsIn(restoreDir: restoreDir) else { return nil }
+        let file = try restoreDir.appending(path: Self.manifestComponentPath("RestoreKernelCache", in: restoreDir))
+        let stashed = originalURL(for: file).flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+        return try KernelCacheMixer.Input(
+            kernelcache: Data(contentsOf: stashed ?? file),
+            guest: readGuestDevice(restoreDir).family.rawValue,
+            restoreTree: restoreDir,
+        )
+    }
+
+    /// The guest family the preserved iPhone manifest names (iPhone when none).
+    static func guestFamily(restoreDir: URL) -> String {
+        let manifest = restoreDir.appendingPathComponent("iPhone-BuildManifest.plist")
+        return (VPhoneGuestDevice.detect(buildManifestAt: manifest) ?? .default).family.rawValue
+    }
+
     /// `ProductVersion` from a manifest in `restoreDir`, or nil if absent/unreadable.
     static func readProductVersion(_ restoreDir: URL, manifest: String) -> String? {
         let url = restoreDir.appendingPathComponent(manifest)
@@ -46,9 +67,16 @@ extension FirmwarePipeline {
         return version
     }
 
-    /// iPhone base version (`iPhone-BuildManifest.plist`, preserved by fw_prepare).
+    /// The version of the OTA a device without an IPSW takes its userland
+    /// from, which `fw prepare` records beside the base's manifest: the
+    /// userland, not the restored IPSW, is what the guest patches meet.
+    public static let otaVersionFileName = "OTA-SystemVersion.plist"
+
+    /// iPhone base version: the staged OTA's when there is one, else
+    /// `iPhone-BuildManifest.plist`'s, preserved by fw_prepare.
     static func readBaseProductVersion(_ restoreDir: URL) -> String? {
-        readProductVersion(restoreDir, manifest: "iPhone-BuildManifest.plist")
+        readProductVersion(restoreDir, manifest: otaVersionFileName)
+            ?? readProductVersion(restoreDir, manifest: "iPhone-BuildManifest.plist")
     }
 
     /// The device whose IPSW supplied the guest OS: the one `fw prepare`
@@ -57,6 +85,12 @@ extension FirmwarePipeline {
     /// names none.
     func readGuestDevice(_ restoreDir: URL) -> VPhoneGuestDevice {
         let recorded = try? VPhoneVirtualMachineManifest.load(from: vmDirectory.appendingPathComponent("config.plist"))
+        // An Apple TV 4K has no IPSW: it is built over an Apple TV HD restore
+        // and takes its userland from an OTA, so the HD's manifest never lists
+        // it. Its own device tree, placed in the restore tree, presents it.
+        if let guest = recorded?.guestDevice, guest.restoreBase != nil {
+            return guest
+        }
         return VPhoneGuestDevice.detect(
             buildManifestAt: restoreDir.appendingPathComponent("iPhone-BuildManifest.plist"),
             preferring: recorded?.guestProductType,
@@ -66,6 +100,32 @@ extension FirmwarePipeline {
     /// cloudOS/kernel version (the live `BuildManifest.plist`).
     static func readCloudOSProductVersion(_ restoreDir: URL) -> String? {
         readProductVersion(restoreDir, manifest: "BuildManifest.plist")
+    }
+
+    static func manifestComponentPath(_ component: String, in restoreDir: URL) throws -> String {
+        let url = restoreDir.appendingPathComponent("BuildManifest.plist")
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        guard let root = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let identities = root["BuildIdentities"] as? [[String: Any]]
+        else {
+            throw PatcherError.invalidFormat("BuildManifest.plist has no BuildIdentities")
+        }
+        let paths = Set(identities.compactMap { identity -> String? in
+            guard let manifest = identity["Manifest"] as? [String: Any],
+                  let entry = manifest[component] as? [String: Any],
+                  let info = entry["Info"] as? [String: Any]
+            else { return nil }
+            return info["Path"] as? String
+        })
+        guard paths.count == 1, let path = paths.first else {
+            throw PatcherError.invalidFormat(
+                "BuildManifest.plist names \(paths.count) distinct \(component) paths, expected one",
+            )
+        }
+        guard CustomFirmwareDaemons.isPlainRelativePath(path) else {
+            throw PatcherError.invalidFormat("BuildManifest.plist has unsafe \(component) path: \(path)")
+        }
+        return path
     }
 
     /// Dotted `ProductVersion` >= major.minor, compared numerically. nil is false.

@@ -1,16 +1,17 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Settings
 
-/// Hardware, network and startup for one machine, or for several at once. The
+/// Hardware, network, startup and location for one machine, or for several at once. The
 /// fields start from the first machine; only the ones edited are written, to
 /// every machine, so values the machines do not share are left alone. A fixed
 /// address, a MAC and forwarded ports belong to one machine, so they are only
 /// offered when one is selected, on pages of their own.
 struct VPhoneLaunchpadMachineSettingsView: View {
     private enum Field {
-        case cpu, memory, network, address, mac, forwards, mdns, macName, unlock
+        case cpu, memory, network, address, mac, forwards, mdns, macName, natPeers, unlock, location
     }
 
     enum Page: Hashable {
@@ -33,7 +34,9 @@ struct VPhoneLaunchpadMachineSettingsView: View {
     @State private var forwards: [String]
     @State private var advertisesName: Bool
     @State private var resolvesMacName: Bool
+    @State private var reachesPeers: Bool
     @State private var unlocksAtStartup: Bool
+    @State private var syncsHostLocation: Bool
     @State private var newTransport = "tcp"
     @State private var newHostPort = ""
     @State private var newGuestPort = ""
@@ -56,7 +59,9 @@ struct VPhoneLaunchpadMachineSettingsView: View {
         _forwards = State(initialValue: first?.network.portForwards?.map(\.argument) ?? [])
         _advertisesName = State(initialValue: first?.network.localHostName != nil)
         _resolvesMacName = State(initialValue: first?.network.resolvesMacName != false)
+        _reachesPeers = State(initialValue: first?.network.reachesPeers != false)
         _unlocksAtStartup = State(initialValue: first?.unlocksAtStartup == true)
+        _syncsHostLocation = State(initialValue: first?.syncsHostLocation == true)
     }
 
     private var title: Text {
@@ -134,6 +139,7 @@ struct VPhoneLaunchpadMachineSettingsView: View {
                     }
                     if !single || page == .general {
                         startupSection
+                        locationSection
                     }
                 }
                 .formStyle(.grouped)
@@ -145,7 +151,6 @@ struct VPhoneLaunchpadMachineSettingsView: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSave)
         }
-        .frame(width: 480)
         .fixedSize(horizontal: false, vertical: true)
         .onChange(of: cpu) { edited.insert(.cpu) }
         .onChange(of: memoryMB) { edited.insert(.memory) }
@@ -159,13 +164,15 @@ struct VPhoneLaunchpadMachineSettingsView: View {
         .onChange(of: forwards) { edited.insert(.forwards) }
         .onChange(of: advertisesName) { edited.insert(.mdns) }
         .onChange(of: resolvesMacName) { edited.insert(.macName) }
+        .onChange(of: reachesPeers) { edited.insert(.natPeers) }
         .onChange(of: unlocksAtStartup) { edited.insert(.unlock) }
+        .onChange(of: syncsHostLocation) { edited.insert(.location) }
         #if DEBUG
-        .onAppear {
-            if VPhoneLaunchpadPreview.isActive {
-                page = VPhoneLaunchpadPreview.machineSettingsPage
+            .onAppear {
+                if VPhoneLaunchpadPreview.isActive {
+                    page = VPhoneLaunchpadPreview.machineSettingsPage
+                }
             }
-        }
         #endif
     }
 
@@ -189,6 +196,17 @@ struct VPhoneLaunchpadMachineSettingsView: View {
         }
     }
 
+    private var locationSection: some View {
+        Section {
+            Toggle("Sync this Mac's location", isOn: $syncsHostLocation)
+        } header: {
+            Text("Location")
+        } footer: {
+            Text("While the machine runs, the guest gets this Mac's location as a simulated location. macOS asks for permission the first time. Apps in the guest also need Location Services turned on in the guest's Settings.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var networkSection: some View {
         Section {
             Picker("Mode", selection: $network) {
@@ -200,23 +218,24 @@ struct VPhoneLaunchpadMachineSettingsView: View {
             if network == "bridged" {
                 TextField("Interface", text: $bridgeInterface, prompt: Text("First available"))
             }
-            if network == "tunnel" {
-                Text("Traffic leaves through this Mac's own connections, so it follows the Mac's VPN.")
-                    .foregroundStyle(.secondary)
-            }
-            if dropsForwards {
-                Text("This mode cannot forward ports, so saving removes the port forwards.")
-                    .foregroundStyle(.secondary)
+            if network == "nat" {
+                Toggle("Reach other NAT machines", isOn: $reachesPeers)
             }
         } header: {
             if !single {
                 Text("Network")
             }
         } footer: {
-            if machines.count > 1 {
-                Text("Only the settings you change are applied to each machine.")
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(VPhoneLaunchpadNewMachineAdvancedView.networkDescription(network))
+                if dropsForwards {
+                    Text("This mode cannot forward ports, so saving removes the port forwards.")
+                }
+                if machines.count > 1 {
+                    Text("Only the settings you change are applied to each machine.")
+                }
             }
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -340,6 +359,7 @@ struct VPhoneLaunchpadMachineSettingsView: View {
         let network = edited.contains(.network) ? network : nil
         let bridgeInterface = network == "bridged" ? bridgeInterface : nil
         let unlocksAtStartup = edited.contains(.unlock) ? unlocksAtStartup : nil
+        let syncsHostLocation = edited.contains(.location) ? syncsHostLocation : nil
         var networkArguments: [String] = []
         if single {
             if edited.contains(.address) {
@@ -357,6 +377,9 @@ struct VPhoneLaunchpadMachineSettingsView: View {
             }
             if edited.contains(.macName) {
                 networkArguments += ["--mac-name", resolvesMacName ? "on" : "off"]
+            }
+            if edited.contains(.natPeers) {
+                networkArguments += ["--nat-peers", reachesPeers ? "on" : "off"]
             }
             if edited.contains(.mdns) {
                 networkArguments += ["--mdns", advertisesName ? "on" : "off"]
@@ -383,6 +406,7 @@ struct VPhoneLaunchpadMachineSettingsView: View {
                     bridgeInterface: bridgeInterface,
                     networkArguments: networkArguments,
                     unlocksAtStartup: unlocksAtStartup,
+                    syncsHostLocation: syncsHostLocation,
                 )
             }
         }
@@ -392,15 +416,34 @@ struct VPhoneLaunchpadMachineSettingsView: View {
 
 // MARK: - Rename and clone
 
-struct VPhoneLaunchpadNameSheet: View {
+/// A new name for a machine, and for a clone whatever else it takes, in
+/// sections of `options` under the name.
+struct VPhoneLaunchpadNameSheet<Options: View>: View {
     let title: LocalizedStringKey
     let action: LocalizedStringKey
     let initial: String
     /// The machine renamed or cloned. The new name stays in its library.
     let machine: VPhoneLaunchpadMachinePath
+    @ViewBuilder let options: Options
     let onConfirm: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
+
+    init(
+        title: LocalizedStringKey,
+        action: LocalizedStringKey,
+        initial: String,
+        machine: VPhoneLaunchpadMachinePath,
+        @ViewBuilder options: () -> Options,
+        onConfirm: @escaping (String) -> Void,
+    ) {
+        self.title = title
+        self.action = action
+        self.initial = initial
+        self.machine = machine
+        self.options = options()
+        self.onConfirm = onConfirm
+    }
 
     private var fitsLocation: Bool {
         VPhoneLaunchpadMachineLocations.socketPathFits(root: machine.libraryRoot, name: name)
@@ -424,6 +467,7 @@ struct VPhoneLaunchpadNameSheet: View {
                             .foregroundStyle(.red)
                     }
                 }
+                options
             }
             .formStyle(.grouped)
         } actions: {
@@ -436,88 +480,56 @@ struct VPhoneLaunchpadNameSheet: View {
             .keyboardShortcut(.defaultAction)
             .disabled(!isValid)
         }
-        .frame(width: 420)
         .fixedSize(horizontal: false, vertical: true)
         .onAppear { name = initial }
     }
 }
 
-// MARK: - Export
-
-/// One machine offers the archive options. Several are written with the
-/// defaults, one `<name>.tzst` each, into a folder chosen once.
-struct VPhoneLaunchpadExportView: View {
-    let machines: [VPhoneLaunchpadMachinePath]
-    @Environment(VPhoneLaunchpadModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @State private var densest = false
-    @State private var includeIPSW = false
-
-    private var title: Text {
-        machines.count == 1 ? Text("Export \(machines[0].name)") : Text("Export \(machines.count) Machines")
+extension VPhoneLaunchpadNameSheet where Options == EmptyView {
+    init(
+        title: LocalizedStringKey,
+        action: LocalizedStringKey,
+        initial: String,
+        machine: VPhoneLaunchpadMachinePath,
+        onConfirm: @escaping (String) -> Void,
+    ) {
+        self.init(title: title, action: action, initial: initial, machine: machine, options: { EmptyView() }, onConfirm: onConfirm)
     }
+}
+
+/// Clone, with the choice of a device of its own. A new identity is the
+/// default: a clone that keeps the original's ECID, UDID and MAC cannot run
+/// at the same time as it, and the host sees them as one device.
+struct VPhoneLaunchpadCloneSheet: View {
+    let machine: VPhoneLaunchpadMachinePath
+    let onConfirm: (_ name: String, _ newIdentity: Bool) -> Void
+    @State private var newIdentity = true
 
     var body: some View {
-        VPhoneLaunchpadSheet(title) {
-            Form {
-                if machines.count == 1 {
-                    Section {
-                        Toggle("Maximum compression", isOn: $densest)
-                        Toggle("Include the restore IPSW directory", isOn: $includeIPSW)
-                    } footer: {
-                        Text(densest
-                            ? "Creates a smaller .txz archive. Export takes much longer."
-                            : "Creates a .tzst archive.")
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Section {
-                        ForEach(machines, id: \.self) { machine in
-                            Text(verbatim: "\(machine.name).tzst")
-                        }
-                    } footer: {
-                        Text("Creates a .tzst archive for each machine in the folder you choose.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
+        VPhoneLaunchpadNameSheet(
+            title: "Clone \(machine.name)",
+            action: "Clone",
+            initial: "\(machine.name)-clone",
+            machine: machine,
+        ) {
+            Section {
+                Toggle("New device identity", isOn: $newIdentity)
+            } footer: {
+                Text(newIdentity
+                    ? "The clone gets its own ECID, UDID and MAC address, so it can run alongside the original. The guest asks to trust this Mac again the first time it connects."
+                    : "The clone is the same device as the original. Run only one of them at a time.")
+                    .foregroundStyle(.secondary)
             }
-            .formStyle(.grouped)
-        } actions: {
-            Button("Cancel") { dismiss() }
-                .keyboardShortcut(.cancelAction)
-            Button("Choose Location…") { choose() }
-                .keyboardShortcut(.defaultAction)
+        } onConfirm: { name in
+            onConfirm(name, newIdentity)
         }
-        .frame(width: 420)
-        .fixedSize(horizontal: false, vertical: true)
     }
+}
 
-    private func choose() {
-        let library = model.machines
-        if machines.count == 1 {
-            let machine = machines[0]
-            let panel = NSSavePanel()
-            panel.title = String(localized: "Export \(machine.name)")
-            panel.nameFieldStringValue = "\(machine.name).\(densest ? "txz" : "tzst")"
-            let densest = densest
-            let includeIPSW = includeIPSW
-            panel.present { url in
-                Task { await library.export([(machine, url)], densest: densest, includeIPSW: includeIPSW) }
-                dismiss()
-            }
-            return
-        }
-        let panel = NSOpenPanel()
-        panel.title = String(localized: "Export \(machines.count) Machines")
-        panel.prompt = String(localized: "Export")
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        let machines = machines
-        panel.present { folder in
-            let items = machines.map { ($0, folder.appendingPathComponent("\($0.name).tzst")) }
-            Task { await library.export(items, densest: false, includeIPSW: false) }
-            dismiss()
-        }
-    }
+// MARK: - Export
+
+extension UTType {
+    /// `<name>.vpea`: a machine as `vm export` writes it, a gnutar of its
+    /// folder compressed with zstd. Declared in Info.plist.
+    static let vphoneExportedArchive = UTType(exportedAs: "com.vphone.exported-archive")
 }

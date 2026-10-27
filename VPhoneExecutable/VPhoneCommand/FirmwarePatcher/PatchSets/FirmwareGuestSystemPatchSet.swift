@@ -15,6 +15,52 @@ import VPhonePatchKit
 public enum FirmwareGuestSystemPatchSet {
     public static let identifier = "com.vphone.patchset.guest.system"
 
+    public static let settingsRootRows = "system-preferences-exp-root_rows"
+    public static let settingsSoftwareUpdate = "dyld-exp-settings_software_update_row"
+    public static let settingsRowPatches: Set<String> = [settingsRootRows, settingsSoftwareUpdate]
+
+    public static let installCoordinationPersona = "system-installcoordination_proxy-cfw-persona_lookup"
+    public static let installCoordinationPersonaMarker = "/usr/lib/vphone-installcoordination-persona-lookup"
+    public static let homePodInstallPersonaLibrary = "/usr/lib/libvphoneinstallpersona.dylib"
+    public static let homePodAdHocInstall = "system-installd-exp-homepod_adhoc"
+    public static let homePodMISFixLibrary = "/usr/lib/libvphonehomepodmisfix.dylib"
+    public static let metalCacheReuse = "system-systemhook-cfw-metal_cache_reuse"
+    public static let metalCacheReuseMarker = "/usr/lib/vphone-metal-cache-reuse"
+    public static let gyroscope = "system-backboardd-cfw-gyroscope"
+    public static let accelerometer = "system-backboardd-cfw-accelerometer"
+    public static let attitude = "system-apps-cfw-attitude"
+    public static let followUpGroups = "system-preferences-cfw-followup_groups"
+    public static let signInSheets = "system-apps-cfw-signin_sheets"
+    public static let arm64eX1DyldBootstrap = "system-dyld-boot-arm64e_x1_bootstrap"
+    public static let arm64eX1CacheBootstrap = "dyld-boot-arm64e_x1_bootstrap"
+    public static let arm64eX1LaunchdBootstrap = "system-launchd-boot-arm64e_x1_bootstrap"
+    public static let arm64eX1FsckBootstrap = "system-fsck-boot-arm64e_x1_bootstrap"
+    public static let arm64eX1MountBootstrap = "system-mount-boot-arm64e_x1_bootstrap"
+
+    public static let paravirtGPUIndexOffset = "system-paravirt_gpu-cfw-heap_index_offset"
+    public static let paravirtGPUDriverPath =
+        "System/Library/Extensions/AppleParavirtGPUMetalIOGPUFamily.bundle/AppleParavirtGPUMetalIOGPUFamily"
+
+    public static let locationdCohorting = "system-locationd-cfw-disable_auto_cohort"
+    public static let virtualBluetooth = "system-bluetoothd-cfw-btvc_le_connection"
+    public static let jetsamDisableAllowed = "system-jetsamproperties-cfw-disable_allowed"
+    public static let tvTPRO = "system-dyld-exp-tv_tpro"
+    public static let tvSetupDisplayLookup = "system-setupbackground-exp-pineboard_lookup"
+    public static let tvLegacySetup = "system-tv-exp-legacy_setup"
+    public static let tvSetupFocus = "system-setup-exp-deferred_focus"
+    public static let tvSetupFocusLibrary = "/usr/lib/libvphonetvsetupfocus.dylib"
+    public static let tvLocalActivation = "system-mobileactivationd-exp-tv_activation"
+    /// Replaces the restored System volume with an Apple TV 4K userland
+    /// staged from its OTA. Research only: no IPSW exists for that device.
+    public static let tvOTAUserland = "system-tv-exp-ota_userland"
+    public static let homePodOTAUserland = "system-homepod-exp-ota_userland"
+    public static let homePodCryptexClass = "preboot-homepod-exp-cryptex_class"
+    public static let homePodCryptexStaging = "system-cryptexd-exp-homepod_staging"
+    public static let homePodCryptexStagingLibrary = "/usr/lib/libvphonecryptexstaging.dylib"
+    public static let homePodSoundGlow = "system-homepod-exp-sound_glow"
+    public static let homePodSoundGlowPath = "/usr/share/vphone/HomePodSoundGlow.plist"
+    public static let otaUserland = "system-exp-ota_userland"
+
     private static let ios27 = VPhonePatchApplicability(iOSBase: .major(27))
 
     /// The bases where short-circuiting `checkTrustAndAuthorization` in the
@@ -38,6 +84,116 @@ public enum FirmwareGuestSystemPatchSet {
         name: "Guest System",
         summary: "Shared-cache policy gates, patched system daemons and the vphone guest payload",
         patches: [
+            VPhonePatchDeclaration(
+                identifier: homePodCryptexClass,
+                title: "HomePod Cryptex product class",
+                summary: "Sets the research kernel's Cryptex product class to the native tvOS/HomePod value so signed tvOS developer images pass Image4 equality validation. Changes only /product/cryptex1-product-class; preserves the global product token.",
+                target: .prebootDeviceTree,
+                applicability: ios27,
+            ),
+            VPhonePatchDeclaration(
+                identifier: homePodAdHocInstall,
+                title: "HomePod local app signatures",
+                summary: "Ports the existing MIS signature-option adapter to HomePod installd so locally signed research apps install without the provisioning service HomePod does not ship. Keeps MIS's native signature validation and returned metadata; no device identity or profile scope hooks.",
+                target: .guestExecutable(path: "/usr/libexec/installd"),
+                applicability: ios27,
+            ),
+            VPhonePatchDeclaration(
+                identifier: homePodCryptexStaging,
+                title: "HomePod developer image staging",
+                summary: "Lets HomePod 27 cryptexd stage and activate developer images on the research guest: accepts unsupported protection classes, uses until-reboot DDI lifetime, and tolerates the research SEP's unavailable digest storage only for the verified DDI. Retains Apple personalization, signature, root-hash and trust-cache checks.",
+                target: .guestExecutable(path: "/usr/libexec/cryptexd"),
+                applicability: ios27,
+            ),
+            VPhonePatchDeclaration(
+                identifier: homePodOTAUserland,
+                title: "HomePod userland from OTA",
+                summary: "Research: replaces the restored HomePod mini System volume with its full 27.2 or later OTA, retaining the HomePod restore identity and cloudOS boot chain. The staged payload is verified before installation.",
+                target: .guestFile(path: "/"),
+                applicability: VPhonePatchApplicability(iOSBase: .atLeast(major: 27, minor: 2)),
+            ),
+            VPhonePatchDeclaration(
+                identifier: homePodSoundGlow,
+                title: "HomePod Sound Glow",
+                summary: "Enables the native HomePod 27.2 media display through a process-local accessory setting adapter. Requires vphoned and the donor-driven HomePod top cap; keeps the original product token.",
+                target: .guestFile(path: "/usr/share/vphone/HomePodSoundGlow.plist"),
+                applicability: VPhonePatchApplicability(iOSBase: .atLeast(major: 27, minor: 2)),
+            ),
+            VPhonePatchDeclaration(
+                identifier: otaUserland,
+                title: "Full OTA system update",
+                summary: "Experimental: replaces the System volume from a staged full OTA, retaining Data, xART, NVRAM and SEPStorage. Requires a stopped disk/SEP/NVRAM snapshot and a prepared target; installs the target kernelcache and TXM in the same transaction. Use fw ota to verify migration and roll back.",
+                target: .guestFile(path: "/"),
+                applicability: ios27,
+            ),
+            VPhonePatchDeclaration(
+                identifier: tvTPRO,
+                title: "TV TPRO feature detection",
+                summary: "Plain-arm64 TVOS compatibility: stops standalone and cached dyld enabling cloudOS-advertised hardware TPRO and pager modes, preserving page-in linking and all fixups.",
+                target: .guestExecutable(path: "/usr/lib/dyld"),
+                applicability: VPhonePatchApplicability(iOSBase: .major(26)),
+            ),
+            VPhonePatchDeclaration(
+                identifier: tvLegacySetup,
+                title: "Legacy TV setup (research)",
+                summary: "Research fallback: selects the legacy TVSetup app in tvOS 27.2 by disabling TVSetupV2 and TVSetupV2HW. Off in every preset; disabling restores the original flags and the new Setup flow.",
+                target: .guestFile(path: "/" + CustomFirmwareTVSetup.relativePath),
+                applicability: VPhonePatchApplicability(iOSBase: .release(major: 27, minor: 2)),
+            ),
+            VPhonePatchDeclaration(
+                identifier: tvLocalActivation,
+                title: "TV local activation",
+                summary: "Uses mobileactivationd’s existing local activation path for the tvOS 27.2 research guest, allowing the native Setup assistant to proceed without an Apple activation record.",
+                target: .guestExecutable(path: "/usr/libexec/mobileactivationd"),
+                applicability: VPhonePatchApplicability(iOSBase: .release(major: 27, minor: 2)),
+            ),
+            VPhonePatchDeclaration(
+                identifier: tvSetupFocus,
+                title: "TV setup button focus",
+                summary: "Uses native TV button-focus policy in the new tvOS 27.2 Setup window, so Consumer Select works without indirect-touch activity, including after idle. Preserves explicit focus overrides, eligibility and all Setup readiness checks.",
+                target: .guestExecutable(path: "/Applications/Setup.app/Setup"),
+                applicability: VPhonePatchApplicability(iOSBase: .release(major: 27, minor: 2)),
+            ),
+            VPhonePatchDeclaration(
+                identifier: tvSetupDisplayLookup,
+                title: "TV setup display connection",
+                summary: "Lets tvOS 27.2 SetupBackground look up PineBoardServices on the cloudOS kernel. Without this one sandbox exception, its display-state request times out and setup stays black.",
+                target: .guestEntitlements(path: "/Applications/SetupBackground.app/SetupBackground"),
+                applicability: VPhonePatchApplicability(iOSBase: .release(major: 27, minor: 2)),
+            ),
+            VPhonePatchDeclaration(
+                identifier: tvOTAUserland,
+                title: "Apple TV 4K userland from OTA",
+                summary: "Research: replaces the System volume with the arm64e tvOS userland staged in the VM's OTAUserland folder, extracted with aa so ownership, modes, flags and compression survive.",
+                target: .guestFile(path: "/"),
+                applicability: VPhonePatchApplicability(iOSBase: .atLeast(major: 26, minor: 0)),
+            ),
+            VPhonePatchDeclaration(
+                identifier: virtualBluetooth,
+                title: "Virtual Bluetooth",
+                summary: "Turns on the feature flag that lets bluetoothd establish LE connections between guests over its Bonjour virtual controller.",
+                target: .guestFile(path: "/" + CustomFirmwareBluetoothVirtualController.relativePath),
+                applicability: VPhonePatchApplicability(iOSBase: .atLeast(major: 26, minor: 0)),
+            ),
+            VPhonePatchDeclaration(
+                identifier: locationdCohorting,
+                title: "locationd startup stability",
+                summary: "Uses independent location silos to avoid iOS 27 startup crashes and queue hangs on the research guest.",
+                target: .guestFile(path: "/" + CustomFirmwareLocationdCohorting.relativePath),
+                applicability: ios27,
+            ),
+            VPhonePatchDeclaration(
+                identifier: jetsamDisableAllowed,
+                title: "Disabled services stay off",
+                summary: """
+                Removes the iOS 27 jetsam property that makes launchd load some daemons whatever \
+                its disabled list says. Without it the trimmed service profile and the OTA block \
+                do not hold on a guest that presents its board.
+                """,
+                target: .guestFile(path: "/" + CustomFirmwareJetsamDisableAllowed.directory),
+                applicability: ios27,
+            ),
+
             // MARK: Shared Cache Policy
 
             VPhonePatchDeclaration(
@@ -88,7 +244,64 @@ public enum FirmwareGuestSystemPatchSet {
                 applicability: misTrustAuthBases,
             ),
 
+            VPhonePatchDeclaration(
+                identifier: settingsRootRows,
+                title: "Hide selected Settings root rows",
+                summary: "Hides Apple Account, Game Center, iCloud and Wallet on reviewed 24A435 Preferences. Does not hide Indexing or Software Update. Other binary revisions are refused.",
+                target: .guestExecutable(path: "/Applications/Preferences.app/Preferences"),
+                applicability: VPhonePatchApplicability(iOSBase: .release(major: 27, minor: 0)),
+            ),
+
+            VPhonePatchDeclaration(
+                identifier: settingsSoftwareUpdate,
+                title: "Hide Software Update in Settings",
+                summary: "Hides the General Software Update row in reviewed 24A435 GeneralSettingsUI. Uses cache-page re-attestation and the normal undo log; other image UUIDs are refused.",
+                target: .dyldSharedCache,
+                applicability: VPhonePatchApplicability(iOSBase: .release(major: 27, minor: 0)),
+            ),
+
             // MARK: System Daemons
+
+            VPhonePatchDeclaration(
+                identifier: arm64eX1DyldBootstrap,
+                title: "ARM64E_X1 dyld bootstrap",
+                summary: "Lowers X1 instructions in dyld so launchd can install the host exception handler that translates later faults on demand.",
+                target: .guestExecutable(path: "/usr/lib/dyld"),
+                applicability: ios27,
+                bootEssential: true,
+            ),
+            VPhonePatchDeclaration(
+                identifier: arm64eX1CacheBootstrap,
+                title: "ARM64E_X1 cache bootstrap",
+                summary: "Lowers only libSystem's pre-constructor X1 code so launchd can install the global on-demand instruction handler.",
+                target: .dyldSharedCache,
+                applicability: ios27,
+                bootEssential: true,
+            ),
+            VPhonePatchDeclaration(
+                identifier: arm64eX1LaunchdBootstrap,
+                title: "ARM64E_X1 launchd bootstrap",
+                summary: "Lowers PID 1 itself so its injected on-demand instruction handler can become active for the rest of userland.",
+                target: .guestExecutable(path: "/sbin/launchd"),
+                applicability: ios27,
+                bootEssential: true,
+            ),
+            VPhonePatchDeclaration(
+                identifier: arm64eX1FsckBootstrap,
+                title: "ARM64E_X1 fsck bootstrap",
+                summary: "Lowers the boot fsck wrapper so its forked checker does not inherit runtime-modified signed pages.",
+                target: .guestExecutable(path: "/sbin/fsck"),
+                applicability: ios27,
+                bootEssential: true,
+            ),
+            VPhonePatchDeclaration(
+                identifier: arm64eX1MountBootstrap,
+                title: "ARM64E_X1 mount bootstrap",
+                summary: "Lowers the boot mount wrapper so its forked mount helpers do not inherit runtime-modified signed pages.",
+                target: .guestExecutable(path: "/sbin/mount"),
+                applicability: ios27,
+                bootEssential: true,
+            ),
 
             VPhonePatchDeclaration(
                 identifier: "system-seputil-boot-gigalocker_uuid",
@@ -139,6 +352,24 @@ public enum FirmwareGuestSystemPatchSet {
                 applicability: ios27,
             ),
 
+            VPhonePatchDeclaration(
+                identifier: installCoordinationPersona,
+                title: "Xcode installation persona lookup",
+                summary: "Allows only the CoreDevice installation proxy to look up UserManager through launchd on the hybrid guest. HomePod uses a dedicated tvOS adapter with the same audit-token checks, independently of the iPhone environment.",
+                target: .guestFile(path: installCoordinationPersonaMarker),
+                applicability: ios27,
+            ),
+            VPhonePatchDeclaration(
+                identifier: metalCacheReuse,
+                title: "Keep Metal shader caches",
+                summary: """
+                Has SystemHook request FS_CACHE_REUSE_ON_REBOOT=1 at process startup, \
+                allowing Metal's guest shader caches to survive a reboot and reducing \
+                repeated shader compilation. An explicit environment setting takes precedence.
+                """,
+                target: .guestFile(path: metalCacheReuseMarker),
+            ),
+
             // MARK: Guest Payload
 
             VPhonePatchDeclaration(
@@ -156,11 +387,50 @@ public enum FirmwareGuestSystemPatchSet {
                 bootEssential: true,
             ),
             VPhonePatchDeclaration(
+                identifier: paravirtGPUIndexOffset,
+                title: "GPU heap index buffers",
+                summary: """
+                Makes the paravirtual GPU driver send every indexed draw with 64-bit offsets. Its \
+                compact command keeps an index buffer's heap offset in 16 bits, so meshes whose \
+                indices sit 64 KiB or more into an MTLHeap (Unity games) draw with another \
+                mesh's indices.
+                """,
+                target: .guestExecutable(path: "/\(paravirtGPUDriverPath)"),
+                applicability: VPhonePatchApplicability(cloudOS: .release(major: 26, minor: 4)),
+            ),
+            VPhonePatchDeclaration(
                 identifier: "system-vphoned-boot-install",
                 title: "vphoned",
                 summary: "Installs the guest daemon the host talks to over VSOCK.",
                 target: .guestFile(path: "/usr/local/bin/vphoned"),
                 bootEssential: true,
+            ),
+            VPhonePatchDeclaration(
+                identifier: homePodTopCap,
+                title: "HomePod top cap",
+                summary: "Stages the donor MiniDisplay geometry for vphoned's virtual HomePod LED display and volume buttons, with a SoundBoard-only shim for its reserved HID class identity.",
+                target: .guestFile(path: homePodDisplayPath),
+            ),
+            VPhonePatchDeclaration(
+                identifier: homePodSetupBypass,
+                title: "HomePod setup completion",
+                summary: "Completes the donor's local AudioAccessory setup state as mobile, prepares SetupAssistant's native launch sentinel and lets SoundBoard initialize its post-setup services. Turning it off restores the prior completion flags at the next boot. Does not provision accounts, activation or a HomeKit home.",
+                target: .guestFile(path: homePodSetupPath),
+                applicability: VPhonePatchApplicability(iOSBase: .major(27)),
+            ),
+            VPhonePatchDeclaration(
+                identifier: homePodSiriSpeech,
+                title: "HomePod native Siri speech",
+                summary: "Enables the HomePod guest's output-only auxiliary audio session on native Siri speech events, using the existing SoundBoard adapter. Requires vphoned, the HomePod top cap and virtio sound. Turning it off removes only this policy. The native branch is verified; repair playback remains pending runtime validation.",
+                target: .guestFile(path: homePodSiriSpeechPath),
+                applicability: VPhonePatchApplicability(iOSBase: .major(27)),
+            ),
+            VPhonePatchDeclaration(
+                identifier: homePodWelcome,
+                title: "HomePod first-boot welcome",
+                summary: "Enables a guest-owned, one-time welcome after HomePod setup, display and audio services become ready. Requires vphoned, the HomePod top cap, local setup completion, virtio sound and native Siri speech. Turning it off removes the policy and preserves the guest's once-only state. Native welcome playback remains pending runtime validation.",
+                target: .guestFile(path: homePodWelcomePath),
+                applicability: VPhonePatchApplicability(iOSBase: .major(27)),
             ),
             VPhonePatchDeclaration(
                 identifier: "system-launchdaemons-boot-environment",
@@ -173,11 +443,61 @@ public enum FirmwareGuestSystemPatchSet {
                 and into lockdownd and remoted, which tell the host a configured UDID. It also \
                 ships libhapticsfix.dylib, which SystemHook loads into SpringBoard so UIKit's \
                 feedback engine takes the no-haptics path instead of crashing on the VM's absent \
-                haptic hardware, and libbatteryhealthfix.dylib, inserted into Settings, which gives \
-                the virtual battery the health record Battery Health waits for.
+                haptic hardware, libbatteryhealthfix.dylib, inserted into Settings, which gives \
+                the virtual battery the health record Battery Health waits for, and \
+                libdevicehubfix.dylib, inserted into cryptexd, which then stages the iOS 27 \
+                developer disk image, into the image's dtremotedisplayd and dtdeviceinfod, \
+                which then report the media stream features and the screen mask Xcode's \
+                DeviceHub needs to show the screen, and into avconferenced, where a stream \
+                split into bands would otherwise deadlock the host GPU. \
+                libdevicename.dylib, inserted into configd and lockdownd, does nothing until \
+                vphoned stores a device name (the host sends the VM's name); then configd \
+                publishes that name and lockdownd refuses to rename the device.
                 """,
                 target: .guestFile(path: "/Library/LaunchDaemons"),
                 bootEssential: true,
+            ),
+
+            // MARK: Account prompts
+
+            VPhonePatchDeclaration(
+                identifier: followUpGroups,
+                title: "Hide Settings follow-up groups",
+                summary: "Installs libprefsfix.dylib, loaded by SystemHook into Settings. Hides the CoreFollowUp groups: Apple Account suggestions, services included with purchase, AppleCare, More for Your iPhone and Screen Time updates. Removing the library shows them again on the next Settings launch.",
+                target: .guestFile(path: "/usr/lib/libprefsfix.dylib"),
+            ),
+
+            VPhonePatchDeclaration(
+                identifier: signInSheets,
+                title: "Suppress sign-in sheets",
+                summary: "Installs libsigninfix.dylib, loaded by SystemHook into every app. Drops Apple Account, iCloud, Game Center and Media & Purchases sign-in sheets; account daemons are untouched. Removing the library restores the sheets on the next app launch.",
+                target: .guestFile(path: "/usr/lib/libsigninfix.dylib"),
+            ),
+
+            // MARK: Motion
+
+            VPhonePatchDeclaration(
+                identifier: accelerometer,
+                title: "Virtual gravity accelerometer",
+                summary: "Installs libvphoneaccelerometer.dylib. Publishes a built-in HID gravity sensor and bridges its classified pose into backboardd's native device-orientation sink. In SpringBoard, recomputes orientation delivery and deferral after the real backlight seed. Follows display.rotation across relaunches; removing the library disables both after a reboot.",
+                target: .guestFile(path: "/usr/lib/libvphoneaccelerometer.dylib"),
+                applicability: VPhonePatchApplicability(iOSBase: .atLeast(major: 18, minor: 0)),
+            ),
+
+            VPhonePatchDeclaration(
+                identifier: gyroscope,
+                title: "Virtual 3D gyroscope",
+                summary: "Installs libvphonegyro.dylib, loaded by SystemHook into backboardd. Publishes a virtual HID gyro service using the three-axis rotation rate configured through vphoned. Removing the library disables the provider after a reboot.",
+                target: .guestFile(path: "/usr/lib/libvphonegyro.dylib"),
+                applicability: VPhonePatchApplicability(iOSBase: .atLeast(major: 18, minor: 0)),
+            ),
+
+            VPhonePatchDeclaration(
+                identifier: attitude,
+                title: "Device attitude simulation",
+                summary: "Installs libvphoneattitude.dylib, loaded by SystemHook into apps outside system UI services such as SpringBoard. Supplies a stationary Core Motion pose configured through vphoned, with polling and callback updates in the arbitrary vertical reference frame. Disabling simulation restores native motion; removing the library reverts the hook on app relaunch.",
+                target: .guestFile(path: "/usr/lib/libvphoneattitude.dylib"),
+                applicability: VPhonePatchApplicability(iOSBase: .atLeast(major: 18, minor: 0)),
             ),
 
             // MARK: Audio
@@ -290,6 +610,13 @@ public enum FirmwareGuestSystemPatchSet {
                 target: .prebootDeviceTree,
             ),
             VPhonePatchDeclaration(
+                identifier: homePodAudioProduct,
+                title: "HomePod donor product identity (experimental)",
+                summary: "Copies the donor's product-id into Preboot, changing MobileGestalt identity system-wide. Off in every preset: audio uses VirtualAudio's local product override instead. Retained for explicit research and to restore the shared Preboot backup when disabled after an earlier install.",
+                target: .prebootDeviceTree,
+                applicability: VPhonePatchApplicability(iOSBase: .major(27)),
+            ),
+            VPhonePatchDeclaration(
                 identifier: prebootIPhoneProduct,
                 title: "iPhone product description",
                 summary: """
@@ -387,7 +714,17 @@ public enum FirmwareGuestSystemPatchSet {
 
     /// The iPad audio node repair in the restored Preboot device tree, for an
     /// iPad VM patched before `fw patch` copied the board's node.
+    public static let homePodTopCap = "system-homepod-exp-top_cap"
+    public static let homePodDisplayPath = "/usr/share/vphone/HomePodDisplay.plist"
+    public static let homePodSetupBypass = "system-homepod-exp-setup_bypass"
+    public static let homePodSetupPath = "/usr/share/vphone/HomePodSetup.plist"
+    public static let homePodWelcome = "system-homepod-exp-welcome"
+    public static let homePodWelcomePath = "/usr/share/vphone/HomePodWelcome.plist"
+    public static let homePodSiriSpeech = "system-homepod-exp-siri_speech"
+    public static let homePodSiriSpeechPath = "/usr/share/vphone/HomePodSiriSpeech.plist"
+
     public static let prebootBoardAudio = "preboot-cfw-devicetree_board_audio"
+    public static let homePodAudioProduct = "preboot-homepod-exp-audio_product"
 
     /// The iPhone product description in the restored Preboot device tree,
     /// taken from the iPhone's own tree: see `DeviceTreePatcher.presentPhoneProduct`.

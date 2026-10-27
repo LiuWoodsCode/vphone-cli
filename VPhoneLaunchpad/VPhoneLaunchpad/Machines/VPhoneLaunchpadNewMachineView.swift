@@ -1,42 +1,71 @@
 import AppKit
 import SwiftUI
 
-/// Name, location, Core Bundle, guest device and firmware pairing from
-/// `fw catalog`, hardware and options, on three pages. Every page has
-/// defaults, so Create works from any of them.
-/// Create hands off to the pipeline sheet.
+/// The name, guest device and firmware pairing from `fw catalog` on the
+/// basic page; hardware and network, the template, its slimming, the Core
+/// Bundle and custom IPSWs, patches, and restore files on six tabs of an Advanced
+/// Options sheet over it, behind one row that sums them up.
+/// Every setting has a default, so Create works without opening it. Create
+/// hands off to the pipeline sheet.
 struct VPhoneLaunchpadNewMachineView: View {
     let onCreate: (VPhoneLaunchpadMachinePath) -> Void
     @Environment(VPhoneLaunchpadModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+
+    /// Half the host's cores, at least two.
+    static let defaultCPU = max(2, ProcessInfo.processInfo.activeProcessorCount / 2)
+    static let defaultMemoryMB = 8192
+    static let defaultDiskSizeGB = 64
+    static let defaultNetwork = "nat"
 
     @State private var name = ""
     /// The Core Bundle picked here; nil follows the default version.
     @State private var chosenVersion: String?
     /// The canonical library the machine is created in.
     @State private var location = VPhoneLaunchpadMachineLocations.defaultRoot
-    /// A folder chosen with Other… that is not one of the library's locations.
-    @State private var chosenLocation: String?
     @State private var catalog: VPhoneLaunchpadFirmwareCatalog?
     @State private var catalogError: String?
+    /// The names of the IPSWs already in an IPSW cache, to mark the releases
+    /// that need no download.
+    @State private var downloaded: Set<String> = []
     /// The guest device's product type.
     @State private var guest: String?
     @State private var pairing: String?
     @State private var usesCustomSources = false
     @State private var iphoneSource = ""
+    @State private var customGuestProductType: String?
+    @State private var inspectedCustomSource: String?
     @State private var cloudOSSource = ""
-    @State private var cpu = 8
-    @State private var memoryMB = 8192
-    @State private var diskSizeGB = 64
-    @State private var network = "nat"
+    /// Run the release on its own cloudOS, where the research board stands in
+    /// for vphone600 and the kernelcache is mixed (`fw kernelcache`).
+    @State private var usesOwnCloudOS = false
+    /// The ipsw that stages a mix; vphone-cli does not ship one.
+    @AppStorage("KernelcacheIPSW") private var kernelcacheIPSW = ""
+    /// The Mac that links an iOS 18 guest's kernel-first mix over ssh
+    /// (`user@host`), kept like the ipsw.
+    @AppStorage("KernelcacheBuilder") private var kernelcacheBuilderDestination = ""
+    /// Its password, for ssh and sudo there. Kept only while the sheet is
+    /// open, and by the creation that runs with it.
+    @State private var kernelcacheBuilderPassword = ""
+    @State private var cpu = Self.defaultCPU
+    @State private var memoryMB = Self.defaultMemoryMB
+    @State private var diskSizeGB = Self.defaultDiskSizeGB
+    @State private var network = Self.defaultNetwork
     @State private var patches = VPhoneLaunchpadPatchSelection()
     @State private var patchCatalog: VPhoneLaunchpadPatchCatalog?
     @State private var patchCatalogError: String?
     @State private var keepArtifacts = false
-    @State private var page = Page.general
+    /// Clone the machine from a template, built first when there is none.
+    @State private var usesTemplate = true
+    @State private var slimming = VPhoneLaunchpadSlimming()
+    /// The page the Advanced Options sheet shows: the one last shown.
+    @State private var page = Page.hardware
+    @State private var showsAdvanced = false
+    @State private var showsServiceTrimmingNotice = false
 
+    /// The basic page, then the advanced ones.
     enum Page: Hashable {
-        case general, hardware, advanced
+        case basic, hardware, template, slimming, firmware, patches, storage
     }
 
     private var selectedGuest: VPhoneLaunchpadFirmwareCatalog.Device? {
@@ -63,7 +92,60 @@ struct VPhoneLaunchpadNewMachineView: View {
             let cloudOS = cloudOSSource.trimmingCharacters(in: .whitespaces)
             return iphone.isEmpty || cloudOS.isEmpty ? nil : (iphone, cloudOS)
         }
-        return selectedPairing.map { ($0.ios.url, $0.recommendedCloudOS.url) }
+        return selectedPairing.map { ($0.ios.url, ownCloudOS?.url ?? $0.recommendedCloudOS.url) }
+    }
+
+    private var warnsAboutServiceTrimming: Bool {
+        slimming.slim && slimming.trimsServices
+            && VPhoneLaunchpadSlimming.warnsAboutServiceTrimming(iphoneSource: sources?.0 ?? "")
+    }
+
+    /// The release's own cloudOS, when chosen and the pairing has one.
+    private var ownCloudOS: VPhoneLaunchpadFirmwareCatalog.Image? {
+        usesOwnCloudOS && !usesCustomSources ? selectedPairing?.matchingCloudOS : nil
+    }
+
+    /// Whether `fw patch` rebuilds the kernelcache, which a 2.12.0 bundle
+    /// stages with the ipsw (a 2.12.1 one extracts natively): on
+    /// the release's own cloudOS, always for a watch, whose kexts no cloudOS
+    /// kernelcache has, and for an iOS 18 guest, which boots its own release's
+    /// research board kernel.
+    private var rebuildsKernelcache: Bool {
+        ownCloudOS != nil || !usesCustomSources && (selectedGuest?.isWatch == true || linksKernelFirst)
+    }
+
+    private var hasKernelcacheIPSW: Bool {
+        FileManager.default.isExecutableFile(atPath: kernelcacheIPSW)
+    }
+
+    /// An iOS 18 guest from the catalog, whose kernelcache only the kmutil of
+    /// macOS 15 or 26.0 to 26.3 links.
+    private var linksKernelFirst: Bool {
+        !usesCustomSources && selectedGuest?.linksKernelFirst == true
+    }
+
+    /// The ssh builder that links it, when one is named.
+    private var kernelcacheBuilder: VPhoneLaunchpadKernelcacheBuilder? {
+        let destination = kernelcacheBuilderDestination.trimmingCharacters(in: .whitespaces)
+        guard linksKernelFirst, !destination.isEmpty else {
+            return nil
+        }
+        return VPhoneLaunchpadKernelcacheBuilder(destination: destination, password: kernelcacheBuilderPassword)
+    }
+
+    /// Why the builder stops Create: none named where this Mac links
+    /// kernel-last, or one that is not `user@host`.
+    private var kernelcacheBuilderProblem: String? {
+        guard linksKernelFirst else {
+            return nil
+        }
+        if let kernelcacheBuilder {
+            return VPhoneLaunchpadKernelcacheBuilder.isValid(kernelcacheBuilder.destination)
+                ? nil : String(localized: "Name the macOS builder as user@host.")
+        }
+        return VPhoneLaunchpadKernelcacheBuilder.hostNeedsBuilder
+            ? String(localized: "Name a Mac or macOS VM running macOS 15 or 26.0 to 26.3, with Remote Login on, as the macOS builder in Advanced Options: this Mac's kmutil cannot link iOS 18 kernels.")
+            : nil
     }
 
     private var effectiveName: String {
@@ -80,12 +162,26 @@ struct VPhoneLaunchpadNewMachineView: View {
             || FileManager.default.fileExists(atPath: machine.url.path)
     }
 
-    /// The first `pcc-research-NN` free in `root`, filled into the field when
-    /// the sheet opens.
+    /// A fruit no machine in `root` is named after yet, at random, filled into
+    /// the field when the sheet opens. Once all are taken, `<fruit>-2`, then
+    /// `-3` and on.
     private func suggestedName(in root: String) -> String {
-        let names = (1 ... 99).lazy.map { String(format: "pcc-research-%02d", $0) }
-        return names.first { !isTaken(VPhoneLaunchpadMachinePath(libraryRoot: root, name: $0)) } ?? "pcc-research"
+        let suffixes = [""] + (2 ... 99).map { "-\($0)" }
+        for suffix in suffixes {
+            let free = Self.fruits.map { $0 + suffix }.filter { !isTaken(VPhoneLaunchpadMachinePath(libraryRoot: root, name: $0)) }
+            if let name = free.randomElement() {
+                return name
+            }
+        }
+        return "machine"
     }
+
+    private static let fruits = [
+        "Apple", "Apricot", "Avocado", "Banana", "Blackberry", "Blueberry", "Cherry", "Coconut",
+        "Cranberry", "Date", "Durian", "Fig", "Grape", "Guava", "Kiwi", "Kumquat",
+        "Lemon", "Lime", "Lychee", "Mango", "Melon", "Mulberry", "Nectarine", "Olive",
+        "Orange", "Papaya", "Peach", "Pear", "Persimmon", "Pineapple", "Plum", "Pomegranate",
+    ]
 
     private var nameProblem: String? {
         if !VPhoneLaunchpadNames.isValidMachineName(effectiveName) {
@@ -107,55 +203,49 @@ struct VPhoneLaunchpadNewMachineView: View {
         VPhoneLaunchpadMachineLocations.problem(with: location)
     }
 
+    /// Why the location cannot hold the template build, or nil.
+    private var templatePathProblem: String? {
+        // The template is built in a machine named like `template-1a2b3c4d`.
+        guard usesTemplate, !VPhoneLaunchpadMachineLocations.socketPathFits(root: location, name: "template-00000000") else {
+            return nil
+        }
+        return String(localized: "The path is too long. Use a location with a shorter path.")
+    }
+
+    /// A setting on an advanced page that stops Create, and that page. The
+    /// basic page names it under Advanced Options, which opens on it.
+    private var advancedProblem: (page: Page, text: String)? {
+        if let problem = locationProblem ?? templatePathProblem {
+            return (.storage, problem)
+        }
+        if let problem = slimming.problem {
+            return (.slimming, problem)
+        }
+        return nil
+    }
+
+    /// Whether a current template was built from the chosen device and
+    /// release; nil for custom IPSWs and until the template list is read.
+    private var templateAvailable: Bool? {
+        guard !usesCustomSources, let guest, let pairing = selectedPairing, let templates = model.machines.templates else {
+            return nil
+        }
+        return templates.contains { !$0.stale && $0.key.device == guest && $0.key.iOSBuild == pairing.build }
+    }
+
     private var canCreate: Bool {
-        nameProblem == nil && locationProblem == nil && sources != nil && bundleVersion != nil
+        nameProblem == nil && advancedProblem == nil && sources != nil && bundleVersion != nil
+            && (!usesCustomSources || inspectedCustomSource == iphoneSource)
+            && kernelcacheBuilderProblem == nil
     }
 
     var body: some View {
         VPhoneLaunchpadSheet(Text("New Machine")) {
-            VStack(spacing: 0) {
-                VPhoneLaunchpadSheetPages(selection: $page) {
-                    Text("General").tag(Page.general)
-                    Text("Hardware").tag(Page.hardware)
-                    Text("Advanced").tag(Page.advanced)
-                }
-                Form {
-                    switch page {
-                    case .general:
-                        Section {
-                            TextField("Name", text: $name)
-                            locationPicker
-                        } footer: {
-                            if let problem = nameProblem ?? locationProblem {
-                                Text(problem).foregroundStyle(.red)
-                            }
-                        }
-
-                        bundleSection
-
-                        firmware
-                    case .hardware:
-                        Section {
-                            Stepper("CPU: \(cpu) cores", value: $cpu, in: 1 ... ProcessInfo.processInfo.activeProcessorCount)
-                            Stepper("Memory: \(memoryMB) MB", value: $memoryMB, in: 2048 ... 65536, step: 1024)
-                            Stepper("Disk: \(diskSizeGB) GB", value: $diskSizeGB, in: 32 ... 512, step: 16)
-                        } footer: {
-                            Text(spaceNote).foregroundStyle(.secondary)
-                        }
-                    case .advanced:
-                        VPhoneLaunchpadNewMachineAdvancedView(
-                            network: $network,
-                            patches: $patches,
-                            keepArtifacts: $keepArtifacts,
-                            patchCatalog: patchCatalog,
-                            patchCatalogError: patchCatalogError,
-                            reloadPatches: { Task { await loadPatchCatalog() } },
-                            bundleVersion: bundleVersion,
-                        )
-                    }
-                }
-                .formStyle(.grouped)
+            Form {
+                basicPage
             }
+            .formStyle(.grouped)
+            .vphoneFittedHeight(limit: VPhoneLaunchpadSheetSize.maximum - VPhoneLaunchpadSheetSize.chrome)
         } actions: {
             Button("Cancel") { dismiss() }
                 .keyboardShortcut(.cancelAction)
@@ -163,21 +253,370 @@ struct VPhoneLaunchpadNewMachineView: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canCreate)
         }
-        .frame(width: 560)
         .fixedSize(horizontal: false, vertical: true)
+        // A second sheet over this one, so the basic settings stay put behind it.
+        .sheet(isPresented: $showsAdvanced) {
+            advancedSheet
+                .environment(model)
+                .alert("Service trimming is available only for iOS 26 and iOS 27. This step will be skipped on unsupported versions.", isPresented: $showsServiceTrimmingNotice) {
+                    Button("OK", role: .cancel) {}
+                }
+        }
+        .alert("Service trimming is available only for iOS 26 and iOS 27. This step will be skipped on unsupported versions.", isPresented: Binding(
+            get: { showsServiceTrimmingNotice && !showsAdvanced },
+            set: { showsServiceTrimmingNotice = $0 },
+        )) {
+            Button("OK", role: .cancel) {}
+        }
+        .onChange(of: warnsAboutServiceTrimming) { _, warns in
+            showsServiceTrimmingNotice = warns
+        }
         // Each bundle version has its own firmware pairings and patch sets.
         .task(id: bundleVersion) { await loadCatalog() }
         .task(id: bundleVersion) { await loadPatchCatalog() }
+        .task { await loadDownloaded() }
+        .task(id: usesCustomSources ? iphoneSource : "") {
+            let source = iphoneSource
+            let type = await Task.detached {
+                VPhoneLaunchpadIPSW.productType(forSource: source)
+            }.value
+            guard !Task.isCancelled, usesCustomSources, source == iphoneSource else { return }
+            let previous = customGuestProductType
+            customGuestProductType = type
+            applyGuestDefaults(previousProductType: previous)
+            inspectedCustomSource = source
+        }
+        .onChange(of: usesCustomSources) { previous, _ in
+            applyGuestDefaults(previousProductType: previous ? customGuestProductType : selectedGuest?.productType)
+        }
+        .task { await model.machines.refreshTemplates() }
+        // Off when there is no template to clone; it can still be turned on
+        // to build one.
+        .onChange(of: templateAvailable, initial: true) {
+            if let templateAvailable, !requiresStandaloneRestore, !patches.customisesRestoredSystem {
+                usesTemplate = templateAvailable
+            }
+        }
+        // The Minimal preset is restored on its own and not slimmed.
+        .onChange(of: patches.customisesRestoredSystem) { _, restored in
+            guard !requiresStandaloneRestore else { return }
+            if restored {
+                usesTemplate = false
+                slimming.slim = false
+            } else {
+                usesTemplate = templateAvailable ?? true
+                slimming = VPhoneLaunchpadSlimming()
+            }
+        }
         .onAppear {
+            if let version = bundleVersion, let known = Self.catalogs[version] {
+                apply(known)
+            }
             let root = model.machines.preferredRoot
             location = root
             name = suggestedName(in: root)
             #if DEBUG
                 if VPhoneLaunchpadPreview.isActive {
-                    page = VPhoneLaunchpadPreview.newMachinePage
+                    open(VPhoneLaunchpadPreview.newMachinePage)
+                    patches = VPhoneLaunchpadPreview.newMachinePatches
                 }
             #endif
         }
+    }
+
+    /// Opens the Advanced Options sheet on `target`; `.basic` closes it.
+    private func open(_ target: Page) {
+        if target == .basic {
+            showsAdvanced = false
+        } else {
+            page = target
+            showsAdvanced = true
+        }
+    }
+
+    // MARK: - Advanced Options
+
+    private var advancedSheet: some View {
+        VPhoneLaunchpadSheet(Text("Advanced Options")) {
+            VStack(spacing: 0) {
+                advancedBar
+                Form {
+                    switch page {
+                    case .basic, .hardware:
+                        hardwarePage
+                        advancedSections(.hardware)
+                    case .template:
+                        VPhoneLaunchpadSlimmingSections(part: .template, usesTemplate: $usesTemplate, templateAvailable: templateAvailable, slimming: $slimming, warnsAboutServiceTrimming: warnsAboutServiceTrimming, requiresStandaloneRestore: requiresStandaloneRestore, forRestoredSystem: patches.customisesRestoredSystem)
+                    case .slimming:
+                        VPhoneLaunchpadSlimmingSections(part: .slimming, usesTemplate: $usesTemplate, templateAvailable: templateAvailable, slimming: $slimming, warnsAboutServiceTrimming: warnsAboutServiceTrimming, requiresStandaloneRestore: requiresStandaloneRestore, forRestoredSystem: patches.customisesRestoredSystem)
+                    case .firmware:
+                        bundleSection
+                        firmwareSourceSection
+                    case .patches:
+                        advancedSections(.patches)
+                    case .storage:
+                        // The machine goes in the default location; when that cannot
+                        // hold it, this says why.
+                        if let problem = locationProblem ?? templatePathProblem {
+                            Section {
+                                Text(problem).foregroundStyle(.red)
+                            }
+                        }
+                        advancedSections(.storage)
+                    }
+                }
+                .formStyle(.grouped)
+            }
+        } actions: {
+            Button("Done") { showsAdvanced = false }
+                .keyboardShortcut(.defaultAction)
+        }
+        // One height for every page; the form scrolls.
+        .frame(height: 500)
+    }
+
+    // MARK: - Basic
+
+    @ViewBuilder
+    private var basicPage: some View {
+        Section {
+            TextField("Name", text: $name)
+            firmwareChoice
+        } footer: {
+            if let nameProblem {
+                Text(nameProblem).foregroundStyle(.red)
+            } else {
+                firmwareNote
+            }
+        }
+
+        if model.bundles.selectableVersions.isEmpty {
+            Section {
+                Label("No Core Bundle is installed. Install one in Core Bundle.", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        advancedSection
+    }
+
+    @ViewBuilder
+    private var firmwareChoice: some View {
+        if usesCustomSources {
+            LabeledContent("Firmware") {
+                HStack {
+                    Text("Custom IPSWs").foregroundStyle(.secondary)
+                    Button("Change…") { open(.firmware) }
+                }
+            }
+        } else if let catalog {
+            Picker("Device", selection: Binding(
+                get: { guest },
+                set: { choose($0) },
+            )) {
+                ForEach(catalog.guests) { guest in
+                    let count = guest.pairings.count(where: isDownloaded)
+                    Text(verbatim: count > 0 ? "\(guest.name) (\(count))" : guest.name).tag(Optional(guest.id))
+                }
+            } currentValueLabel: {
+                // The count is for choosing; the closed menu names the device.
+                Text(verbatim: selectedGuest?.name ?? "")
+            }
+            Picker(LocalizedStringKey(selectedGuest?.osName ?? "iOS"), selection: $pairing) {
+                ForEach((selectedGuest?.pairings ?? []).reversed()) { pairing in
+                    let title = "\(pairing.ios.name) (\(pairing.build))"
+                    Text(verbatim: isDownloaded(pairing) ? "\(title) ✓" : title).tag(Optional(pairing.id))
+                }
+            } currentValueLabel: {
+                Text(verbatim: selectedPairing.map { "\($0.ios.name) (\($0.build))" + (isDownloaded($0) ? " ✓" : "") } ?? "")
+            }
+        } else {
+            // The same rows as a loaded catalog, so the sheet keeps its
+            // size when it arrives; the footer says what is happening.
+            placeholderPicker("Device")
+            placeholderPicker("iOS")
+        }
+    }
+
+    /// Whether the pairing's iOS or iPadOS IPSW is downloaded, under the name
+    /// `fw prepare` gives it or its own.
+    private func isDownloaded(_ pairing: VPhoneLaunchpadFirmwareCatalog.Pairing) -> Bool {
+        // An OTA pairing needs the OTA and the IPSW it is restored over.
+        if let files = pairing.ios.files {
+            return !files.isEmpty && files.allSatisfy(downloaded.contains)
+        }
+        guard let url = URL(string: pairing.ios.url) else {
+            return false
+        }
+        return downloaded.contains(VPhoneLaunchpadIPSW.cacheName(for: url)) || downloaded.contains(url.lastPathComponent)
+    }
+
+    private func loadDownloaded() async {
+        guard let scan = try? await VPhoneLaunchpadIPSWCache.scan(libraryRoots: model.machines.roots, machineFolders: []) else {
+            return
+        }
+        var names = Set(scan.ipsws.filter { !$0.isDownloading }.map(\.name))
+        // OTAs are in each cache's `ota` folder, under the names pairings list.
+        for directory in scan.cacheDirectories {
+            let ota = directory.appendingPathComponent("ota", isDirectory: true)
+            for name in (try? FileManager.default.contentsOfDirectory(atPath: ota.path)) ?? []
+                where !name.hasPrefix(".") && name.lowercased().hasSuffix(".aea")
+            {
+                names.insert("ota/\(name)")
+            }
+        }
+        downloaded = names
+    }
+
+    private func placeholderPicker(_ title: LocalizedStringKey) -> some View {
+        Picker(title, selection: .constant(0)) {
+            Text(catalogError == nil ? "Loading…" : "Unavailable").tag(0)
+        }
+        .disabled(true)
+    }
+
+    @ViewBuilder
+    private var firmwareNote: some View {
+        if usesCustomSources {
+            if let (iphone, cloudOS) = sources {
+                Text(verbatim: "\(Self.fileName(iphone)) · \(Self.fileName(cloudOS))")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else {
+                Text("Choose a guest IPSW and a cloudOS IPSW in Advanced Options.").foregroundStyle(.red)
+            }
+        } else if let own = ownCloudOS {
+            Text("On its own cloudOS, \(own.name): the kernelcache is rebuilt, which asks for administrator access once.")
+                .foregroundStyle(.secondary)
+        } else if linksKernelFirst, let cloudOS = selectedPairing?.recommendedCloudOS.name {
+            if let kernelcacheBuilderProblem {
+                Text(kernelcacheBuilderProblem).foregroundStyle(.red)
+            } else {
+                Text("With \(cloudOS): the kernelcache is rebuilt and linked \(kernelcacheBuilder.map { "on \($0.destination)" } ?? "on this Mac"), and the restore image asks for administrator access once.")
+                    .foregroundStyle(.secondary)
+            }
+        } else if rebuildsKernelcache, let cloudOS = selectedPairing?.recommendedCloudOS.name {
+            Text("With \(cloudOS): the kernelcache is rebuilt with the watch's kexts, which asks for administrator access once.")
+                .foregroundStyle(.secondary)
+        } else if let selectedGuest, let cloudOS = selectedPairing?.recommendedCloudOS.name {
+            Text("Recommended firmware pairings for \(selectedGuest.detailedName), with \(cloudOS).")
+                .foregroundStyle(.secondary)
+        } else if catalog == nil, let catalogError {
+            Text(catalogError).foregroundStyle(.red)
+        } else if catalog == nil {
+            Text("Loading firmware catalog…").foregroundStyle(.secondary)
+        }
+    }
+
+    private static func fileName(_ source: String) -> String {
+        let url = source.hasPrefix("/") ? URL(fileURLWithPath: source) : URL(string: source)
+        return url?.lastPathComponent ?? source
+    }
+
+    /// One row that opens the advanced pages: what they are set to, how many
+    /// settings differ from the defaults, and anything that stops Create.
+    private var advancedSection: some View {
+        Section {
+            Button {
+                open(advancedProblem?.page ?? page)
+            } label: {
+                LabeledContent {
+                    HStack(spacing: 6) {
+                        Text(verbatim: advancedSummary)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.secondary)
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Advanced Options")
+                        if changedCount > 0 {
+                            Text("^[\(changedCount) setting](inflect: true) changed")
+                                .font(.caption)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(.tint.opacity(0.15)))
+                                .foregroundStyle(.tint)
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } footer: {
+            if let advancedProblem {
+                Text(advancedProblem.text).foregroundStyle(.red)
+            } else {
+                Text(spaceNote).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var advancedSummary: String {
+        let networkTitle = VPhoneLaunchpadNewMachineAdvancedView.networkModes.first { $0.tag == network }?.title ?? network
+        return String(localized: "\(cpu) cores · \(memoryMB / 1024) GB memory · \(diskSizeGB) GB disk") + " · " + networkTitle
+    }
+
+    /// The advanced settings that differ from what the sheet opened with.
+    private var changedCount: Int {
+        let defaultSlimming = VPhoneLaunchpadSlimming()
+        return [
+            cpu != Self.defaultCPU,
+            memoryMB != Self.defaultMemoryMB,
+            diskSizeGB != Self.defaultDiskSizeGB,
+            // Off is the default when no template exists to clone.
+            usesTemplate != (templateAvailable ?? true),
+            slimming != defaultSlimming,
+            chosenVersion != nil && bundleVersion != model.bundles.defaultVersion,
+            usesCustomSources,
+            patches != VPhoneLaunchpadPatchSelection(),
+            network != Self.defaultNetwork,
+            !usesTemplate && keepArtifacts,
+        ].count(where: \.self)
+    }
+
+    // MARK: - Advanced
+
+    /// Back to the basic page, and the advanced pages.
+    private var advancedBar: some View {
+        HStack(spacing: 12) {
+            VPhoneLaunchpadSheetPages(selection: Binding(get: { page }, set: { open($0) })) {
+                Text("Hardware").tag(Page.hardware)
+                Text("Template").tag(Page.template)
+                Text("Slimming").tag(Page.slimming)
+                Text("Firmware").tag(Page.firmware)
+                Text("Patches").tag(Page.patches)
+                Text("Storage").tag(Page.storage)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 20)
+    }
+
+    private var hardwarePage: some View {
+        Section {
+            Stepper("CPU: \(cpu) cores", value: $cpu, in: 1 ... ProcessInfo.processInfo.activeProcessorCount)
+            Stepper("Memory: \(memoryMB) MB", value: $memoryMB, in: 2048 ... 65536, step: 1024)
+            Stepper("Disk: \(diskSizeGB) GB", value: $diskSizeGB, in: 32 ... 512, step: 16)
+        } footer: {
+            Text(spaceNote).foregroundStyle(.secondary)
+        }
+    }
+
+    private func advancedSections(_ page: Page) -> some View {
+        VPhoneLaunchpadNewMachineAdvancedView(
+            page: page,
+            usesTemplate: usesTemplate,
+            network: $network,
+            patches: $patches,
+            keepArtifacts: $keepArtifacts,
+            patchCatalog: patchCatalog,
+            patchCatalogError: patchCatalogError,
+            reloadPatches: { Task { await loadPatchCatalog() } },
+            bundleVersion: bundleVersion,
+        )
     }
 
     // MARK: - Core Bundle
@@ -224,115 +663,47 @@ struct VPhoneLaunchpadNewMachineView: View {
         )
     }
 
-    // MARK: - Location
-
-    /// The library's locations that are mounted, the default one first, and
-    /// a folder chosen with Other….
-    private var locations: [String] {
-        var roots = model.machines.roots.filter { $0 == model.machines.libraryRoot || VPhoneLaunchpadMachineLocations.isAvailable($0) }
-        for root in [chosenLocation, location].compactMap(\.self) where !roots.contains(root) {
-            roots.append(root)
-        }
-        return roots
-    }
-
-    private var locationPicker: some View {
-        Picker("Location", selection: Binding(
-            get: { location },
-            set: { root in
-                if root.isEmpty {
-                    // Let the menu close before the open panel runs.
-                    Task { @MainActor in chooseLocation() }
-                } else {
-                    location = root
-                }
-            },
-        )) {
-            ForEach(locations, id: \.self) { root in
-                Text(verbatim: VPhoneLaunchpadHostSetup.abbreviated(URL(fileURLWithPath: root, isDirectory: true)))
-                    .tag(root)
-            }
-            Divider()
-            // Library roots are absolute, so an empty tag cannot be one.
-            Text("Other…").tag("")
-        }
-        .help(location)
-    }
-
-    private func chooseLocation() {
-        let panel = NSOpenPanel()
-        panel.title = String(localized: "Choose a Location")
-        panel.message = String(localized: "The machine is created in a folder with its name inside the folder you choose.")
-        panel.prompt = String(localized: "Choose")
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = URL(fileURLWithPath: location, isDirectory: true)
-        panel.present { url in
-            useLocation(url)
-        }
-    }
-
-    private func useLocation(_ url: URL) {
-        let root = VPhoneLaunchpadMachineLocations.canonical(url)
-        if !model.machines.roots.contains(root) {
-            chosenLocation = root
-        }
-        location = root
-        // Machines already in the folder join the list; a folder that cannot
-        // hold machines is only shown here, with the reason.
-        if VPhoneLaunchpadMachineLocations.problem(with: root) == nil {
-            model.machines.addLocation(root)
-        }
-    }
-
     // MARK: - Firmware
 
-    private var firmware: some View {
+    private var firmwareSourceSection: some View {
         Section {
-            Picker("Source", selection: $usesCustomSources) {
-                Text("Catalog").tag(false)
-                Text("Custom IPSWs").tag(true)
-            }
-            .pickerStyle(.segmented)
+            Toggle("Use Specified Firmware", isOn: $usesCustomSources)
 
             if usesCustomSources {
-                sourceField("iPhone IPSW", $iphoneSource)
+                sourceField("Guest IPSW", $iphoneSource)
                 sourceField("cloudOS IPSW", $cloudOSSource)
-            } else if let catalog {
-                if catalog.guests.count > 1 {
-                    Picker("Device", selection: Binding(
-                        get: { guest },
-                        set: { choose($0) },
-                    )) {
-                        ForEach(catalog.guests) { guest in
-                            Text(verbatim: guest.name).tag(Optional(guest.id))
-                        }
-                    }
+            } else if let pairing = selectedPairing, let own = pairing.matchingCloudOS {
+                Picker("cloudOS", selection: $usesOwnCloudOS) {
+                    Text(verbatim: pairing.recommendedCloudOS.name).tag(false)
+                    Text(verbatim: own.name).tag(true)
                 }
-                Picker(selectedGuest?.isPad == true ? "iPadOS" : "iOS", selection: $pairing) {
-                    ForEach((selectedGuest?.pairings ?? []).reversed()) { pairing in
-                        Text(verbatim: "\(pairing.ios.name) (\(pairing.build))").tag(Optional(pairing.id))
-                    }
+                if usesOwnCloudOS {
+                    sourceField("ipsw", $kernelcacheIPSW)
                 }
-                LabeledContent("cloudOS", value: selectedPairing?.recommendedCloudOS.name ?? "—")
-            } else if let catalogError {
-                Label(catalogError, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.secondary)
             } else {
-                HStack {
-                    ProgressView().controlSize(.small)
-                    Text("Loading firmware catalog…").foregroundStyle(.secondary)
+                LabeledContent("cloudOS", value: selectedPairing?.recommendedCloudOS.name ?? "—")
+                if rebuildsKernelcache {
+                    sourceField("ipsw", $kernelcacheIPSW)
+                }
+                if linksKernelFirst {
+                    TextField("macOS builder", text: $kernelcacheBuilderDestination, prompt: Text("user@host"))
+                    SecureField("Password", text: $kernelcacheBuilderPassword, prompt: Text("None with ssh keys"))
+                        .disabled(kernelcacheBuilder == nil)
                 }
             }
         } header: {
             Text("Firmware")
         } footer: {
-            if !usesCustomSources, let selectedGuest {
-                Text("Recommended firmware pairings for \(selectedGuest.detailedName).")
-                    .foregroundStyle(.secondary)
-            }
+            Text(usesCustomSources
+                ? "These two files replace the device and version chosen on the basic page."
+                : ownCloudOS != nil
+                ? "On its own cloudOS the release boots its own kernel, rebuilt with the vphone600 virtualisation kexts: it is staged as you, and the helper links it as root. The ipsw (with `kernel extract --kdk`) is only needed by a 2.12.0 Core Bundle."
+                : linksKernelFirst
+                ? "iOS 18 boots its own release's kernel, rebuilt with the vphone600 kexts of cloudOS 26.1: it is staged as you (a 2.12.0 Core Bundle needs the ipsw with `kernel extract --kdk` for that). Only the kmutil of macOS 15 or 26.0 to 26.3 links it: from macOS 26.4 on, the macOS builder, a Mac or macOS VM with Remote Login on, links it over ssh as root there. The password is for ssh and sudo on it and is not saved; leave it empty with ssh keys and passwordless sudo."
+                : rebuildsKernelcache
+                ? "A watch boots the cloudOS kernel rebuilt with its own kexts: it is staged as you, and the helper links it as root. The ipsw (with `kernel extract --kdk`) is only needed by a 2.12.0 Core Bundle."
+                : "The device and version are chosen on the basic page; cloudOS goes with them.")
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -385,6 +756,39 @@ struct VPhoneLaunchpadNewMachineView: View {
 
     // MARK: - Actions
 
+    /// Each Core Bundle version's catalog, read once per session, so the
+    /// sheet opens on the same rows it shows after loading.
+    private static var catalogs: [String: VPhoneLaunchpadFirmwareCatalog] = [:]
+
+    /// The default version's catalog, read once per session.
+    static func catalog(_ model: VPhoneLaunchpadModel) async -> VPhoneLaunchpadFirmwareCatalog? {
+        await prefetchCatalog(model)
+        return model.bundles.defaultVersion.flatMap { catalogs[$0] }
+    }
+
+    /// Reads the default version's catalog ahead of the sheet.
+    static func prefetchCatalog(_ model: VPhoneLaunchpadModel) async {
+        guard let version = model.bundles.defaultVersion, catalogs[version] == nil,
+              let commandLine = model.bundles.commandLine(version: version),
+              let catalog = try? await fetchCatalog(commandLine)
+        else {
+            return
+        }
+        catalogs[version] = catalog
+    }
+
+    private struct CatalogFailure: LocalizedError {
+        var errorDescription: String?
+    }
+
+    private static func fetchCatalog(_ commandLine: VPhoneLaunchpadCommandLine) async throws -> VPhoneLaunchpadFirmwareCatalog {
+        let result = try await commandLine.run(["fw", "catalog", "--json"], recordInHistory: false)
+        guard result.succeeded, let data = result.jsonData else {
+            throw CatalogFailure(errorDescription: result.tail)
+        }
+        return try JSONDecoder().decode(VPhoneLaunchpadFirmwareCatalog.self, from: data)
+    }
+
     private func loadCatalog() async {
         #if DEBUG
             if VPhoneLaunchpadPreview.isActive {
@@ -393,41 +797,74 @@ struct VPhoneLaunchpadNewMachineView: View {
                 return
             }
         #endif
-        let version = bundleVersion
-        guard let commandLine = version.flatMap(model.bundles.commandLine(version:)) else {
+        guard let version = bundleVersion, let commandLine = model.bundles.commandLine(version: version) else {
+            return
+        }
+        if let known = Self.catalogs[version] {
+            apply(known)
             return
         }
         do {
-            let result = try await commandLine.run(["fw", "catalog", "--json"], recordInHistory: false)
+            let catalog = try await Self.fetchCatalog(commandLine)
+            Self.catalogs[version] = catalog
             // Another version may have been chosen meanwhile.
-            guard version == bundleVersion else {
-                return
-            }
-            guard result.succeeded, let data = result.jsonData else {
-                catalogError = result.tail
-                return
-            }
-            let catalog = try JSONDecoder().decode(VPhoneLaunchpadFirmwareCatalog.self, from: data)
-            self.catalog = catalog
-            // The guest and pairing chosen under the previous version stay
-            // when this one offers them too.
-            if !catalog.guests.contains(where: { $0.id == guest }) {
-                choose(catalog.guests.first?.id)
-            } else if selectedGuest?.pairings.contains(where: { $0.id == pairing }) != true {
-                pairing = selectedGuest?.defaultPairing?.id
+            if version == bundleVersion {
+                apply(catalog)
             }
         } catch {
-            guard version == bundleVersion else {
-                return
+            if version == bundleVersion {
+                catalogError = error.localizedDescription
             }
-            catalogError = error.localizedDescription
+        }
+    }
+
+    /// The guest and pairing chosen under the previous version stay when
+    /// this one offers them too.
+    private func apply(_ catalog: VPhoneLaunchpadFirmwareCatalog) {
+        self.catalog = catalog
+        catalogError = nil
+        if !catalog.guests.contains(where: { $0.id == guest }) {
+            choose(catalog.guests.first?.id)
+        } else if selectedGuest?.pairings.contains(where: { $0.id == pairing }) != true {
+            pairing = selectedGuest?.defaultPairing?.id
         }
     }
 
     /// Select a guest device and its newest release.
     private func choose(_ productType: String?) {
+        let previous = guestProductType
         guest = productType
         pairing = selectedGuest?.defaultPairing?.id
+        applyGuestDefaults(previousProductType: previous)
+    }
+
+    /// Custom IPSWs carry the guest identity in their manifest or file name.
+    private var guestProductType: String? {
+        usesCustomSources ? customGuestProductType : selectedGuest?.productType
+    }
+
+    /// Apple TV and HomePod are restored without iOS templates or slimming.
+    private var requiresStandaloneRestore: Bool {
+        guestProductType?.hasPrefix("AppleTV") == true || guestProductType?.hasPrefix("AudioAccessory") == true
+    }
+
+    private func applyGuestDefaults(previousProductType: String?) {
+        let previousPreset = VPhoneLaunchpadPatchSelection.defaultPreset(forDevice: previousProductType)
+        let nextPreset = VPhoneLaunchpadPatchSelection.defaultPreset(forDevice: guestProductType)
+        let hadOwnPreset = previousPreset != VPhoneLaunchpadPatchSelection.defaultPreset
+        let hasOwnPreset = nextPreset != VPhoneLaunchpadPatchSelection.defaultPreset
+        // Preserve custom iPhone/iPad patch and template settings when
+        // switching between guests that share the iOS creation workflow.
+        guard hadOwnPreset != hasOwnPreset
+            || hasOwnPreset && previousProductType != guestProductType else { return }
+        patches = VPhoneLaunchpadPatchSelection()
+        patches.preset = VPhoneLaunchpadPatchSelection.defaultPreset(forDevice: guestProductType)
+        usesTemplate = hasOwnPreset ? false : templateAvailable ?? true
+        slimming = VPhoneLaunchpadSlimming()
+        if hasOwnPreset {
+            slimming.slim = false
+        }
+        Task { await loadPatchCatalog() }
     }
 
     /// Read again whenever the preset or the version changes: `inPreset`, which
@@ -476,13 +913,19 @@ struct VPhoneLaunchpadNewMachineView: View {
             iphoneSource: iphone,
             cloudOSSource: cloudOS,
             // An iPad IPSW often covers two sizes; name the one chosen.
-            device: usesCustomSources ? nil : selectedGuest.flatMap { $0.isPad ? $0.productType : nil },
+            // Apple TV and HomePod are named too, so the restore tree identifies them.
+            device: guestProductType,
             cpuCount: cpu,
             memoryMB: memoryMB,
             diskSizeGB: diskSizeGB,
             network: network,
             patches: patches,
+            guestPatches: patchCatalog?.guestOverrides(patches) ?? [],
             keepArtifacts: keepArtifacts,
+            usesTemplate: usesTemplate,
+            slimming: slimming,
+            kernelcacheIPSW: rebuildsKernelcache && hasKernelcacheIPSW ? kernelcacheIPSW : nil,
+            kernelcacheBuilder: kernelcacheBuilder,
         )
         let pipeline = model.machines.create(options)
         model.machines.selection = [pipeline.machine]
@@ -493,26 +936,81 @@ struct VPhoneLaunchpadNewMachineView: View {
 // MARK: - Pipeline
 
 /// The pipeline, which keeps running when this sheet closes. A failure shows
-/// on its step; the log, which records why, opens in its own sheet.
+/// on its step; the log, which records why, opens in its own sheet. A
+/// template-backed creation shows the template's steps apart from the
+/// machine's own.
 struct VPhoneLaunchpadCreationView: View {
+    typealias Step = VPhoneLaunchpadCreationStep
+
     let creation: VPhoneLaunchpadCreationPipeline
+    @Environment(VPhoneLaunchpadModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var showsLog = false
+    /// The IPSWs a template this creation built came from, once it is done.
+    @State private var ipswFiles: [VPhoneLaunchpadIPSWFile] = []
+    @State private var ipswDirectories: [URL] = []
+    @State private var offersIPSWs = false
+
+    private var templateSteps: [Step] {
+        creation.steps.filter { $0 == .findTemplate || creation.plan.buildsTemplate($0) }
+    }
+
+    private var machineSteps: [Step] {
+        creation.steps.filter { !templateSteps.contains($0) }
+    }
 
     var body: some View {
         VPhoneLaunchpadSheet(Text("Creating \(creation.options.name)")) {
             Form {
+                if creation.plan.usesTemplate {
+                    Section {
+                        ForEach(templateSteps) { step in
+                            stepRow(step)
+                        }
+                    } header: {
+                        Text("Template")
+                    } footer: {
+                        if let templateNote {
+                            Text(templateNote).foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 Section {
-                    ForEach(VPhoneLaunchpadCreationPipeline.Step.allCases) { step in
+                    ForEach(machineSteps) { step in
                         stepRow(step)
+                    }
+                } header: {
+                    if creation.plan.usesTemplate {
+                        Text("Machine")
                     }
                 } footer: {
                     if creation.isRunning {
                         Text("Creation continues if you close this window.").foregroundStyle(.secondary)
+                    } else if let failure = creation.failure, let detail = failure.detail {
+                        Text(verbatim: detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .lineLimit(6)
                     }
+                }
+                if offersIPSWs {
+                    VPhoneLaunchpadTemplateIPSWOffer(files: $ipswFiles, cacheDirectories: ipswDirectories)
                 }
             }
             .formStyle(.grouped)
+            // A template build lists fourteen steps: the form scrolls in a
+            // sheet that fits a laptop screen instead of growing past it.
+            .vphoneFittedHeight(limit: VPhoneLaunchpadSheetSize.maximum - VPhoneLaunchpadSheetSize.chrome)
+            .task(id: creation.isFinished && creation.builtTemplate) {
+                guard creation.isFinished, creation.builtTemplate, !offersIPSWs else {
+                    return
+                }
+                let found = await VPhoneLaunchpadTemplateIPSWOffer.scan(creation, library: model.machines)
+                ipswFiles = found.files
+                ipswDirectories = found.directories
+                offersIPSWs = !found.files.isEmpty
+            }
         } accessory: {
             Button("Open Log") { showsLog = true }
         } actions: {
@@ -525,14 +1023,24 @@ struct VPhoneLaunchpadCreationView: View {
             Button("Close") { dismiss() }
                 .keyboardShortcut(.cancelAction)
         }
-        .frame(width: 720)
         .fixedSize(horizontal: false, vertical: true)
         .sheet(isPresented: $showsLog) {
             VPhoneLaunchpadConsoleView(title: "\(creation.options.name) Creation Log", url: creation.logFile)
         }
     }
 
-    private func stepRow(_ step: VPhoneLaunchpadCreationPipeline.Step) -> some View {
+    /// Which template the machine came from, once that is known.
+    private var templateNote: String? {
+        if let id = creation.templateID, creation.plan.foundTemplate == true {
+            return String(localized: "Cloned from template \(id), which machines with these options share.")
+        }
+        if let id = creation.templateID, creation.builtTemplate {
+            return String(localized: "Saved as template \(id). The next machine with these options is cloned from it in seconds.")
+        }
+        return nil
+    }
+
+    private func stepRow(_ step: Step) -> some View {
         LabeledContent {
             HStack(spacing: 8) {
                 if step == .prepare, let fraction = creation.downloadFraction {
@@ -552,13 +1060,21 @@ struct VPhoneLaunchpadCreationView: View {
             }
         } label: {
             Label {
-                HStack(spacing: 4) {
-                    Text(step.title)
-                    if step.needsRoot {
-                        Image(systemName: "lock.fill")
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Text(step.title)
+                        if step.needsRoot {
+                            Image(systemName: "lock.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .help("Runs as root through the privileged helper")
+                        }
+                    }
+                    if step == .setUpTemplate, let stage = creation.setupStage {
+                        // The CLI's own words for the stage: `b. wait for first-boot work`.
+                        Text(verbatim: stage)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .help("Runs as root through the privileged helper")
                     }
                 }
             } icon: {
@@ -569,5 +1085,106 @@ struct VPhoneLaunchpadCreationView: View {
 
     static func duration(_ interval: TimeInterval) -> String {
         Duration.seconds(interval).formatted(.time(pattern: interval >= 3600 ? .hourMinuteSecond : .minuteSecond))
+    }
+}
+
+// MARK: - IPSWs a template came from
+
+/// Offered once a creation has built a template: its clones need neither
+/// IPSW, so the two downloads can go. Nothing is deleted without the
+/// confirmation, and only files the IPSW cache holds.
+struct VPhoneLaunchpadTemplateIPSWOffer: View {
+    @Binding var files: [VPhoneLaunchpadIPSWFile]
+    let cacheDirectories: [URL]
+    @State private var confirming = false
+    @State private var deleted = false
+    @State private var error: VPhoneLaunchpadError?
+
+    private var total: Int64 {
+        files.reduce(0) { $0 + $1.size }
+    }
+
+    var body: some View {
+        Section {
+            if deleted {
+                Label("The IPSWs were deleted.", systemImage: "checkmark.circle")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(files) { file in
+                    LabeledContent {
+                        Text(verbatim: VPhoneLaunchpadIPSWCacheView.size(file.size)).monospacedDigit()
+                    } label: {
+                        Text(verbatim: file.name)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Button("Delete IPSWs…") { confirming = true }
+                        .disabled(files.isEmpty)
+                }
+            }
+        } header: {
+            Text("Downloaded Firmware")
+        } footer: {
+            if !deleted {
+                Text("Machines from this template need neither IPSW. A machine with other options downloads them again.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .confirmationDialog(
+            String(localized: "Delete the IPSWs this template came from?"),
+            isPresented: $confirming,
+        ) {
+            Button(String(localized: "Delete \(VPhoneLaunchpadIPSWCacheView.size(total))"), role: .destructive) {
+                Task { await delete() }
+            }
+        } message: {
+            Text("\(files.map(\.name).joined(separator: ", ")) are deleted from the IPSW cache.")
+        }
+        .errorAlert($error)
+    }
+
+    /// The cached IPSWs `creation` was given as sources and no unfinished
+    /// creation still reads.
+    static func scan(
+        _ creation: VPhoneLaunchpadCreationPipeline,
+        library: VPhoneLaunchpadMachineLibrary,
+    ) async -> (files: [VPhoneLaunchpadIPSWFile], directories: [URL]) {
+        let sources = [creation.options.iphoneSource, creation.options.cloudOSSource]
+        #if DEBUG
+            if VPhoneLaunchpadPreview.isActive {
+                let scan = VPhoneLaunchpadPreview.ipswScan
+                return (scan.ipsws.filter { file in sources.contains { VPhoneLaunchpadIPSWUse.source($0, is: file) } }, scan.cacheDirectories)
+            }
+        #endif
+        guard let scan = try? await VPhoneLaunchpadIPSWCache.scan(libraryRoots: library.roots, machineFolders: []) else {
+            return ([], [])
+        }
+        let busy = library.creations.values.filter { !$0.isFinished && $0 !== creation }
+            .flatMap { [$0.options.iphoneSource, $0.options.cloudOSSource] }
+        let files = scan.ipsws.filter { file in
+            !file.isDownloading
+                && sources.contains { VPhoneLaunchpadIPSWUse.source($0, is: file) }
+                && !busy.contains { VPhoneLaunchpadIPSWUse.source($0, is: file) }
+        }
+        return (files, scan.cacheDirectories)
+    }
+
+    private func delete() async {
+        var remaining = files
+        for file in files {
+            do {
+                try await VPhoneLaunchpadIPSWCache.removeIPSW(file.url, cacheDirectories: cacheDirectories)
+                remaining.removeAll { $0.id == file.id }
+            } catch {
+                self.error = VPhoneLaunchpadError(String(localized: "Unable to Delete \(file.name)"), detail: error.localizedDescription)
+                files = remaining
+                return
+            }
+        }
+        files = []
+        deleted = true
     }
 }

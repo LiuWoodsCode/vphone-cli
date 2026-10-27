@@ -71,7 +71,8 @@ nonisolated struct VPhoneLaunchpadPatchCatalog: Decodable, Sendable {
         /// Whether the patch is in the boot chain, which only a restore
         /// changes on a machine that exists. Read from `part` when the bundle
         /// reports it, else from `target`, which names the component the same
-        /// way for a boot-chain patch.
+        /// way for a boot-chain patch. Every `.firmware` component counts, as
+        /// it does for `fw patch` and the template key.
         var isBootChain: Bool {
             Self.bootChainParts.contains(part ?? target)
         }
@@ -82,7 +83,7 @@ nonisolated struct VPhoneLaunchpadPatchCatalog: Decodable, Sendable {
         }
 
         private static let bootChainParts: Set<String> = [
-            "AVPBooter", "iBSS", "iBEC", "LLB", "TXM", "kernelcache", "DeviceTree",
+            "AVPBooter", "iBSS", "iBEC", "LLB", "TXM", "kernelcache", "DeviceTree", "SEP", "Filesystem", "Manifest",
         ]
 
         /// False when the patch applies to every version, which is not worth a
@@ -180,6 +181,14 @@ nonisolated struct VPhoneLaunchpadPatchCatalog: Decodable, Sendable {
         patches.count { $0.pending == true && ($0.delivery ?? (($0.isBootChain && !$0.isKernel) ? "restore" : "")) == "restore" }
     }
 
+    /// The overrides of `selection` the guest half of an install writes. One
+    /// naming a patch this catalog does not list counts as boot chain, as the
+    /// template key counts it.
+    func guestOverrides(_ selection: VPhoneLaunchpadPatchSelection) -> Set<String> {
+        let guest = Set(patches.filter { !$0.isBootChain }.map(\.identifier))
+        return selection.blocked.union(selection.allowed).intersection(guest)
+    }
+
     func preset(_ identifier: String) -> Preset? {
         presets.first { $0.identifier == identifier }
     }
@@ -266,6 +275,38 @@ nonisolated struct VPhoneLaunchpadPatchSelection: Hashable, Sendable {
     /// only add noise, so the pipeline omits the flag for this one value.
     static let defaultPreset = "standard"
 
+    /// The preset an Apple TV guest gets, mirroring
+    /// `VPhonePatchPreset.tvOSIdentifier`.
+    static let tvOSPreset = "tvos"
+
+    /// The preset an Apple TV 4K guest gets, mirroring
+    /// `VPhonePatchPreset.tvOS4KIdentifier`: its arm64e userland comes from
+    /// the OTA, with the paravirtual GPU driver.
+    static let tvOS4KPreset = "tvos-4k"
+    /// The preset that customises the system before the restore and patches
+    /// no boot chain: `fw patch` runs as root, and nothing writes the system
+    /// afterwards, so there is no template and no slimming.
+    static let minimalPreset = "minimal"
+    /// The preset an Apple Watch guest gets, mirroring
+    /// `VPhonePatchPreset.watchOSIdentifier`: `minimal` for the watch board.
+    static let watchOSPreset = "watchos"
+
+    /// The HomePod mini's arm64e userland has a preset of its own.
+    static let homePodMiniPreset = "homepod-mini"
+
+    /// The preset a new machine of `productType` starts from.
+    static func defaultPreset(forDevice productType: String?) -> String {
+        switch productType {
+        case "AudioAccessory5,1": homePodMiniPreset
+        case "AppleTV14,1", "AppleTV18,1": tvOS4KPreset
+        case let type? where type.hasPrefix("AppleTV"): tvOSPreset
+        case let type? where type.hasPrefix("Watch"): watchOSPreset
+        // The iOS 18 research board kernels boot no other preset.
+        case "iPhone11,6", "iPhone11,4": minimalPreset
+        default: defaultPreset
+        }
+    }
+
     var preset = defaultPreset
     /// Patches the preset turns on that this VM leaves off.
     var blocked: Set<String> = []
@@ -289,6 +330,10 @@ nonisolated struct VPhoneLaunchpadPatchSelection: Hashable, Sendable {
     }
 
     /// The `--preset` flag `fw patch` and `fw patches` carry, if any.
+    var customisesRestoredSystem: Bool {
+        preset == Self.minimalPreset || preset == Self.watchOSPreset
+    }
+
     var presetArguments: [String] {
         preset == Self.defaultPreset ? [] : ["--preset", preset]
     }

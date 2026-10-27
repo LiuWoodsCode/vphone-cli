@@ -25,19 +25,28 @@
 // MARK: - support (CamFixSupport.m)
 
 CFX_HIDDEN void cfxlog(NSString *fmt, ...);
+CFX_HIDDEN NSDictionary *cfx_overrides(void);
 CFX_HIDDEN BOOL cfx_session_is_for_vcam(AVCaptureSession *session);
 CFX_HIDDEN BOOL cfx_output_is_for_vcam(id self);
 
 // MARK: - frame source (Frame/CamFixFrameSource.m)
 
 CFX_HIDDEN CMSampleBufferRef cfx_build_cmsb(void);
+CFX_HIDDEN CMSampleBufferRef cfx_build_oriented_cmsb(uint32_t fmt_out, uint32_t preset_w,
+                                                     uint32_t preset_h, int angle, double zoom,
+                                                     int extra_turns, BOOL mirror,
+                                                     uint32_t *outW, uint32_t *outH);
+CFX_HIDDEN BOOL cfx_shm_frame_size(uint32_t *w, uint32_t *h);
 CFX_HIDDEN CGImageRef cfx_build_cgimage_from_shm(void) CF_RETURNS_RETAINED;
 CFX_HIDDEN NSData *cfx_jpeg_from_cgimage(CGImageRef img);
 CFX_HIDDEN IOSurfaceRef cfx_build_iosurface_from_shm(uint32_t *outW, uint32_t *outH) CF_RETURNS_RETAINED;
 
-// MARK: - device (Device/CamFixActiveFormat.m)
+// MARK: - device (Device/)
 
 CFX_HIDDEN void cfx_install_setActiveFormat_hook(void);
+CFX_HIDDEN void cfx_install_front_camera_alias(void);
+CFX_HIDDEN void cfx_install_exposure_hooks(void);
+CFX_HIDDEN void cfx_stamp_exif(CMSampleBufferRef sb, double meanLuma);
 
 // MARK: - photos (Photo/)
 
@@ -51,6 +60,17 @@ CFX_HIDDEN void cfx_install_photo_representation_hooks(void);
 CFX_HIDDEN void cfx_install_capturePhoto_hook(void);
 CFX_HIDDEN void cfx_install_moment_capture_hooks(void);
 CFX_HIDDEN void cfx_install_capturerequest_stubs(void);
+// YES for Camera.app's CAMCaptureEngine, which registers each still request
+// by uniqueID and waits for the whole callback sequence before saving.
+CFX_HIDDEN BOOL cfx_delegate_registers_still_requests(id delegate);
+// Delivers a photo built from the shm frame to such a delegate, with the
+// full will/did/finish callback sequence for the settings' uniqueID.
+CFX_HIDDEN void cfx_drive_capture(id output, id delegate, id settings);
+
+// MARK: - movies (Movie/)
+
+CFX_HIDDEN void cfx_install_movie_recording_hooks(void);
+CFX_HIDDEN void cfx_install_video_mode_capability(void);
 
 // MARK: - preview (Preview/)
 
@@ -70,5 +90,7 @@ CFX_HIDDEN void cfx_deliver_video_frames_once(void);
 CFX_HIDDEN void cfx_install_session_guards(void);
 CFX_HIDDEN void cfx_install_input_diagnostics(void);
 CFX_HIDDEN void cfx_install_session_state_lies(void);
+CFX_HIDDEN void cfx_install_asset_writer_settings(void);
+CFX_HIDDEN BOOL cfx_output_frame_size(id out, uint32_t *w, uint32_t *h);
 
 #endif

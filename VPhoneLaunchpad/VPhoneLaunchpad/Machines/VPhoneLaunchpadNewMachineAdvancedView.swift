@@ -1,8 +1,12 @@
 import SwiftUI
 
-/// New Machine's Advanced page: network, patches and restore options, as
-/// sections of New Machine's form. It edits New Machine's own state.
+/// The patch sections of New Machine's Patches tab, the network section of
+/// its Hardware tab and the restore options of its Storage tab, as sections
+/// of New Machine's form. It edits New Machine's own state.
 struct VPhoneLaunchpadNewMachineAdvancedView: View {
+    var page: VPhoneLaunchpadNewMachineView.Page
+    /// A template never keeps the restore files.
+    var usesTemplate: Bool
     @Binding var network: String
     @Binding var patches: VPhoneLaunchpadPatchSelection
     @Binding var keepArtifacts: Bool
@@ -17,24 +21,57 @@ struct VPhoneLaunchpadNewMachineAdvancedView: View {
     @Environment(VPhoneLaunchpadModel.self) private var model
     @State private var showsPatchSettings = false
 
+    /// The network modes `vm create --network` takes, with their titles.
+    static var networkModes: [(tag: String, title: String)] {
+        [
+            ("nat", String(localized: "NAT")),
+            ("bridged", String(localized: "Bridged")),
+            ("tunnel", String(localized: "Tunnel")),
+            ("none", String(localized: "None")),
+        ]
+    }
+
+    /// What `mode` does, for the footer under its picker.
+    static func networkDescription(_ mode: String) -> String {
+        switch mode {
+        case "nat": String(localized: "The guest shares this Mac's connection through Virtualization's built-in NAT. Its traffic skips a VPN on the Mac.")
+        case "bridged": String(localized: "The guest joins the network of one of this Mac's interfaces with an address of its own, so other devices on that network can reach it.")
+        case "tunnel": String(localized: "Traffic leaves through this Mac's own connections, so it follows the Mac's VPN.")
+        case "none": String(localized: "The guest has no network device and stays offline.")
+        default: ""
+        }
+    }
+
     var body: some View {
-        Section("Network") {
-            Picker("Mode", selection: $network) {
-                Text("NAT").tag("nat")
-                Text("Bridged").tag("bridged")
-                Text("Tunnel").tag("tunnel")
-                Text("None").tag("none")
-            }
-            if network == "tunnel" {
-                Text("Traffic leaves through this Mac's own connections, so it follows the Mac's VPN.")
+        switch page {
+        case .patches:
+            patchSection
+        case .hardware:
+            Section {
+                Picker("Mode", selection: $network) {
+                    ForEach(Self.networkModes, id: \.tag) { mode in
+                        Text(verbatim: mode.title).tag(mode.tag)
+                    }
+                }
+            } header: {
+                Text("Network")
+            } footer: {
+                Text(Self.networkDescription(network))
                     .foregroundStyle(.secondary)
             }
-        }
-
-        patchSection
-
-        Section("Options") {
-            Toggle("Keep prepared restore files", isOn: $keepArtifacts)
+        case .storage:
+            Section {
+                Toggle("Keep prepared restore files", isOn: $keepArtifacts)
+                    .disabled(usesTemplate)
+            } header: {
+                Text("Options")
+            } footer: {
+                if usesTemplate {
+                    Text("A template never keeps them.").foregroundStyle(.secondary)
+                }
+            }
+        default:
+            EmptyView()
         }
     }
 
@@ -84,6 +121,10 @@ struct VPhoneLaunchpadNewMachineAdvancedView: View {
             }
             if patches.hasOverrides {
                 Text("Differs from the preset: \(patches.blocked.count) off, \(patches.allowed.count) on.")
+                    .foregroundStyle(.secondary)
+            }
+            if usesTemplate, let patchCatalog, !patchCatalog.guestOverrides(patches).isEmpty {
+                Text("Guest patch changes are applied to this machine after it is cloned. The template keeps the preset’s, so machines that do not change them share it.")
                     .foregroundStyle(.secondary)
             }
             if !essentialOff.isEmpty {

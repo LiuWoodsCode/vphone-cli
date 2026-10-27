@@ -1,4 +1,3 @@
-import CryptoKit
 import Darwin
 import Foundation
 import Virtualization
@@ -16,6 +15,9 @@ final class VPhoneGuestControl {
         case guestError(String)
         /// `bootstrap.install` found a completed installation in the guest.
         case bootstrapAlreadyInstalled(String)
+        /// The guest's Location Services switch is off, so it has no location to
+        /// give an app, a simulated one included.
+        case locationServicesOff(String)
 
         var description: String {
             switch self {
@@ -23,8 +25,22 @@ final class VPhoneGuestControl {
                 VPhoneLocalization.text("The guest agent is not connected. Wait for it to connect, then try again.")
             case let .unsupportedCapability(value): "guest does not support capability: \(value)"
             case let .protocolError(value): "API protocol error: \(value)"
-            case let .guestError(value), let .bootstrapAlreadyInstalled(value): value
+            case let .guestError(value), let .bootstrapAlreadyInstalled(value), let .locationServicesOff(value): value
             }
+        }
+    }
+
+    /// vphoned refused an `/v1/rpc` call. `body` is its error object as sent;
+    /// it came from JSON, so it serializes back unchanged.
+    struct GuestRPCFailure: Error, CustomStringConvertible, @unchecked Sendable {
+        let body: [String: Any]
+
+        var message: String {
+            body["message"] as? String ?? "Guest operation failed"
+        }
+
+        var description: String {
+            message
         }
     }
 
@@ -42,11 +58,14 @@ final class VPhoneGuestControl {
     @ObservationIgnored private var orderedInput: Task<Void, Never>?
     @ObservationIgnored private var orderedLocation: Task<Void, Never>?
     @ObservationIgnored private var locationGeneration: UInt64 = 0
+    @ObservationIgnored var isHomePodGuest = false
     private(set) var isConnected = false
     private(set) var guestCapabilities: [String] = []
     private(set) var guestIPAddress: String?
     private(set) var guestIOSVersion: String?
     @ObservationIgnored var guestBinaryURL: URL?
+    /// The bundled vphoned's hash, kept between probes (VPhoneFileDigestCache).
+    @ObservationIgnored private var guestBinaryDigest = VPhoneFileDigestCache()
     @ObservationIgnored var onConnect: (([String]) -> Void)?
     @ObservationIgnored var onDisconnect: (() -> Void)?
     /// What en0 should be configured as, from the manifest. Applied on every
@@ -55,6 +74,9 @@ final class VPhoneGuestControl {
     /// The guest's mDNS name from the manifest, applied on every connect; nil
     /// puts back a name vphoned replaced, and leaves any other alone.
     @ObservationIgnored var guestLocalHostName: String?
+    /// The guest's device name, the VM's name, applied on every connect; nil
+    /// gives the guest its own back.
+    @ObservationIgnored var guestDeviceName: String?
     /// Names the guest resolves locally, worked out on each connect (the Mac's
     /// name or a bridged address can change while the VM runs). Nil sends
     /// nothing.
@@ -63,6 +85,15 @@ final class VPhoneGuestControl {
     /// that has just started connects, from the manifest. Read at each connect,
     /// so a change from the menu holds from the next guest start.
     @ObservationIgnored var unlocksAtStartup = false
+    /// Whether the bundle's /usr/lib hooks are kept in step with the guest.
+    /// Off for an Apple TV: its preset leaves the environment out, and the
+    /// iOS hooks have no tvOS port.
+    @ObservationIgnored var syncsGuestEnvironment = true
+    /// Whether the Mac's location is forwarded to the guest, from the manifest.
+    /// The VM window's Location menu starts from it and writes it back.
+    @ObservationIgnored var syncsHostLocation = false
+    /// Called on the main actor when a `location.set` or `location.clear` fails.
+    @ObservationIgnored var onLocationFailure: ((Error) -> Void)?
     /// The `instance` of the last vphoned connected to. Kept across
     /// disconnects: a lost probe reconnects to the same vphoned, which is not
     /// a start. Guest counters such as the clipboard's change count start
@@ -159,6 +190,10 @@ final class VPhoneGuestControl {
         monitor = nil
         orderedInput?.cancel()
         orderedInput = nil
+        openScroll = nil
+        pendingPointer = nil
+        openPointerPress = nil
+        heldPointerButtons = 0
         orderedLocation?.cancel()
         orderedLocation = nil
         device = nil
@@ -175,17 +210,16 @@ final class VPhoneGuestControl {
                 throw ControlError.protocolError("incompatible guest API")
             }
             if let binary = guestBinaryURL,
+               let hash = guestBinaryDigest.sha256(of: binary),
+               hash != info["binary_hash"] as? String,
                let data = try? Data(contentsOf: binary, options: .mappedIfSafe)
             {
-                let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-                if hash != info["binary_hash"] as? String {
-                    print("[control] updating vphoned over HTTP...")
-                    try await createDirectory(path: "/var/root/Library/Caches")
-                    try await uploadFile(path: "/var/root/Library/Caches/vphoned.next", data: data)
-                    _ = try await call("agent.apply_update", params: ["sha256": hash])
-                    setDisconnected()
-                    return
-                }
+                print("[control] updating vphoned over HTTP...")
+                try await createDirectory(path: "/var/root/Library/Caches")
+                try await uploadFile(path: "/var/root/Library/Caches/vphoned.next", data: data)
+                _ = try await call("agent.apply_update", params: ["sha256": hash])
+                setDisconnected()
+                return
             }
             // The probe repeats every few seconds; assign only changes so
             // observing windows do not redraw on every probe.
@@ -220,7 +254,7 @@ final class VPhoneGuestControl {
                         Task { await unlockAtStartup() }
                     }
                 }
-                if capabilities.contains("environment_update") {
+                if syncsGuestEnvironment, capabilities.contains("environment_update") {
                     Task { await syncEnvironment() }
                 }
                 if capabilities.contains("network_ipv4"), let setting = guestIPv4Setting {
@@ -228,6 +262,9 @@ final class VPhoneGuestControl {
                 }
                 if capabilities.contains("network_hostname") {
                     Task { await applyGuestLocalHostName(guestLocalHostName) }
+                }
+                if capabilities.contains("device_name") {
+                    Task { await applyGuestDeviceName(guestDeviceName) }
                 }
                 if capabilities.contains("network_static_names"), let entries = guestStaticNames?() {
                     Task { await applyGuestStaticNames(entries) }
@@ -261,30 +298,67 @@ final class VPhoneGuestControl {
         sendHID(page: page, usage: usage, down: nil)
     }
 
-    func sendHIDDown(page: UInt32, usage: UInt32) {
-        sendHID(page: page, usage: usage, down: true)
+    func sendHIDDown(page: UInt32, usage: UInt32, longPress: Bool = false) {
+        sendHID(page: page, usage: usage, down: true, longPress: longPress)
     }
 
-    func sendHIDUp(page: UInt32, usage: UInt32) {
-        sendHID(page: page, usage: usage, down: false)
+    func sendHIDUp(page: UInt32, usage: UInt32, minimumHold: Duration = .zero, longPress: Bool = false) {
+        sendHID(page: page, usage: usage, down: false, minimumHold: minimumHold, longPress: longPress)
     }
 
-    private func sendHID(page: UInt32, usage: UInt32, down: Bool?) {
+    @ObservationIgnored private var heldHIDKeys: [UInt64: ContinuousClock.Instant] = [:]
+
+    private func sendHID(page: UInt32, usage: UInt32, down: Bool?, minimumHold: Duration = .zero, longPress: Bool = false) {
         var params: [String: Any] = ["page": page, "usage": usage]
         if let down {
             params["down"] = down
         }
-        enqueueInput("input.hid", params: params)
+        if longPress { params["long_press"] = true }
+        let key = UInt64(page) << 32 | UInt64(usage)
+        let previous = orderedInput
+        orderedInput = Task {
+            await previous?.value
+            guard !Task.isCancelled else { return }
+            if down == false, minimumHold > .zero, let began = heldHIDKeys[key] {
+                // Preserve a tap's duration even when the guest or transport
+                // delays key-down. Timing in the view can collapse both events
+                // into consecutive RPCs after the input queue catches up.
+                let remaining = minimumHold - began.duration(to: .now)
+                if remaining > .zero { try? await Task.sleep(for: remaining) }
+            }
+            guard !Task.isCancelled else { return }
+            do {
+                _ = try await call("input.hid", params: params)
+                if down == true { heldHIDKeys[key] = .now }
+                else { heldHIDKeys.removeValue(forKey: key) }
+            } catch { print("[control] input.hid: \(error)") }
+        }
     }
 
-    func sendTouch(phase: Int, x: Double, y: Double) {
+    /// `edge` is the screen edge the touch started at, in `_VZTouch` swipeAim
+    /// encoding (1 top, 2 bottom, 4 right, 8 left, 0 none). A guest with
+    /// `touch_edge` injects such a touch with the digitizer edge flags UIKit's
+    /// screen-edge gestures (home, Control Center) require.
+    func sendTouch(phase: Int, x: Double, y: Double, edge: Int = 0) {
         let name =
             switch phase {
             case 0: "down"
             case 1: "move"
             default: "up"
             }
-        enqueueInput("input.touch", params: ["phase": name, "x": x, "y": y, "normalized": true])
+        var params: [String: Any] = ["phase": name, "x": x, "y": y, "normalized": true]
+        if edge != 0, supportsEdgeTouch {
+            params["edge"] = edge
+        }
+        enqueueInput("input.touch", params: params)
+    }
+
+    /// Whether the guest can inject a touch carrying screen-edge flags. The
+    /// VZ USB touchscreen cannot: its HID report has no field for them, so
+    /// `_VZTouch`'s swipeAim never reaches the guest and SpringBoard's
+    /// bottom-edge home gesture does not start.
+    var supportsEdgeTouch: Bool {
+        isConnected && guestCapabilities.contains("touch_edge")
     }
 
     /// Whether the guest takes two fingers in one hand event. Guests that only
@@ -308,6 +382,158 @@ final class VPhoneGuestControl {
         ])
     }
 
+    /// Whether the guest scrolls under a virtual pointer (`input.pointer`,
+    /// `input.scroll`), as an iPad with a trackpad does.
+    var supportsPointerScroll: Bool {
+        isConnected && guestCapabilities.contains("pointer_scroll")
+    }
+
+    /// Whether a button held in a pointer move is a click (`input.pointer`'s
+    /// `buttons`), so a Mac click can be the guest pointer's.
+    var supportsPointerButtons: Bool {
+        isConnected && guestCapabilities.contains("pointer_buttons")
+    }
+
+    @ObservationIgnored private var pointersInFlight = 0
+    @ObservationIgnored private var pendingPointer: CGPoint?
+    @ObservationIgnored private var lastPointerSequence: UInt64 = 0
+    /// The buttons the last `setPointer` holds down.
+    @ObservationIgnored private var heldPointerButtons = 0
+    /// `setPointer` requests not yet answered.
+    @ObservationIgnored private var pointerPressesQueued = 0
+    @ObservationIgnored private var openPointerPress: PendingPointerPress?
+
+    /// Moves in flight at once. Each request is its own connection; waiting
+    /// for one answer before the next put a round trip behind every move.
+    private static let maximumPointersInFlight = 4
+
+    /// Puts the guest's pointer at `point`, 0...1 of the interface as shown.
+    /// Not in the ordered input queue: where the pointer sits does not depend
+    /// on the order of touches, and a mouse that keeps moving would hold every
+    /// click behind it. Moves go out at once, numbered so that vphoned drops
+    /// one that lands after a later one; past `maximumPointersInFlight` the
+    /// newest position waits for the next free slot. While a button is down,
+    /// or its release has not been answered, the newest position waits too: a
+    /// move holds no buttons, and one numbered past a press would release it.
+    func movePointer(to point: CGPoint) {
+        guard pointersInFlight < Self.maximumPointersInFlight, heldPointerButtons == 0, pointerPressesQueued == 0
+        else {
+            pendingPointer = point
+            return
+        }
+        let params: [String: Any] = ["x": Double(point.x), "y": Double(point.y), "seq": nextPointerSequence()]
+        pointersInFlight += 1
+        Task {
+            _ = try? await call("input.pointer", params: params)
+            pointersInFlight -= 1
+            movePendingPointer()
+        }
+    }
+
+    /// The position a press or a drag still waiting in the input queue sends.
+    private final class PendingPointerPress {
+        var point: CGPoint
+        let buttons: Int
+
+        init(point: CGPoint, buttons: Int) {
+            self.point = point
+            self.buttons = buttons
+        }
+    }
+
+    /// Puts the guest's pointer at `point` with `buttons` held, bit 0 primary
+    /// and bit 1 secondary: a click that is the pointer's, as a trackpad's is,
+    /// and not a touch. In the ordered input queue, after the keys and touches
+    /// sent before it, so no press or release is reordered or dropped. A drag
+    /// that keeps the same buttons down joins the move still waiting there,
+    /// so a guest slower than the mouse gets fewer moves and loses no release.
+    func setPointer(_ point: CGPoint, buttons: Int) {
+        heldPointerButtons = buttons
+        // A hover from before the press would land after it.
+        pendingPointer = nil
+        if let open = openPointerPress, open.buttons == buttons {
+            open.point = point
+            return
+        }
+        let open = PendingPointerPress(point: point, buttons: buttons)
+        openPointerPress = open
+        pointerPressesQueued += 1
+        let previous = orderedInput
+        orderedInput = Task {
+            await previous?.value
+            if openPointerPress === open {
+                openPointerPress = nil
+            }
+            if !Task.isCancelled {
+                let params: [String: Any] = [
+                    "x": Double(open.point.x), "y": Double(open.point.y), "buttons": open.buttons,
+                    "seq": nextPointerSequence(),
+                ]
+                do { _ = try await call("input.pointer", params: params) } catch { print("[control] input.pointer: \(error)") }
+            }
+            pointerPressesQueued -= 1
+            movePendingPointer()
+        }
+    }
+
+    private func movePendingPointer() {
+        guard let next = pendingPointer else { return }
+        pendingPointer = nil
+        movePointer(to: next)
+    }
+
+    /// Microseconds of uptime: increasing across reconnects and restarts of
+    /// this process, which a guest that keeps running may still remember.
+    private func nextPointerSequence() -> UInt64 {
+        let now = UInt64(ProcessInfo.processInfo.systemUptime * 1_000_000)
+        lastPointerSequence = max(now, lastPointerSequence + 1)
+        return lastPointerSequence
+    }
+
+    /// The `changed` deltas waiting in the input queue, added up until that
+    /// request goes out.
+    private final class PendingScroll {
+        var delta = CGVector.zero
+    }
+
+    @ObservationIgnored private var openScroll: PendingScroll?
+
+    /// One native scroll event, in order with the other input. `delta` is in
+    /// interface points with a browser wheel event's signs. `changed` deltas
+    /// that arrive while one waits in the queue are added to it, so a guest
+    /// slower than the trackpad gets fewer, larger deltas and loses none.
+    func sendScroll(phase: String, delta: CGVector = .zero, pointer: CGPoint? = nil) {
+        if phase == "changed" {
+            if let open = openScroll {
+                open.delta.dx += delta.dx
+                open.delta.dy += delta.dy
+                return
+            }
+            let open = PendingScroll()
+            open.delta = delta
+            openScroll = open
+            let previous = orderedInput
+            orderedInput = Task {
+                await previous?.value
+                if openScroll === open {
+                    openScroll = nil
+                }
+                guard !Task.isCancelled else { return }
+                let params: [String: Any] = ["phase": "changed", "dx": Double(open.delta.dx), "dy": Double(open.delta.dy)]
+                do { _ = try await call("input.scroll", params: params) } catch { print("[control] input.scroll: \(error)") }
+            }
+            return
+        }
+        // A delta after this event belongs to the next scroll, not to one queued before it.
+        openScroll = nil
+        var params: [String: Any] = ["phase": phase]
+        if let pointer {
+            params["x"] = Double(pointer.x)
+            params["y"] = Double(pointer.y)
+        }
+        enqueueInput("input.scroll", params: params)
+    }
+
     private func enqueueInput(_ method: String, params: [String: Any]) {
         let previous = orderedInput
         orderedInput = Task {
@@ -319,9 +545,21 @@ final class VPhoneGuestControl {
 
     /// Calls one vphoned operation after the input events already queued, so a
     /// key or text request cannot overtake a tap sent before it.
+    /// A cancellable input producer must drain first, then check that its
+    /// interaction is still current immediately before submitting a new RPC.
+    func waitForQueuedInput() async { await orderedInput?.value }
+
     func callAfterQueuedInput(_ method: String, params: [String: Any] = [:]) async throws -> [String: Any] {
         await orderedInput?.value
         return try await call(method, params: params)
+    }
+
+    /// `callAfterQueuedInput`, but a refusal from vphoned is thrown as
+    /// `GuestRPCFailure` with its whole error object, for a caller that passes
+    /// it on (`vphone.sock`'s `rpc`).
+    func rpcAfterQueuedInput(_ method: String, params: [String: Any] = [:]) async throws -> [String: Any] {
+        await orderedInput?.value
+        return try await rpc(method, params: params)
     }
 
     func isDeveloperModeEnabled() async throws -> Bool {
@@ -402,25 +640,64 @@ final class VPhoneGuestControl {
 
     /// Calls one named vphoned operation over `/v1/rpc` and returns its result object.
     func call(_ method: String, params: [String: Any] = [:]) async throws -> [String: Any] {
+        do {
+            return try await rpc(method, params: params)
+        } catch let failure as GuestRPCFailure {
+            if failure.body["code"] as? String == "bootstrap_already_installed" {
+                throw ControlError.bootstrapAlreadyInstalled(failure.message)
+            }
+            if failure.body["code"] as? String == "location_services_off" {
+                throw ControlError.locationServicesOff(failure.message)
+            }
+            throw ControlError.guestError(failure.message)
+        }
+    }
+
+    /// `call`, with vphoned's refusal kept whole as `GuestRPCFailure`: `code`,
+    /// `message` and whatever the command adds (`results`, `reason`, `errno`,
+    /// `retryable` …).
+    private func rpc(_ method: String, params: [String: Any], limits: VPhoneHTTPLimits = .rpc) async throws -> [String: Any] {
         let object: [String: Any] = ["id": UUID().uuidString, "method": method, "params": params]
         let body = try JSONSerialization.data(withJSONObject: object)
         let longOperation = method == "bootstrap.install" || method == "apps.install_trollstore_lite"
         let response = try await http(
             method: "POST", path: "/v1/rpc", body: body,
-            limits: longOperation ? .installation : .rpc,
+            limits: longOperation ? .installation : limits,
         )
         guard let envelope = try JSONSerialization.jsonObject(with: response.body) as? [String: Any]
         else { throw ControlError.protocolError("invalid JSON response") }
         if let error = envelope["error"] as? [String: Any] {
-            let message = error["message"] as? String ?? "Guest operation failed"
-            if error["code"] as? String == "bootstrap_already_installed" {
-                throw ControlError.bootstrapAlreadyInstalled(message)
-            }
-            throw ControlError.guestError(message)
+            throw GuestRPCFailure(body: error)
         }
         guard response.status == 200, let result = envelope["result"] as? [String: Any]
         else { throw ControlError.protocolError("missing result (HTTP \(response.status))") }
         return result
+    }
+
+    /// A latest-frame read has a short deadline: loss of the guest must blank
+    /// the cap instead of leaving a frozen animation lit for an RPC timeout.
+    func homePodDisplaySnapshot() async throws -> (geometry: VPhoneHomePodDisplayGeometry, frame: VPhoneHomePodDisplayFrame)? {
+        let state = try await rpc("homepod.display.state", params: [:], limits: .homePodDisplay)
+        guard state["available"] as? Bool == true else { return nil }
+        guard let geometry = state["geometry"] as? [String: Any],
+              let x = geometry["x"] as? [Double], let y = geometry["y"] as? [Double],
+              let rings = geometry["rings"] as? [UInt32],
+              let bitDepth = state["bit_depth"] as? Int,
+              let version = state["hardware_version"] as? UInt32,
+              let displays = state["displays"] as? [[String: Any]], !displays.isEmpty,
+              let plus = state["plus"] as? Double, let minus = state["minus"] as? Double,
+              let generation = state["generation"] as? UInt64
+        else { throw ControlError.protocolError("invalid HomePod display snapshot") }
+        let layout = try VPhoneHomePodDisplayGeometry(xCoordinates: x, yCoordinates: y, rings: rings, bitDepth: bitDepth, hardwareVersion: version)
+        let banks = try displays.map { display -> [[Double]] in
+            guard let pixels = display["pixels"] as? [[Double]] else {
+                throw ControlError.protocolError("missing HomePod LED bank")
+            }
+            return pixels
+        }
+        let frame = try VPhoneHomePodDisplayFrame(banks: banks, plusBrightness: plus, minusBrightness: minus, generation: generation)
+        guard frame.matches(layout) else { throw ControlError.protocolError("HomePod display frame does not match its geometry") }
+        return (layout, frame)
     }
 
     func listFiles(path: String) async throws -> [[String: Any]] {
@@ -446,6 +723,54 @@ final class VPhoneGuestControl {
             limits: .upload,
         )
         guard response.status == 200 else { throw try httpError(response) }
+    }
+
+    /// Streams the host file at `localURL` to `path` in the guest, a chunk at
+    /// a time, so its size is not limited by memory or by a JSON body.
+    /// vphoned writes it beside `path` and renames it once every byte is in.
+    /// Returns the size written.
+    func pushFile(from localURL: URL, to path: String, permissions: String) async throws -> Int64 {
+        let response = try await http(
+            method: "PUT",
+            path: filePath(path, mode: permissions),
+            contentType: "application/octet-stream",
+            limits: .fileTransfer,
+            upload: localURL,
+        )
+        guard response.status == 200 else { throw try httpError(response) }
+        let reply = try? JSONSerialization.jsonObject(with: response.body) as? [String: Any]
+        let result = reply?["result"] as? [String: Any]
+        return (result?["size"] as? NSNumber)?.int64Value ?? 0
+    }
+
+    /// Streams the guest file at `path` to `localURL` on the host. The bytes
+    /// go to a hidden file beside `localURL`, which replaces it only once the
+    /// whole file has arrived. Returns the size written.
+    func pullFile(_ path: String, to localURL: URL) async throws -> Int64 {
+        let temporary = localURL.deletingLastPathComponent()
+            .appendingPathComponent(".\(localURL.lastPathComponent).vphone-\(UUID().uuidString).part")
+        guard FileManager.default.createFile(atPath: temporary.path, contents: nil) else {
+            throw ControlError.guestError("Could not create \(temporary.path)")
+        }
+        do {
+            let handle = try FileHandle(forWritingTo: temporary)
+            let response: VPhoneHTTPResponse
+            do {
+                response = try await http(method: "GET", path: filePath(path), limits: .fileTransfer, download: handle)
+                try handle.close()
+            } catch {
+                try? handle.close()
+                throw error
+            }
+            guard response.status == 200 else { throw try httpError(response) }
+            guard rename(temporary.path, localURL.path) == 0 else {
+                throw ControlError.guestError("Could not replace \(localURL.path): \(String(cString: strerror(errno)))")
+            }
+            return response.streamedLength
+        } catch {
+            unlink(temporary.path)
+            throw error
+        }
     }
 
     func createDirectory(path: String) async throws {
@@ -672,7 +997,12 @@ final class VPhoneGuestControl {
         orderedLocation = Task {
             await previous?.value
             guard !Task.isCancelled, generation == locationGeneration else { return }
-            do { _ = try await call(method, params: params) } catch { print("[control] \(method): \(error)") }
+            do {
+                _ = try await call(method, params: params)
+            } catch {
+                print("[control] \(method): \(error)")
+                onLocationFailure?(error)
+            }
         }
     }
 
@@ -689,6 +1019,20 @@ final class VPhoneGuestControl {
         return components.string ?? ""
     }
 
+    /// A VSOCK connection of its own for a route that streams for as long as
+    /// it is open, rather than answering once. The caller owns it from here:
+    /// every other request sets a read timeout and closes when its reply is
+    /// complete, neither of which suits a terminal that is idle most of the
+    /// time. `VPhoneGuestShellChannel` is the only caller.
+    func openGuestStream() async throws -> VPhoneGuestStream {
+        guard let device else { throw ControlError.notConnected }
+        let socket = await withCheckedContinuation {
+            (continuation: CheckedContinuation<VPhoneSocketResult, Never>) in
+            device.connect(toPort: 1339) { continuation.resume(returning: VPhoneSocketResult($0)) }
+        }
+        return VPhoneGuestStream(connection: try socket.result.get())
+    }
+
     private func httpError(_ response: VPhoneHTTPResponse) throws -> ControlError {
         let body = try JSONSerialization.jsonObject(with: response.body) as? [String: Any]
         let error = body?["error"] as? [String: Any]
@@ -701,6 +1045,8 @@ final class VPhoneGuestControl {
         body: Data = Data(),
         contentType: String = "application/json",
         limits: VPhoneHTTPLimits = .rpc,
+        upload: URL? = nil,
+        download: FileHandle? = nil,
     ) async throws -> VPhoneHTTPResponse {
         guard let device else { throw ControlError.notConnected }
         let socket = await withCheckedContinuation {
@@ -715,6 +1061,8 @@ final class VPhoneGuestControl {
             body: body,
             contentType: contentType,
             limits: limits,
+            upload: upload,
+            download: download,
         )
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -729,6 +1077,8 @@ final class VPhoneGuestControl {
 private struct VPhoneHTTPResponse: Sendable {
     let status: Int
     let body: Data
+    /// The bytes written to the transaction's `download` handle instead of `body`.
+    var streamedLength: Int64 = 0
 }
 
 // MARK: - Limits
@@ -744,10 +1094,16 @@ private struct VPhoneHTTPLimits: Sendable {
     /// 120 s read timeout before it answers, so the deadline sits above it.
     static let rpc = VPhoneHTTPLimits(maxBodyLength: 64 * 1024 * 1024, deadline: .seconds(180))
     static let installation = VPhoneHTTPLimits(maxBodyLength: 64 * 1024 * 1024, deadline: .seconds(30 * 60))
+    static let homePodDisplay = VPhoneHTTPLimits(maxBodyLength: 64 * 1024, deadline: .seconds(1))
     /// File downloads: the response body is the file.
     static let download = VPhoneHTTPLimits(maxBodyLength: 2_147_483_647, deadline: .seconds(30 * 60))
     /// Uploads: the request body is large, the response is a small JSON reply.
     static let upload = VPhoneHTTPLimits(maxBodyLength: 64 * 1024 * 1024, deadline: .seconds(30 * 60))
+    /// `push` and `pull` on vphone.sock: the file streams between the guest
+    /// and a host file, so only an error reply is held in memory. The
+    /// deadline allows a few GiB over a slow guest; a stall still ends at the
+    /// per-read timeout.
+    static let fileTransfer = VPhoneHTTPLimits(maxBodyLength: 64 * 1024 * 1024, deadline: .seconds(2 * 60 * 60))
 }
 
 private struct VPhoneSocketResult: @unchecked Sendable {
@@ -766,6 +1122,10 @@ private final class VPhoneHTTPTransaction: @unchecked Sendable {
     let body: Data
     let contentType: String
     let limits: VPhoneHTTPLimits
+    /// A file sent as the request body in place of `body`.
+    let upload: URL?
+    /// Where a 200 response body goes in place of memory.
+    let download: FileHandle?
     private let deadline: ContinuousClock.Instant
 
     /// Per-read and per-write socket timeout.
@@ -780,8 +1140,12 @@ private final class VPhoneHTTPTransaction: @unchecked Sendable {
         body: Data,
         contentType: String,
         limits: VPhoneHTTPLimits,
+        upload: URL? = nil,
+        download: FileHandle? = nil,
     ) {
         self.connection = connection
+        self.upload = upload
+        self.download = download
         self.method = method
         self.path = path
         self.body = body
@@ -811,10 +1175,22 @@ private final class VPhoneHTTPTransaction: @unchecked Sendable {
         else {
             throw VPhoneGuestControl.ControlError.notConnected
         }
+        let source = try upload.map { try FileHandle(forReadingFrom: $0) }
+        defer { try? source?.close() }
+        let bodyLength: Int64 = if let source { Int64(try source.seekToEnd()) } else { Int64(body.count) }
+        try source?.seek(toOffset: 0)
         let headers =
-            "\(method) \(path) HTTP/1.1\r\nHost: vphoned\r\nConnection: close\r\nContent-Type: \(contentType)\r\nContent-Length: \(body.count)\r\n\r\n"
+            "\(method) \(path) HTTP/1.1\r\nHost: vphoned\r\nConnection: close\r\nContent-Type: \(contentType)\r\nContent-Length: \(bodyLength)\r\n\r\n"
         try write(fd, data: Data(headers.utf8))
-        if !body.isEmpty {
+        if let source {
+            var sent: Int64 = 0
+            while sent < bodyLength {
+                guard let chunk = try source.read(upToCount: Int(min(1 << 20, bodyLength - sent))), !chunk.isEmpty
+                else { throw VPhoneGuestControl.ControlError.protocolError("the file shrank while it was sent") }
+                try write(fd, data: chunk)
+                sent += Int64(chunk.count)
+            }
+        } else if !body.isEmpty {
             try write(fd, data: body)
         }
 
@@ -833,6 +1209,19 @@ private final class VPhoneHTTPTransaction: @unchecked Sendable {
             throw VPhoneGuestControl.ControlError.protocolError("invalid HTTP status")
         }
         let length = try Self.contentLength(lines.dropFirst())
+        if let download, status == 200 {
+            var payload = Data(received[boundary.upperBound...])
+            var written: Int64 = 0
+            while true {
+                let part = payload.prefix(Int(min(Int64(payload.count), Int64(length) - written)))
+                try download.write(contentsOf: part)
+                written += Int64(part.count)
+                guard written < Int64(length) else { break }
+                payload.removeAll(keepingCapacity: true)
+                try readMore(fd, into: &payload)
+            }
+            return VPhoneHTTPResponse(status: status, body: Data(), streamedLength: written)
+        }
         guard length <= limits.maxBodyLength else {
             throw VPhoneGuestControl.ControlError.protocolError("HTTP body of \(length) bytes exceeds the \(limits.maxBodyLength)-byte limit")
         }
@@ -946,6 +1335,22 @@ extension VPhoneGuestControl {
             }
         } catch {
             print("[network] could not set the guest's mDNS name: \(error)")
+        }
+    }
+}
+
+extension VPhoneGuestControl {
+    /// Pin the guest's device name to `name`, what Xcode, devicectl and Finder
+    /// show, or with nil give the guest its own back. vphoned stores it where
+    /// the guest's hooks read it at every boot, and applies it at once.
+    func applyGuestDeviceName(_ name: String?) async {
+        do {
+            let result = try await call("device.name.set", params: ["name": name ?? NSNull()])
+            if result["changed"] as? Bool == true {
+                print("[device] guest device name \(name.map { "set to \($0)" } ?? "restored to its own")")
+            }
+        } catch {
+            print("[device] could not set the guest's device name: \(error)")
         }
     }
 }

@@ -18,6 +18,7 @@
 
 import Darwin
 import Foundation
+import VPhoneCoreKit
 import VPhonePatchKit
 
 /// Orchestrates firmware patching for all boot-chain components.
@@ -32,7 +33,6 @@ public final class FirmwarePipeline {
     // MARK: - Variant
 
     public enum Variant: String, Sendable {
-        case less
         case regular
         case dev
         case jb
@@ -84,7 +84,7 @@ public final class FirmwarePipeline {
         /// Whether the pipeline keeps this component's untouched bytes aside and
         /// re-patches those on every run — see FirmwarePipelineOriginals.swift.
         ///
-        /// False for the two `.less` components, and only for them. `Filesystem`
+        /// False for the two restore image components, and only for them. `Filesystem`
         /// and `Manifest` both name `BuildManifest.plist`, but neither is a patcher
         /// over that one file: `CryptexFilesystemPatcher` rewrites cryptex images
         /// across the restore tree, and `ManifestHashPatcher` rewrites hashes to
@@ -92,6 +92,13 @@ public final class FirmwarePipeline {
         /// would describe a tree that no longer exists, so they keep the old
         /// in-place behaviour and opt out here.
         var restorable: Bool = true
+
+        /// A container standing in for the shipped file, and the record of the
+        /// swap: the patchers run over its payload and are saved into it. The
+        /// research board's kernelcache is replaced by its mix this way
+        /// (KernelCacheMixer), whose container carries kmutil's layout
+        /// properties rather than the shipped kernel's.
+        var replacement: (() throws -> (container: Data, record: PatchRecord))? = nil
 
         /// The same descriptor with more patchers appended after the existing ones.
         func appending(_ factories: [(Data, Bool) throws -> any Patcher]) -> ComponentDescriptor {
@@ -102,6 +109,7 @@ public final class FirmwarePipeline {
                 searchPatterns: searchPatterns,
                 patcherFactories: patcherFactories + factories,
                 restorable: restorable,
+                replacement: replacement,
             )
         }
     }
@@ -138,6 +146,8 @@ public final class FirmwarePipeline {
 
     /// The cloudOS `ProductVersion` `patchAll()` read, if it found one.
     public private(set) var cloudOSProductVersion: VPhoneVersion?
+
+    public private(set) var notApplicablePatches: Set<String> = []
 
     // MARK: - Init
 
@@ -188,15 +198,24 @@ public final class FirmwarePipeline {
         let cloudOSVersion = VPhoneVersion(Self.readCloudOSProductVersion(restoreDir))
         cloudOSProductVersion = cloudOSVersion
         log("[*] cloudOS kernel:    \(cloudOSVersion?.description ?? "unknown")")
+        if VPhoneBootROM.kind(ofMachineAt: vmDirectory) == .openAVB {
+            log("[*] Boot ROM:          OpenAVB, which needs no ROM patch")
+        }
 
         // The preset resolves here rather than in init: its version gates need the
         // two ProductVersions that were just read, and a conflict or a misnamed
         // patch must stop the run before a single byte is written.
         let plan = try resolvePlan(iOSBase: baseVersion, cloudOS: cloudOSVersion)
+        try resolveFirmwareApplicability(
+            restoreDir: restoreDir,
+            iOSBase: baseVersion,
+            cloudOS: cloudOSVersion,
+            plan: plan,
+        )
         resolvedPlan = plan
         let gate = plan.map { VPhonePatchGate(plan: $0) } ?? .unrestricted
 
-        let components = buildComponentList(
+        let components = try buildComponentList(
             restoreDir: restoreDir,
             iOSBase: baseVersion,
             plan: plan,
@@ -211,6 +230,36 @@ public final class FirmwarePipeline {
         log(String(repeating: "=", count: 60))
 
         return allRecords
+    }
+
+    /// Whether the restore tree boots the research board's device tree, which
+    /// `FirmwareManifest` takes when the cloudOS has no vphone600ap.
+    public static func researchBoardStandsIn(restoreDir: URL) -> Bool {
+        (try? manifestComponentPath("RestoreDeviceTree", in: restoreDir))?.contains(".vresearch101") ?? false
+    }
+
+    func resolveFirmwareApplicability(
+        restoreDir: URL,
+        iOSBase: VPhoneVersion?,
+        cloudOS: VPhoneVersion?,
+        plan: VPhonePatchPlan?,
+    ) throws {
+        notApplicablePatches = []
+        // The research board patches convert what a cloudOS without vphone600
+        // components supplies; any other restore tree has nothing for them.
+        if !Self.researchBoardStandsIn(restoreDir: restoreDir) {
+            let researchBoard = FirmwareResearchBoardPatchSet.manifest.patches.map(\.identifier)
+            notApplicablePatches.formUnion(researchBoard.filter { plan?.isEnabled($0) ?? true })
+        }
+        let sealPatch = RestoreRamDiskSealPatcher.patchIdentifier
+        let sealSelected = plan?.isEnabled(sealPatch)
+            ?? (iOSBase?.major == 27 && cloudOS?.major == 26 && cloudOS?.minor == 4)
+        guard sealSelected else { return }
+        let hashType = try RestoreRamDiskSealPatcher.systemVolumeHashType(in: restoreDir)
+        if hashType == RestoreRamDiskSealPatcher.sha256Type {
+            notApplicablePatches.insert(sealPatch)
+            log("[=] \(sealPatch): SystemVolume root hash uses SHA-256; restore tools stay pristine")
+        }
     }
 
     /// Patch a kernelcache file in place with this VM's selection, without a
@@ -232,7 +281,7 @@ public final class FirmwarePipeline {
         // restoreDir is unused when building the kernelcache component's
         // patchers (they take the gate and versions, not files), so the VM
         // directory stands in for the parameter.
-        let components = buildComponentList(restoreDir: vmDirectory, iOSBase: iOSBase, plan: plan, gate: gate)
+        let components = try buildComponentList(restoreDir: vmDirectory, iOSBase: iOSBase, plan: plan, gate: gate)
         guard let kernel = components.first(where: { $0.name == "kernelcache" }) else {
             throw PatcherError.invalidFormat("this build has no kernelcache component to patch")
         }
@@ -273,14 +322,13 @@ public final class FirmwarePipeline {
 
         for component in components {
             let baseDir = component.inRestoreDir ? restoreDir : vmDirectory
-            // `.less` never touches the boot chain: it runs the two whole-tree
-            // patchers and leaves every other component with no factories at all.
-            // Keeping it out of this entirely is what stops a `.less` run over an
-            // already patched VM reading "no patches here" as "put the unpatched
-            // boot chain back".
-            let keepsOriginal = variant != .less && component.restorable
+            // A plan without the boot chain, kernel and TXM sets (the `minimal`
+            // preset) leaves those components with no factories, and the pass
+            // below puts back what an earlier preset patched: a stock boot chain
+            // is what the restore image patches expect.
+            let keepsOriginal = component.restorable
 
-            guard !component.patcherFactories.isEmpty else {
+            guard !component.patcherFactories.isEmpty || component.replacement != nil else {
                 log("  [=] \(component.name): no patches for \(variant.rawValue)")
                 // The preset dropped this component's whole patch set. If an earlier
                 // run patched it, the file on disk is now carrying patches nothing
@@ -315,7 +363,17 @@ public final class FirmwarePipeline {
                         : "  original: re-patching the copy in \(Self.originalsDirectoryName)/")
                 }
             }
-            let rawData = try loader.load(from: sourceURL)
+            var rawData = try loader.load(from: sourceURL)
+            // The stand-in goes where the shipped file was, so `save` below
+            // repackages into its container.
+            var replacementRecord: PatchRecord?
+            if let replacement = component.replacement {
+                let (container, record) = try replacement()
+                try container.write(to: fileURL)
+                rawData = try loader.load(from: fileURL)
+                replacementRecord = record
+                log("  replaced by the stand-in for \(record.patchID)")
+            }
             log("  format: \(rawData.count) bytes")
 
             let currentData: Data
@@ -333,6 +391,17 @@ public final class FirmwarePipeline {
                 guard stashedNow else { throw error }
                 discardStash(for: fileURL)
                 throw staleFirmwareError(component: component.name, underlying: error)
+            }
+
+            if let replacementRecord {
+                // Already in place; the patchers' result, if any, is saved into it.
+                if !componentRecords.isEmpty {
+                    try loader.save(currentData, to: fileURL)
+                }
+                log("  [+] saved")
+                allRecords.append(replacementRecord)
+                allRecords.append(contentsOf: componentRecords)
+                continue
             }
 
             if componentRecords.isEmpty {
@@ -409,10 +478,11 @@ public final class FirmwarePipeline {
     /// that conflicts with another or needs a newer PatchKit is refused without its
     /// code ever running.
     ///
-    /// Internal rather than private so the tests can resolve a preset naming an
-    /// external set without a restore tree to patch.
-    func resolvePlan(iOSBase: VPhoneVersion?, cloudOS: VPhoneVersion?) throws -> VPhonePatchPlan? {
+    /// Public so the tests and `vm create`'s template key can resolve a preset,
+    /// external sets included, without a restore tree to patch.
+    public func resolvePlan(iOSBase: VPhoneVersion?, cloudOS: VPhoneVersion?) throws -> VPhonePatchPlan? {
         guard let preset else { return nil }
+        try Self.validateExecutionPrivilege(preset: preset, effectiveUID: geteuid())
 
         var available = patchSets
         for reference in preset.patchSets {
@@ -452,6 +522,17 @@ public final class FirmwarePipeline {
                 + plan.droppedBootEssentials.joined(separator: ", "))
         }
         return plan
+    }
+
+    /// A user preset is data, but an external patch set loads native code.
+    /// Privileged runs must reject it before inspecting or loading any bundle.
+    static func validateExecutionPrivilege(preset: VPhonePatchPreset, effectiveUID: uid_t) throws {
+        guard effectiveUID == 0 else { return }
+        for reference in preset.patchSets {
+            if case .external = reference {
+                throw PatcherError.invalidFormat("External patch sets cannot run as root. Use only bundled patch sets for privileged firmware operations.")
+            }
+        }
     }
 
     /// Whether `componentName` should still produce at least one patch record.

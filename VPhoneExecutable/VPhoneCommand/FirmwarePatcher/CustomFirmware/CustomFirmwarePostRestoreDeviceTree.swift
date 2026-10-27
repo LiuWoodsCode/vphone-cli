@@ -135,6 +135,28 @@ public enum CustomFirmwarePostRestoreDeviceTree {
         }
     }
 
+    /// Restore only the HomePod mini donor's native MobileGestalt audio product
+    /// token, keeping personalized IMG4 data and the payload compression.
+    @discardableResult
+    public static func presentHomePodAudioProduct(
+        at url: URL,
+        board boardURL: URL,
+        dryRun: Bool = false,
+        verbose: Bool = true,
+    ) throws -> Outcome {
+        let boardData: Data
+        do {
+            boardData = try Data(contentsOf: boardURL)
+        } catch {
+            throw PatcherError.fileNotFound(boardURL.path)
+        }
+        let board = try openDeviceTree(boardData, path: boardURL.path).blob
+        return try rewrite(at: url, dryRun: dryRun, verbose: verbose) { blob in
+            let (newBlob, changes, delta) = try withHomePodAudioProduct(blob, board: board)
+            return (newBlob, changes, blob.count + delta)
+        }
+    }
+
     /// Remove `/product/haptics` from a guest's `devicetree.img4` (or bare
     /// `.im4p`), in place. See `DeviceTreePatcher.removeHaptics(from:)`.
     @discardableResult
@@ -176,16 +198,26 @@ public enum CustomFirmwarePostRestoreDeviceTree {
         prebootIMG4: Data,
         patchedKernelcache: Data,
     ) throws -> Data? {
+        try firmwareReplacingPayload(prebootIMG4: prebootIMG4, patchedComponent: patchedKernelcache, expectedFourcc: "krnl")
+    }
+
+    /// A Preboot component keeps its personalized IM4M and restore information;
+    /// only the matching, explicitly named payload type may be replaced.
+    public static func firmwareReplacingPayload(
+        prebootIMG4: Data,
+        patchedComponent: Data,
+        expectedFourcc: String
+    ) throws -> Data? {
         let container = try Container(prebootIMG4)
         guard container.isIMG4 else {
             throw PatcherError.invalidFormat("the Preboot kernelcache is a bare IM4P; expected an IMG4 with a manifest")
         }
-        let sourceIM4P = try Container(patchedKernelcache).im4pBytes
+        let sourceIM4P = try Container(patchedComponent).im4pBytes
         let targetFourcc = try IM4P(container.im4pBytes).fourcc
         let sourceFourcc = try IM4P(sourceIM4P).fourcc
-        guard targetFourcc == "krnl", sourceFourcc == "krnl" else {
+        guard targetFourcc == expectedFourcc, sourceFourcc == expectedFourcc else {
             throw PatcherError.invalidFormat(
-                "kernelcache fourcc mismatch: Preboot '\(targetFourcc)', source '\(sourceFourcc)' — expected 'krnl'",
+                "firmware fourcc mismatch: Preboot '\(targetFourcc)', source '\(sourceFourcc)' — expected '\(expectedFourcc)'",
             )
         }
         guard container.im4pBytes != sourceIM4P else { return nil }
@@ -432,6 +464,33 @@ public enum CustomFirmwarePostRestoreDeviceTree {
                                   before: before, after: text))
         }
         return changes.isEmpty ? (blob, []) : (serializeNode(root), changes)
+    }
+
+    public static func withHomePodAudioProduct(_ blob: Data, board: Data) throws -> (Data, [Change], Int) {
+        let root = try parseTree(blob, label: "DT")
+        let source = try parseTree(board, label: "HomePod board DT")
+        guard let change = try DeviceTreePatcher.presentHomePodAudioProduct(in: root, from: source) else {
+            return (blob, [], 0)
+        }
+        let record = Change(property: "product/product-id", before: change.before?.hex ?? "absent", after: change.after.hex)
+        let delta = align4(change.after.count) - (change.before.map { align4($0.count) } ?? -36)
+        return (serializeNode(root), [record], delta)
+    }
+
+    @discardableResult
+    public static func presentHomePodCryptexClass(at url: URL, dryRun: Bool = false, verbose: Bool = true) throws -> Outcome {
+        try rewrite(at: url, dryRun: dryRun, verbose: verbose) { blob in
+            let (newBlob, changes, delta) = try withHomePodCryptexClass(blob)
+            return (newBlob, changes, blob.count + delta)
+        }
+    }
+
+    public static func withHomePodCryptexClass(_ blob: Data) throws -> (Data, [Change], Int) {
+        let root = try parseTree(blob, label: "HomePod DT")
+        guard let change = try DeviceTreePatcher.presentHomePodCryptexClass(in: root) else { return (blob, [], 0) }
+        return (serializeNode(root), [Change(property: "product/cryptex1-product-class",
+                                            before: change.before?.hex ?? "absent", after: change.after.hex)],
+                change.before == nil ? 40 : 0)
     }
 
     /// `blob` without `/product/haptics`, through

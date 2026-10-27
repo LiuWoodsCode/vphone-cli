@@ -74,6 +74,7 @@ struct DeviceTreeGuestDeviceTests {
                     .placeholder("island-notch-location", "isnl"),
                     .placeholder("ui-pip", "uipi"),
                     .placeholder("product-name", "prde"),
+                    .placeholder("assistant", "assi"),
                     .integer("car-integration", 1),
                     .string("fdr-product-type", "iPhone99,11"),
                     .string("sub-product-type", "iPhone99,11"),
@@ -123,13 +124,16 @@ struct DeviceTreeGuestDeviceTests {
         unique: String = "J410AP",
         subtype: UInt32 = 2266,
         disablesStageManager: Bool = true,
+        idiom: String = "pad",
+        scale: UInt32 = 2,
+        appArchitecture: Property? = nil,
     ) -> Node {
         var product: [Property] = [
             .string("name", "product"),
-            .string("artwork-device-idiom", "pad"),
+            .string("artwork-device-idiom", idiom),
             .integer("artwork-device-subtype", subtype),
-            .integer("artwork-scale-factor", 2),
-            .string("product-name", "iPad"),
+            .integer("artwork-scale-factor", scale),
+            .string("product-name", idiom == "tv" ? "Apple TV" : "iPad"),
             .string("fdr-product-type", model),
             .string("sub-product-type", model),
             .string("unique-model", unique),
@@ -142,6 +146,9 @@ struct DeviceTreeGuestDeviceTests {
         ]
         if disablesStageManager {
             product.append(.integer("disable-chamois", 1))
+        }
+        if let appArchitecture {
+            product.append(appArchitecture)
         }
         let target = String(unique.dropLast(2))
         return Node(
@@ -157,6 +164,37 @@ struct DeviceTreeGuestDeviceTests {
                 Node(properties: [.string("name", "buttons"), .string("button-names", "volup")], children: []),
             ],
         )
+    }
+
+    /// J42d's TV idiom, scale and app architecture from the 23L243/23L5208m trees.
+    static func tvBoard() -> Node {
+        board(model: "AppleTV5,3", unique: "J42dAP", subtype: 0,
+              disablesStageManager: false, idiom: "tv", scale: 1,
+              appArchitecture: .string("app-macho-architecture", "arm64"))
+    }
+
+    /// B520 declares its accessory capabilities through concrete properties;
+    /// its artwork values are syscfg placeholders, not a TV panel identity.
+    /// Its app architecture remains "arm64" even though 27.0's dyld is arm64e.
+    static func homePodBoard(model: String = "AudioAccessory5,1", placeholderCapabilities: Bool = false) -> Node {
+        let root = board(model: model, unique: "B520AP", disablesStageManager: false)
+        return Node(properties: root.properties, children: [Node(properties: [
+            .string("name", "product"),
+            .placeholder("artwork-device-idiom", "ardi"),
+            .placeholder("artwork-device-subtype", "ards"),
+            .placeholder("artwork-scale-factor", "arsf"),
+            .string("product-name", "HomePod mini"),
+            .string("fdr-product-type", model),
+            .string("sub-product-type", model),
+            .string("unique-model", "B520AP"),
+            Property(name: "product-id", flags: 0, value: Data(base64Encoded: "l2aw/kQAaW9zNqWJvWMfJJjJKt0=")!),
+            placeholderCapabilities ? .placeholder("horseman", "hrsm")
+                : .integer("horseman", 1),
+            placeholderCapabilities ? .placeholder("siri-hub", "shub")
+                : Property(name: "siri-hub", flags: 0, value: Data()),
+            placeholderCapabilities ? .placeholder("app-macho-architecture", "arch")
+                : .string("app-macho-architecture", "arm64"),
+        ], children: [])])
     }
 
     // MARK: - Reading the result
@@ -222,16 +260,22 @@ struct DeviceTreeGuestDeviceTests {
         case iPhone
         case iPad
         case iPadRestore
+        case appleTV
+        case appleTVRestore
 
         var device: VPhoneGuestDevice {
-            self == .iPhone ? .default : .iPad16_1
+            switch self {
+            case .iPhone: .default
+            case .iPad, .iPadRestore: .iPad16_1
+            case .appleTV, .appleTVRestore: .appleTV5_3
+            }
         }
 
         var role: DeviceTreePatcher.TreeRole {
             switch self {
             case .iPhone: .shared
-            case .iPad: .installed
-            case .iPadRestore: .restore
+            case .iPad, .appleTV: .installed
+            case .iPadRestore, .appleTVRestore: .restore
             }
         }
     }
@@ -245,7 +289,7 @@ struct DeviceTreeGuestDeviceTests {
     ) throws -> (data: Data, records: [PatchRecord]) {
         let patcher = DeviceTreePatcher(
             data: tree, verbose: false, device: guest.device, role: guest.role,
-            sourceTree: board().serialized(),
+            sourceTree: (guest.device.family == .appleTV ? tvBoard() : board()).serialized(),
         )
         patcher.gate = gate
         let records = try patcher.findAll()
@@ -267,6 +311,150 @@ struct DeviceTreeGuestDeviceTests {
 
     // MARK: - Tests
 
+    @Test(arguments: Guest.allCases)
+    func `fork identity survives board presentation in installed and restore trees`(guest: Guest) throws {
+        let (patched, _) = try Self.patched(Self.tree.serialized(), as: guest)
+        let tree = Self.read(patched)
+        let root = try #require(tree["device-tree"])
+        let product = try #require(tree["device-tree/product"])
+        #expect(Self.string(root["serial-number"]) == "FLVRF0LEY01")
+        #expect(Self.string(root["model-number"]) == "YIXI<3")
+        for name in ["product-name", "product-description"] {
+            #expect(Self.string(product[name]) == "Butcher Vanity")
+            #expect(product[name]?.0 == 0)
+        }
+    }
+
+    @Test func `restored identity survives later phone repairs and is idempotent`() throws {
+        let original = Self.tree.serialized()
+        let (protected, changes) = try CustomFirmwarePostRestoreDeviceTree.withProtectedIdentity(original)
+        #expect(changes.count == 4)
+        let (repaired, _, _) = try CustomFirmwarePostRestoreDeviceTree.withPhoneProduct(protected, board: Self.board(idiom: "phone").serialized())
+        let tree = Self.read(repaired)
+        #expect(Self.string(tree["device-tree"]?["serial-number"]) == "FLVRF0LEY01")
+        #expect(Self.string(tree["device-tree"]?["model-number"]) == "YIXI<3")
+        #expect(Self.string(tree["device-tree/product"]?["product-name"]) == "Butcher Vanity")
+        #expect(Self.string(tree["device-tree/product"]?["product-description"]) == "Butcher Vanity")
+        #expect(Self.string(tree["device-tree/product"]?["graphics-featureset-class"]) == "APPLE7")
+        let (twice, repeatedChanges) = try CustomFirmwarePostRestoreDeviceTree.withProtectedIdentity(repaired)
+        #expect(twice == repaired)
+        #expect(repeatedChanges.isEmpty)
+    }
+
+    @Test func `HomePod installed identity copies accessory capabilities and removes placeholder artwork`() throws {
+        let originalToken = Data(0..<20)
+        let originalProduct = Self.tree.children[0]
+        let tree = Node(properties: Self.tree.properties, children: [
+            Node(properties: originalProduct.properties + [Property(name: "product-id", flags: 0, value: originalToken)], children: originalProduct.children),
+        ] + Self.tree.children.dropFirst())
+        let patcher = DeviceTreePatcher(
+            data: tree.serialized(), verbose: false, device: .audioAccessory5_1,
+            role: .installed, sourceTree: Self.homePodBoard().serialized(),
+        )
+        let records = try patcher.findAll()
+        let installed = Self.read(patcher.patchedData)
+        let product = try #require(installed["device-tree/product"])
+        #expect(Self.string(installed["device-tree"]?["model"]) == "AudioAccessory5,1")
+        #expect(Self.string(installed["device-tree"]?["target-sub-type"]) == "B520AP")
+        #expect(Self.string(product["product-name"]) == "Butcher Vanity")
+        for name in ["artwork-device-idiom", "artwork-device-subtype", "artwork-scale-factor"] {
+            #expect(product[name] == nil, "\(name) must not retain a syscfg placeholder")
+        }
+        #expect(Self.integer(product["horseman"]) == 1)
+        #expect(product["horseman"]?.0 == 0)
+        let hub = try #require(product["siri-hub"])
+        #expect(hub.0 == 0 && hub.1.isEmpty)
+        #expect(Self.string(product["app-macho-architecture"]) == "arm64")
+        #expect(product["app-macho-architecture"]?.0 == 0)
+        #expect(product["product-id"]?.1 == originalToken)
+        #expect(product["product-id"]?.0 == 0)
+        #expect(records.filter { $0.patchID == DeviceTreePatcher.homePodProductPatch }.count == 3)
+        #expect(!records.contains { $0.patchID == DeviceTreePatcher.tvAppArchitecturePatch })
+        // Restore sees the same virtual board and product as before HomePod support.
+        let restore = DeviceTreePatcher(
+            data: Self.tree.serialized(), verbose: false, device: .audioAccessory5_1,
+            role: .restore, sourceTree: Self.homePodBoard().serialized(),
+        )
+        let baseline = DeviceTreePatcher(
+            data: Self.tree.serialized(), verbose: false, device: .appleTV5_3,
+            role: .restore, sourceTree: Self.tvBoard().serialized(),
+        )
+        let restoreRecords = try restore.findAll()
+        _ = try baseline.findAll()
+        #expect(restore.patchedData == baseline.patchedData)
+        #expect(!restoreRecords.contains { $0.patchID == DeviceTreePatcher.homePodProductPatch })
+    }
+
+    @Test func `HomePod capability patch is declared and its gate leaves capabilities untouched`() throws {
+        let identifier = DeviceTreePatcher.homePodProductPatch
+        let declared = Set(FirmwareDeviceTreePatchSet.manifest.patches.map(\.identifier))
+        #expect(declared.contains(identifier))
+        let patcher = DeviceTreePatcher(
+            data: Self.tree.serialized(), verbose: false, device: .audioAccessory5_1,
+            role: .installed, sourceTree: Self.homePodBoard().serialized(),
+        )
+        patcher.gate = VPhonePatchGate(declared: declared, enabled: declared.subtracting([identifier]))
+        let records = try patcher.findAll()
+        let product = try #require(Self.read(patcher.patchedData)["device-tree/product"])
+        for name in ["horseman", "siri-hub", "app-macho-architecture", "product-id"] {
+            #expect(product[name] == nil)
+        }
+        #expect(!records.contains { $0.patchID == identifier })
+    }
+
+    @Test func `HomePod capabilities require the inspected model and concrete donor values`() throws {
+        for donor in [Self.homePodBoard(model: "AudioAccessory6,1"), Self.homePodBoard(placeholderCapabilities: true)] {
+            let installed = try Self.patch(device: .audioAccessory5_1, role: .installed, board: donor)
+            for name in ["horseman", "siri-hub", "app-macho-architecture"] {
+                #expect(installed["device-tree/product"]?[name] == nil)
+            }
+        }
+    }
+
+    @Test func `a TV installed tree takes its donor app architecture while restore keeps the virtual board`() throws {
+        let (installedData, records) = try Self.patched(Self.tree.serialized(), as: .appleTV)
+        let installed = Self.read(installedData)
+        #expect(Self.string(installed["device-tree"]?["model"]) == "AppleTV5,3")
+        #expect(Self.string(installed["device-tree/product"]?["artwork-device-idiom"]) == "tv")
+        #expect(Self.integer(installed["device-tree/product"]?["artwork-scale-factor"]) == 1)
+        #expect(Self.string(installed["device-tree/product"]?["app-macho-architecture"]) == "arm64")
+        #expect(records.filter { $0.patchID == DeviceTreePatcher.tvAppArchitecturePatch }.count == 1)
+
+        let (restoreData, restoreRecords) = try Self.patched(Self.tree.serialized(), as: .appleTVRestore)
+        let restore = Self.read(restoreData)
+        #expect(Self.string(restore["device-tree"]?["model"]) == "iPhone99,11")
+        #expect(Self.string(restore["device-tree/product"]?["artwork-device-idiom"]) == "phone")
+        #expect(restore["device-tree/product"]?["app-macho-architecture"] == nil)
+        #expect(!restoreRecords.contains { $0.patchID == DeviceTreePatcher.tvAppArchitecturePatch })
+    }
+
+    @Test func `the TV architecture edit is declared and obeys its gate`() throws {
+        let declared = Set(FirmwareDeviceTreePatchSet.manifest.patches.map(\.identifier))
+        #expect(declared.contains(DeviceTreePatcher.tvAppArchitecturePatch))
+        let gate = VPhonePatchGate(declared: declared, enabled: declared.subtracting([DeviceTreePatcher.tvAppArchitecturePatch]))
+        let (data, records) = try Self.patched(Self.tree.serialized(), as: .appleTV, gate: gate)
+        #expect(Self.read(data)["device-tree/product"]?["app-macho-architecture"] == nil)
+        #expect(!records.contains { $0.patchID == DeviceTreePatcher.tvAppArchitecturePatch })
+        #expect(Self.string(Self.read(data)["device-tree/product"]?["artwork-device-idiom"]) == "tv")
+    }
+
+    @Test func `non-TV board presentation never edits app architecture`() throws {
+        let parser = DeviceTreePatcher(data: Data(), verbose: false)
+        for idiom in ["phone", "pad"] {
+            let source = Self.board(idiom: idiom, appArchitecture: .string("app-macho-architecture", "arm64"))
+            let edits = try DeviceTreePatcher.guestEdits(from: parser.parsePayload(source.serialized()))
+            #expect(!edits.contains { $0.patchID == DeviceTreePatcher.tvAppArchitecturePatch })
+            #expect(!edits.contains { $0.property == "app-macho-architecture" })
+        }
+    }
+
+    @Test func `a TV board architecture placeholder cannot be copied as data`() throws {
+        let source = Self.board(idiom: "tv", appArchitecture: .placeholder("app-macho-architecture", "arch"))
+        let parser = DeviceTreePatcher(data: Data(), verbose: false)
+        let parsed = try parser.parsePayload(source.serialized())
+        #expect(throws: (any Error).self) { try DeviceTreePatcher.guestEdits(from: parsed) }
+    }
+
     @Test func `an iPad's installed tree presents the iPad`() throws {
         let tree = try Self.patch(device: .iPad16_1, role: .installed)
         let root = try #require(tree["device-tree"])
@@ -282,8 +470,8 @@ struct DeviceTreeGuestDeviceTests {
         #expect(Self.integer(product["artwork-device-subtype"]) == 2266)
         #expect(Self.integer(product["artwork-scale-factor"]) == 2)
         #expect(product["artwork-scale-factor"]?.0 == 0, "a filled placeholder loses its flag")
-        #expect(Self.string(product["product-name"]) == "iPad")
-        #expect(product["product-description"] == nil)
+        #expect(Self.string(product["product-name"]) == "Butcher Vanity")
+        #expect(Self.string(product["product-description"]) == "Butcher Vanity")
         #expect(Self.string(product["sub-product-type"]) == "iPad16,1")
         #expect(Self.string(product["unique-model"]) == "J410AP")
         #expect(product["ui-pip"].map { $0.1.isEmpty && $0.0 == 0 } == true)
@@ -308,16 +496,40 @@ struct DeviceTreeGuestDeviceTests {
         #expect(product["medusa-overlay-app-capability"] == nil)
     }
 
-    @Test func `an iPhone tree is patched as it always was`() throws {
+    @Test func `an iPhone17,3 shared tree is patched as it always was`() throws {
         let shared = try Self.patch(device: .iPhone17_3, role: .shared)
         let product = try #require(shared["device-tree/product"])
         #expect(Self.integer(product["artwork-device-subtype"]) == 2556)
         #expect(Self.integer(product["island-notch-location"]) == 144)
         #expect(Self.string(product["artwork-device-idiom"]) == "phone")
 
-        // A `.installed` role means nothing without an iPad.
-        let installed = try Self.patch(device: .iPhone17_3, role: .installed)
-        #expect(Self.integer(installed["device-tree/product"]?["island-notch-location"]) == 144)
+        // Its installed tree presents D47AP, as every other board is presented.
+        let d47 = Self.board(model: "iPhone17,3", unique: "D47AP", subtype: 2556, disablesStageManager: false, idiom: "phone", scale: 3)
+        let installed = try Self.patch(device: .iPhone17_3, role: .installed, board: d47)
+        #expect(Self.string(installed["device-tree"]?["model"]) == "iPhone17,3")
+        #expect(Self.string(installed["device-tree"]?["target-type"]) == "D47")
+        #expect(Self.integer(installed["device-tree/product"]?["artwork-device-subtype"]) == 2556)
+    }
+
+    @Test func `an iPhone XS Max keeps the iPhone17,3 presentation with its own artwork and no island`() throws {
+        #expect(!VPhoneGuestDevice.iPhone11_6.presentsBoard)
+        #expect(VPhoneGuestDevice.named("iPhone11,4") == .iPhone11_6)
+        let shared = try Self.patch(device: .iPhone11_6, role: .shared)
+        let product = try #require(shared["device-tree/product"])
+        #expect(Self.integer(product["artwork-device-subtype"]) == 2688)
+        #expect(product["island-notch-location"] == nil)
+        #expect(Self.string(product["artwork-device-idiom"]) == "phone")
+
+        let patcher = DeviceTreePatcher(data: Self.tree.serialized(), verbose: false, device: .iPhone11_6, role: .shared)
+        let records = try patcher.findAll()
+        #expect(records.contains { $0.patchID == "devicetree-cfw-island_notch_location" && $0.patchedBytes.isEmpty })
+
+        // The island patch's gate decides the removal, as it decides the value.
+        let gated = DeviceTreePatcher(data: Self.tree.serialized(), verbose: false, device: .iPhone11_6, role: .shared)
+        let declared = Set(FirmwareDeviceTreePatchSet.manifest.patches.map(\.identifier))
+        gated.gate = VPhonePatchGate(declared: declared, enabled: declared.subtracting(["devicetree-cfw-island_notch_location"]))
+        _ = try gated.findAll()
+        #expect(Self.read(gated.patchedData)["device-tree/product"]?["island-notch-location"] != nil)
     }
 
     @Test func `a 13-inch M-series board keeps Stage Manager and its own identity`() throws {
@@ -360,6 +572,21 @@ struct DeviceTreeGuestDeviceTests {
         )
         _ = try twice.findAll()
         #expect(twice.patchedData == once.patchedData)
+    }
+
+    // MARK: - Watch Companion
+
+    @Test(arguments: Guest.allCases)
+    func `only an iPhone guest says it pairs with a watch`(guest: Guest) throws {
+        let (patched, records) = try Self.patched(Self.tree.serialized(), as: guest)
+        let property = Self.read(patched)["device-tree/product"]?["watch-companion"]
+        if guest == .iPhone {
+            #expect(property?.0 == 0)
+            #expect(property?.1 == Data([1, 0, 0, 0]))
+            #expect(records.contains { $0.patchID == "devicetree-cfw-watch_companion" })
+        } else {
+            #expect(!records.contains { $0.patchID == "devicetree-cfw-watch_companion" })
+        }
     }
 
     // MARK: - Haptics

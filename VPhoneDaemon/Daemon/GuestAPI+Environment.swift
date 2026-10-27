@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import IcliSystem
+import VphonedNative
 
 // MARK: - vphone Environment
 
@@ -17,6 +18,18 @@ extension GuestAPI {
         "libmisfix.dylib",
         "libhapticsfix.dylib",
         "libbatteryhealthfix.dylib",
+        "libdevicehubfix.dylib",
+        "libdevicename.dylib",
+        "libprefsfix.dylib",
+        "libsigninfix.dylib",
+        "libvphonegyro.dylib",
+        "libvphoneaccelerometer.dylib",
+        "libvphoneattitude.dylib",
+    ]
+    /// Must match `VPhoneGuestEnvironment.selectedLibraries`: the VM's patch selection owns these.
+    static let environmentSelectedLibraries: Set = [
+        "libprefsfix.dylib", "libsigninfix.dylib",
+        "libvphonegyro.dylib", "libvphoneaccelerometer.dylib", "libvphoneattitude.dylib",
     ]
     static let environmentStaging = "/var/root/Library/Caches/vphone-environment"
 
@@ -52,6 +65,9 @@ extension GuestAPI {
             let name = try string(entry, "name")
             guard environmentLibraries.contains(name) else {
                 throw GuestAPIError.invalidRequest("\(name) is not part of the vphone environment")
+            }
+            if environmentSelectedLibraries.contains(name), !FileManager.default.fileExists(atPath: "/usr/lib/" + name) {
+                throw GuestAPIError.invalidRequest("\(name) is off in this VM's patches; enable it with cfw install or cfw update-environment first")
             }
             let staged = URL(fileURLWithPath: environmentStaging + "/" + name)
             guard let data = try? Data(contentsOf: staged, options: .mappedIfSafe) else {
@@ -92,7 +108,11 @@ extension GuestAPI {
             "installed": names,
             "restarted_pids": restarted,
             // launchd loaded its hook at boot and keeps the old copy mapped.
-            "reboot_required": !rootReadOnly || names.contains("launchdhook-vphone.dylib"),
+            // backboardd owns the UI's HID connection. Do not restart it here:
+            // a new gyro hook (or SystemHook which loads it) needs a reboot.
+            "reboot_required": !rootReadOnly || names.contains("launchdhook-vphone.dylib")
+                || names.contains("libvphonegyro.dylib") || names.contains("libvphoneaccelerometer.dylib")
+                || names.contains("SystemHook-vphone.dylib"),
             "root_read_only": rootReadOnly,
         ]
     }
@@ -131,12 +151,12 @@ extension GuestAPI {
             throw GuestAPIError.operationFailed("pipe: \(String(cString: strerror(errno)))")
         }
         var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        posix_spawn_file_actions_adddup2(&actions, errorPipe[1], STDERR_FILENO)
-        posix_spawn_file_actions_addclose(&actions, errorPipe[0])
+        vp_spawn_file_actions_init(&actions)
+        vp_spawn_file_actions_adddup2(&actions, errorPipe[1], STDERR_FILENO)
+        vp_spawn_file_actions_addclose(&actions, errorPipe[0])
         var pid: pid_t = 0
-        let spawned = posix_spawn(&pid, arguments[0], &actions, nil, &argv, environ)
-        posix_spawn_file_actions_destroy(&actions)
+        let spawned = vp_spawn(&pid, arguments[0], &actions, nil, &argv, environ)
+        vp_spawn_file_actions_destroy(&actions)
         close(errorPipe[1])
         guard spawned == 0 else {
             close(errorPipe[0])

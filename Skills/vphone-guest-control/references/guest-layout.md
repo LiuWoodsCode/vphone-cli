@@ -4,7 +4,9 @@ A fresh guest has vphoned and the system changes the project ships, and
 nothing else: no package manager, no sshd, no shell tools. Everything in this
 file is about adding that environment (the "bootstrap") and then finding your
 way around it. Until it is installed, work only through `guest send` and
-`guest rpc`.
+`guest rpc` — including `script.eval`, which runs JavaScript with vphoned's
+identity and needs nothing installed at all (see
+[rpc-methods](rpc-methods.md)).
 
 ## Contents
 
@@ -118,7 +120,9 @@ vphone-launchpad-cli guest rpc myphone bootstrap.uninstall '{"roots":["<path fro
 Uninstall removes **every listed root**, unloads their daemons, unregisters
 their apps, marks the record uninstalled and **reboots the guest** (add
 `"reboot":false` to skip). The paths must match the current inspection
-exactly. Irisin's data under `/var/mobile/Documents` is kept. It destroys the
+exactly. Rootless Irisin keeps its data in the system's
+`/var/mobile/Documents`, which is kept; RootHide Irisin keeps it in the
+jbroot's `var/mobile`, which goes with the root. It destroys the
 user's installed packages, so run it only when asked or as the stated recovery
 for a failed first install.
 
@@ -151,18 +155,22 @@ difference is the `/rootfs` prefix.
 
 ## Handing a file to vphoned
 
-To let an RPC (for example `apps.install`) read a file you put in through ssh:
+`guest push` copies a Mac file to a real-root guest path, streamed, any size,
+with no ssh and no `--api-listen`. `guest pull` brings one back:
 
 ```sh
-scp -P 2222 App.ipa mobile@127.0.0.1:/tmp/App.ipa      # lands in the jbroot's /tmp
-ssh -p 2222 mobile@127.0.0.1 'mv /tmp/App.ipa /rootfs/private/var/tmp/App.ipa'
+vphone-launchpad-cli guest push myphone App.ipa /private/var/tmp/
 vphone-launchpad-cli guest rpc myphone apps.install '{"path":"/private/var/tmp/App.ipa"}'
+vphone-launchpad-cli guest pull myphone /private/var/mobile/Library/Logs/x.log .
 ```
 
-Without ssh, use RPC only: `files.write` for small text. Binaries need the
-HTTP route `PUT /v1/files/content?path=<abs path>`, which exists only when the
-VM was launched with `vphone-cli vm launch --api-listen` outside `vm start`; ask
-the user rather than relaunching a running machine.
+The mode follows the Mac file (`--mode 755` to set it), so an executable
+stays executable. Paths are real-root paths, so a roothide file goes under the
+absolute `.jbroot-<hex>` path from `bootstrap.inspect`, not `/var/jb`. It needs
+a Core Bundle that has `push` on `vphone.sock`; an older one says it cannot
+copy files. There, `files.write` takes only small files (one 1 MiB JSON line,
+no append), and larger ones go through ssh: `scp -P 2222` into the jbroot's
+`/tmp`, then `mv` to `/rootfs/private/var/tmp/`.
 
 ## Installing a `.deb`
 

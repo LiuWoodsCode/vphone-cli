@@ -10,7 +10,7 @@
 //
 // The answers come from the board's own device tree, `DeviceTree.<board>.im4p`,
 // which the IPSW carries and the restore tree keeps. Every guest device but the
-// iPhone17,3 gets them (`VPhoneGuestDevice.presentsBoard`); the patch IDs keep
+// iPhone XS Max gets them (`VPhoneGuestDevice.presentsBoard`); the patch IDs keep
 // the `ipad_` names they were introduced with, because presets list them.
 //
 //   - the `/product` properties in `copiedProductProperties` take the board's
@@ -37,6 +37,7 @@
 // server the node promises. See `removeHaptics(from:)`.
 
 import Foundation
+import Img4tool
 import VPhoneCoreKit
 import VPhonePatchKit
 
@@ -61,6 +62,11 @@ extension DeviceTreePatcher {
     static let iPadButtonsPatch = "devicetree-cfw-ipad_buttons"
     static let iPadIdentityPatch = "devicetree-cfw-ipad_identity"
     static let iPadAudioPatch = "devicetree-cfw-ipad_audio"
+    static let tvAppArchitecturePatch = "devicetree-cfw-tv_app_architecture"
+    static let homePodProductPatch = "devicetree-cfw-homepod_product"
+    static let watchPresentationPatch = "devicetree-cfw-watch_presentation"
+    static let watchDriverKitPatch = "devicetree-cfw-watch_driverkit"
+    static let watchCompanionPatch = "devicetree-cfw-watch_companion"
     static let hapticsPatch = "devicetree-cfw-product_haptics_node"
     static let microphoneArrayPatch = "devicetree-cfw-product_audio_microphone_array"
 
@@ -156,7 +162,42 @@ extension DeviceTreePatcher {
             return property.value
         }
 
+        // J42d's tvOS tree declares arm64 apps. Keep the source's concrete
+        // value rather than the virtual phone's architecture; this edit is TV
+        // presentation only and must not change existing phone or pad output.
+        if let idiom = value(sourceProduct, "artwork-device-idiom"),
+           String(decoding: idiom.prefix { $0 != 0 }, as: UTF8.self) == "tv"
+        {
+            guard let architecture = value(sourceProduct, "app-macho-architecture"), !architecture.isEmpty else {
+                throw PatcherError.patchSiteNotFound("DeviceTree: the TV board's tree has no concrete app-macho-architecture")
+            }
+            edits.append(GuestEdit(nodePath: product, property: "app-macho-architecture",
+                                   action: .set(architecture), patchID: tvAppArchitecturePatch))
+        }
+
+        // B520's accessory identity is independent of its artwork idiom,
+        // which is a syscfg placeholder rather than "tv". HomePod services
+        // query these capabilities through MobileGestalt.
+        if let model = value(source, "model"),
+           String(decoding: model.prefix { $0 != 0 }, as: UTF8.self) == "AudioAccessory5,1"
+        {
+            for name in ["horseman", "siri-hub", "app-macho-architecture"] {
+                let action: GuestEdit.Action = value(sourceProduct, name).map { .set($0) } ?? .remove
+                edits.append(GuestEdit(nodePath: product, property: name,
+                                       action: action, patchID: homePodProductPatch))
+            }
+            // Keep the VM product token. Audio uses VirtualAudio's local
+            // ProductIDOverride; a donor token changes unrelated MG clients.
+        }
+
+        if let idiom = value(sourceProduct, "artwork-device-idiom"),
+           String(decoding: idiom.prefix { $0 != 0 }, as: UTF8.self) == "watch"
+        {
+            edits += watchEdits(product: product, value: { value(sourceProduct, $0) })
+        }
+
         for (name, patchID) in copiedProductProperties {
+
             let action: GuestEdit.Action = value(sourceProduct, name).map { .set($0) } ?? .remove
             edits.append(GuestEdit(nodePath: product, property: name, action: action, patchID: patchID))
         }
@@ -191,6 +232,53 @@ extension DeviceTreePatcher {
         return edits
     }
 
+    // MARK: - Watch
+
+    /// `/product` properties a watch's display is described by, beyond those
+    /// every board copies.
+    static let watchDisplayProperties = ["artwork-display-gamut", "artwork-dynamic-displaymode", "framebuffer-identifier"]
+
+    /// The gestalt variant tags MobileGestalt reads in place of syscfg on the
+    /// VM, and the board's `/product` property each stands for. vphone600's
+    /// carry the D47's values; a watch whose tags still describe a phone shows
+    /// no UI ("unsupported screen class"). A property the board lacks is a
+    /// boolean it does not have: 0.
+    static let watchVariantTags: [(tag: String, property: String)] = [
+        ("tag-ards", "artwork-device-subtype"),
+        ("tag-arsf", "artwork-scale-factor"),
+        ("tag-codf", "compatible-device-fallback"),
+        ("tag-tprt", "sub-product-type"),
+        ("tag-crid", "chrome-identifier"),
+        ("tag-dcrd", "display-corner-radius"),
+        ("tag-fbid", "framebuffer-identifier"),
+        ("tag-prde", "product-description"),
+        ("tag-isnl", "island-notch-location"),
+        ("tag-waco", "watch-companion"),
+    ]
+
+    static let watchVariantNode = ["device-tree", "product", "vphone600-gestalt-variants", "d47vm2025vre-variant"]
+
+    /// The edits a watch board needs besides the common copy: its display
+    /// properties, the variant tags, and `supports-driverkit`. The VM's touch
+    /// screen is a USB device whose HID driver is a dext, and launchd starts
+    /// driverkitd only on a device tree that says so; a real watch has no USB
+    /// touch screen, so N227b's tree does not.
+    static func watchEdits(product: [String], value: (String) -> Data?) -> [GuestEdit] {
+        var edits: [GuestEdit] = []
+        for name in watchDisplayProperties {
+            let action: GuestEdit.Action = value(name).map { .set($0) } ?? .remove
+            edits.append(GuestEdit(nodePath: product, property: name, action: action, patchID: watchPresentationPatch))
+        }
+        let absent = Data(count: 4)
+        for (tag, property) in watchVariantTags {
+            edits.append(GuestEdit(nodePath: watchVariantNode, property: tag,
+                                   action: .set(value(property) ?? absent), patchID: watchPresentationPatch))
+        }
+        edits.append(GuestEdit(nodePath: product, property: "supports-driverkit",
+                               action: .set(Data([1, 0, 0, 0])), patchID: watchDriverKitPatch))
+        return edits
+    }
+
     /// `compatible` with the board first, so `hw.model` reads it, and
     /// VPHONE600AP kept for the platform expert's AppleVMApple1IO match.
     static func compatible(board: Data) -> Data {
@@ -211,6 +299,96 @@ extension DeviceTreePatcher {
     }
 
     // MARK: - Audio
+
+    /// AppleImage4's uint32 identity callback reads this exact four-byte
+    /// property from /product. The research kernel's iOS value rejects a tvOS
+    /// DDI's signed CLAS before APFS can mount it. Keep equality verification
+    /// and supply the native HomePod class instead. See developer_disk_images.md.
+    static func presentHomePodCryptexClass(in root: DTNode) throws -> (before: Data?, after: Data)? {
+        try requireHomePodMini(root)
+        let product = try child(of: root, named: "product")
+        let values = product.properties.filter { $0.name == "cryptex1-product-class" }
+        guard values.count <= 1 else {
+            throw PatcherError.invalidFormat("HomePod cryptex class: duplicated product class")
+        }
+        var value = UInt32(0xf4).littleEndian
+        let bytes = withUnsafeBytes(of: &value) { Data($0) }
+        // TempPod's restored tree omits this property and the running kernel
+        // reports the research iOS class. Supply the native class explicitly.
+        guard let property = values.first else {
+            product.properties.append(DTProperty(name: "cryptex1-product-class", flags: 0, value: bytes, valueOffset: 0))
+            return (nil, bytes)
+        }
+        guard property.flags == 0, property.value.count == 4,
+              [UInt32(0xf2), UInt32(0xf4)].contains(property.value.loadLE(UInt32.self, at: 0)) else {
+            throw PatcherError.invalidFormat("HomePod cryptex class: expected one concrete iOS or tvOS uint32 product class")
+        }
+        guard property.value.loadLE(UInt32.self, at: 0) != 0xf4 else { return nil }
+        let before = property.value
+        property.value = bytes
+        return (before, property.value)
+    }
+
+    /// MobileGestalt matches this exact 20-byte donor token against its product
+    /// table; VirtualAudio uses that result to select the HomePod mini's enum 4
+    /// routing. Root model strings alone do not select the native audio family.
+    /// Accept a retained donor IM4P or its decoded flat payload, never a payload
+    /// invented from the product name or an iPhone ProductIDOverride.
+    public static func homePodAudioProductID(from data: Data) throws -> Data {
+        let payload: Data
+        if let im4p = try? IM4P(data) {
+            guard im4p.fourcc == "dtre", !im4p.isEncrypted else {
+                throw PatcherError.invalidFormat("HomePod audio product: expected an unencrypted dtre IM4P")
+            }
+            payload = try im4p.payload()
+        } else {
+            payload = data
+        }
+        let parser = DeviceTreePatcher(data: payload, verbose: false)
+        return try homePodAudioProductID(from: parser.parsePayload(payload))
+    }
+
+    private static func requireHomePodMini(_ root: DTNode) throws {
+        let models = root.properties.filter { $0.name == "model" }
+        guard models.count == 1, let model = models.first, model.flags == 0,
+              String(decoding: model.value.prefix { $0 != 0 }, as: UTF8.self) == "AudioAccessory5,1"
+        else {
+            throw PatcherError.invalidFormat("HomePod audio product: expected the AudioAccessory5,1 board tree")
+        }
+    }
+
+    static func homePodAudioProductID(from source: DTNode) throws -> Data {
+        try requireHomePodMini(source)
+        let product = try child(of: source, named: "product")
+        let properties = product.properties.filter { $0.name == "product-id" }
+        guard properties.count == 1, let property = properties.first,
+              property.flags == 0, property.value.count == 20
+        else {
+            throw PatcherError.invalidFormat("HomePod audio product: donor product-id must be one concrete 20-byte value")
+        }
+        return property.value
+    }
+
+    /// Replace only the HomePod's audio product token. The Preboot repair uses
+    /// this independently of the board-audio-node repair and keeps the VM's
+    /// virtual audio hardware and unrelated product capabilities unchanged.
+    static func presentHomePodAudioProduct(in root: DTNode, from source: DTNode) throws -> (before: Data?, after: Data)? {
+        try requireHomePodMini(root)
+        let value = try homePodAudioProductID(from: source)
+        let product = try child(of: root, named: "product")
+        guard product.properties.filter({ $0.name == "product-id" }).count <= 1 else {
+            throw PatcherError.invalidFormat("HomePod audio product: installed product-id is duplicated")
+        }
+        if let existing = product.properties.first(where: { $0.name == "product-id" }) {
+            guard existing.value != value || existing.flags != 0 else { return nil }
+            let before = existing.value
+            existing.value = value
+            existing.flags = 0
+            return (before, value)
+        }
+        product.properties.append(DTProperty(name: "product-id", flags: 0, value: value, valueOffset: 0))
+        return (nil, value)
+    }
 
     /// What `presentBoardAudio` changed: the audio node's serialized bytes
     /// before and after, empty when there was no node.
@@ -357,7 +535,8 @@ extension DeviceTreePatcher {
         "display-corner-radius", "display-mirroring", "oled-display", "thin-bezel", "large-format-phone",
         // UI and feature switches.
         "ui-pip", "ui-reachability", "ui-background-quality", "ui-weather-quality",
-        "hme-in-arkit", "carplay-2", "location-reminders", "watch-companion", "car-integration", "find-my", "has-boot-chime", "personal-hotspot", "display-mirroring", "supports-personal-translator" 
+        "hme-in-arkit", "carplay-2", "location-reminders", "watch-companion",
+        "car-integration", "find-my", "has-boot-chime", "personal-hotspot", "supports-personal-translator",
     ]
 
     /// `/product` properties vphone600 lacks altogether, added from the board:
@@ -523,6 +702,76 @@ extension DeviceTreePatcher {
         ))
         if verbose {
             print("  -node  : /product/haptics, no actuator or haptic server on a VM (\(removed.count)B)  [\(Self.hapticsPatch)]")
+        }
+    }
+
+    // MARK: - Notched iPhone
+
+    static let islandNotchLocationPatch = "devicetree-cfw-island_notch_location"
+
+    /// Removes `/product/island-notch-location` for a guest whose userland has
+    /// no Dynamic Island layout (`VPhoneGuestDevice.notchedArtworkSubtype`),
+    /// under the patch that otherwise sets it.
+    func removeIslandNotchLocation(root: DTNode) throws {
+        guard gateAllows(Self.islandNotchLocationPatch),
+              let product = Self.optionalChild(of: root, named: "product"),
+              let index = product.properties.firstIndex(where: { $0.name == "island-notch-location" })
+        else { return }
+        let removed = product.properties.remove(at: index)
+        patches.append(PatchRecord(
+            patchID: Self.islandNotchLocationPatch,
+            component: component,
+            fileOffset: removed.valueOffset,
+            virtualAddress: nil,
+            originalBytes: removed.value,
+            patchedBytes: Data(),
+            description: "Remove the island notch location: \(device.productName) has no Dynamic Island",
+        ))
+        if verbose {
+            print("  -prop  : /product/island-notch-location, no Dynamic Island on \(device.productName)  [\(Self.islandNotchLocationPatch)]")
+        }
+    }
+
+    // MARK: - Watch Companion
+
+    /// Give an iPhone guest's `/product/watch-companion` the value 1, adding it
+    /// where the board copy removed it. Returns its value before (nil when it
+    /// was absent), or nil changes when it already is a plain 1.
+    ///
+    /// vphone600's is `syscfg/waco`, which the VM's syscfg does not have, so
+    /// iBoot drops the property and MobileGestalt answers that the phone pairs
+    /// with no watch: the Watch app has no icon, and NanoRegistry's clients
+    /// never see the watch nanoregistryd discovers.
+    static func presentWatchCompanion(in root: DTNode) -> (before: Data?, after: Data)? {
+        guard let product = optionalChild(of: root, named: "product") else { return nil }
+        let value = Data([1, 0, 0, 0])
+        if let existing = product.properties.first(where: { $0.name == "watch-companion" }) {
+            guard existing.flags & placeholderFlag != 0 || existing.value != value else { return nil }
+            let before = existing.value
+            existing.flags = 0
+            existing.value = value
+            return (before, value)
+        }
+        product.properties.append(DTProperty(name: "watch-companion", flags: 0, value: value, valueOffset: 0))
+        return (nil, value)
+    }
+
+    /// Applies `presentWatchCompanion(in:)` to an iPhone guest's tree.
+    func applyWatchCompanion(root: DTNode) {
+        guard device.family == .iPhone, gateAllows(Self.watchCompanionPatch),
+              let change = Self.presentWatchCompanion(in: root)
+        else { return }
+        patches.append(PatchRecord(
+            patchID: Self.watchCompanionPatch,
+            component: component,
+            fileOffset: 0,
+            virtualAddress: nil,
+            originalBytes: change.before ?? Data(),
+            patchedBytes: change.after,
+            description: "Set /device-tree/product/watch-companion = 1",
+        ))
+        if verbose {
+            print("  =prop  : /product/watch-companion = 1, the VM syscfg has no waco  [\(Self.watchCompanionPatch)]")
         }
     }
 

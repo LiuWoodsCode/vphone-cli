@@ -32,6 +32,9 @@ extension VPhoneBootCommand {
             screenScale: manifest.screenConfig.scale,
             kernelDebugPort: kernelDebugPort,
             isPadGuest: manifest.guestDevice.isPad,
+            isTVGuest: manifest.guestDevice.family == .appleTV,
+            isHomePodGuest: manifest.guestDevice.family == .homePod,
+            isWatchGuest: manifest.guestDevice.family == .watch,
         )
     }
 }

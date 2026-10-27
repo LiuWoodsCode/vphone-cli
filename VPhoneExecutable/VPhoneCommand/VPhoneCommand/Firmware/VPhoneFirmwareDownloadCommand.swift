@@ -4,7 +4,7 @@
 //
 //     ipsw download ipsw --device D --urls        ->  vphone-cli fw urls --device D
 //     ipsw download appledb --os macOS … +
-//       ipsw img4 im4p extract + hdiutil          ->  vphone-cli fw seal-tool
+//       ipsw img4 im4p extract + diskutil          ->  vphone-cli fw seal-tool
 //
 // The second was five steps in shell: resolve a macOS build for the iOS
 // version, range-fetch BuildManifest.plist out of an 18 GB remote zip, read the
@@ -54,7 +54,9 @@ struct VPhoneFirmwareSealToolCommand: ParsableCommand {
         `apfs_sealvolume` is what turns a rebuilt system volume into a sealed
         one, and it is not in an iPhone restore image — only in a macOS one. The
         two have shared a marketing version since 2025, so "the tool for iOS
-        26.1" means "the one in macOS 26.1".
+        26.1" means "the one in macOS 26.1"; iOS 18.x.y goes with macOS 15.x.y.
+        Without an exact match, the newest macOS of that major below it is
+        taken.
 
         The macOS IPSW is about 18 GB and two files in it are wanted, so nothing
         is downloaded whole: the archive is read over HTTP range requests, the
@@ -73,6 +75,18 @@ struct VPhoneFirmwareSealToolCommand: ParsableCommand {
     var output: URL
 
     func run() throws {
+        try Self.stage(version: version, into: output)
+    }
+
+    /// Write `apfs_sealvolume_<version>` into `output` unless it is already
+    /// there. `fw prepare` stages it into the restore tree for the restore
+    /// image patches, which seal the merged system with it.
+    static func stage(version: String, into output: URL) throws {
+        guard !version.isEmpty, version.count < 32,
+              version.split(separator: ".", omittingEmptySubsequences: false).allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) })
+        else {
+            throw ValidationError("Invalid OS version for the seal tool.")
+        }
         let destination = output.appendingPathComponent("apfs_sealvolume_\(version)")
         if FileManager.default.fileExists(atPath: destination.path) {
             print("apfs_sealvolume_\(version) already present")
@@ -113,7 +127,15 @@ struct VPhoneFirmwareSealToolCommand: ParsableCommand {
     /// Resolve the macOS release, then take BuildManifest.plist and the restore
     /// ramdisk out of its IPSW without downloading the IPSW.
     private static func fetchRamdisk(version: String, in output: URL) async throws -> URL {
-        let release = try await VPhoneFirmwareIndex.macOSRelease(version: version)
+        let release = try await VPhoneFirmwareIndex.sealToolRelease(forOSVersion: version)
+        // The catalog supplies discovery metadata, not executable trust.
+        // A privileged seal tool must come directly from Apple's restore CDN.
+        let appleHosts = ["updates.cdn-apple.com", "updates-http.cdn-apple.com", "appldnld.apple.com", "swcdn.apple.com"]
+        guard release.url.scheme == "https", appleHosts.contains(release.url.host ?? ""),
+              release.url.user == nil, release.url.password == nil
+        else {
+            throw ValidationError("The seal tool restore image must come from Apple's HTTPS CDN.")
+        }
         print("  macOS \(release.version) (\(release.build))")
 
         let zip = try await VPhoneRemoteZip.open(release.url)
@@ -158,24 +180,25 @@ struct VPhoneFirmwareSealToolCommand: ParsableCommand {
 
     /// Mount the ramdisk read-only and take the one file out of it.
     private static func copyOut(of dmg: URL, to destination: URL, attached: inout Bool) throws {
-        let output = try run("/usr/bin/hdiutil",
-                             ["attach", "-readonly", "-nobrowse", "-plist", dmg.path])
+        let output = try run("/usr/sbin/diskutil",
+                             ["image", "attach", "-readOnly", "-nobrowse", dmg.path])
         attached = true
-        guard let plist = try PropertyListSerialization.propertyList(
-            from: Data(output.utf8),
-            format: nil,
-        ) as? [String: Any],
-            let entities = plist["system-entities"] as? [[String: Any]]
-        else { throw VPhoneRemoteZip.Error.malformed("hdiutil returned no disk information") }
-        let mount = entities.compactMap { $0["mount-point"] as? String }.first
-        let device = entities.compactMap { $0["dev-entry"] as? String }.first
+        let entities = output.split(whereSeparator: \.isNewline).compactMap { line -> (device: String, mount: String?)? in
+            let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            guard let device = fields.first, device.hasPrefix("/dev/disk") else { return nil }
+            let mount = fields.count > 2 && fields[2].hasPrefix("/") ? fields[2] : nil
+            return (device, mount)
+        }
+        let mount = entities.compactMap(\.mount).first
+        let device = entities.first?.device
         guard let target = device ?? mount else {
-            throw VPhoneRemoteZip.Error.malformed("hdiutil attached nothing that can be detached")
+            throw VPhoneRemoteZip.Error.malformed("diskutil attached nothing that can be detached")
         }
 
         let copied: Result<Void, Swift.Error> = Result {
             guard let mount else {
-                throw VPhoneRemoteZip.Error.malformed("hdiutil attached nothing with a mount point")
+                throw VPhoneRemoteZip.Error.malformed("diskutil attached nothing with a mount point")
             }
             let source = URL(fileURLWithPath: mount).appending(
                 path: "System/Library/Filesystems/apfs.fs/Contents/Resources/apfs_sealvolume",
@@ -185,9 +208,10 @@ struct VPhoneFirmwareSealToolCommand: ParsableCommand {
                                                   ofItemAtPath: destination.path)
         }
         do {
-            try run("/usr/bin/hdiutil", ["detach", target])
+            try run("/usr/sbin/diskutil", ["eject", target])
         } catch {
-            try run("/usr/bin/hdiutil", ["detach", "-force", target])
+            try run("/usr/sbin/diskutil", ["unmountDisk", "force", target])
+            try run("/usr/sbin/diskutil", ["eject", target])
         }
         attached = false
         try copied.get()

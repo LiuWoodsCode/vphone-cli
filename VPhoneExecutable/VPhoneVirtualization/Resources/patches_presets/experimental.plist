@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Everything the bundle declares, including the groups `standard` leaves off: the
+  The general experimental groups `standard` leaves off: the
   Frida Stalker relaxations, the hv_vmm_present concealment, and the iPhone17,3
-  identity rewrites.
+  identity rewrites. The HomePod-only top cap stays off.
 
   Read this as the catalogue and standard as the safe subset — the two name the
   same patch sets and differ only in their selection. Each patch's own version gate
-  still applies, so the Frida pair lands only on cloudOS 26.4 and newer.
+  still applies, so the Frida patches land only on cloudOS 26.4 and newer.
 
   The hv_vmm_present pair is here and nowhere else for a reason: on a freshly
   restored 26.4 guest it is a brick. Renaming the OID makes bluetoothd's cached
@@ -23,7 +23,7 @@
 	<key>Title</key>
 	<string>Experimental</string>
 	<key>Summary</key>
-	<string>Every patch this bundle declares, including the Frida Stalker relaxations, the iPhone17,3 identity rewrites, and the hv_vmm_present concealment that a freshly restored 26.4 guest does not survive.</string>
+	<string>The experimental patches, including the Frida Stalker relaxations, the iPhone17,3 identity rewrites, and the hv_vmm_present concealment that a freshly restored 26.4 guest does not survive. The HomePod-only top cap is off.</string>
 	<key>PatchSets</key>
 	<array>
 		<dict>
@@ -60,6 +60,12 @@
 			<key>Kind</key>
 			<string>Bundled</string>
 			<key>Identifier</key>
+			<string>com.vphone.patchset.research.board</string>
+		</dict>
+		<dict>
+			<key>Kind</key>
+			<string>Bundled</string>
+			<key>Identifier</key>
 			<string>com.vphone.patchset.devicetree</string>
 		</dict>
 		<dict>
@@ -84,7 +90,24 @@
 	<key>Selection</key>
 	<dict>
 		<key>Kind</key>
-		<string>All</string>
+		<string>Block</string>
+		<key>Patches</key>
+		<array>
+			<string>system-homepod-exp-top_cap</string>
+			<string>system-setupbackground-exp-pineboard_lookup</string>
+			<string>system-setup-exp-deferred_focus</string>
+			<string>system-mobileactivationd-exp-tv_activation</string>
+			<string>system-tv-exp-legacy_setup</string>
+			<string>system-homepod-exp-setup_bypass</string>
+			<string>system-homepod-exp-welcome</string>
+			<string>system-homepod-exp-siri_speech</string>
+			<string>system-homepod-exp-ota_userland</string>
+			<string>system-homepod-exp-sound_glow</string>
+			<string>system-installd-exp-homepod_adhoc</string>
+			<string>system-cryptexd-exp-homepod_staging</string>
+			<string>preboot-homepod-exp-cryptex_class</string>
+			<string>preboot-homepod-exp-audio_product</string>
+		</array>
 	</dict>
 </dict>
 </plist>

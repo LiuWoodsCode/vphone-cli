@@ -17,7 +17,8 @@ public enum VPhoneHostFilePermissions {
         try walkTree(
             at: url,
             admits: { metadata in owners.map { $0.contains(metadata.st_uid) } ?? true },
-            visit: { descriptor, _ in
+            visit: { descriptor, metadata in
+                guard needsModeChange(metadata) else { return }
                 guard fchmod(descriptor, 0o777) == 0 else { throw currentError() }
             },
         )
@@ -40,9 +41,21 @@ public enum VPhoneHostFilePermissions {
         if let owners = permittedOwners(), !owners.contains(metadata.st_uid) {
             return
         }
+        guard needsModeChange(metadata) else { return }
         guard fchmod(descriptor, 0o777) == 0 else {
             throw currentError()
         }
+    }
+
+    /// Whether an entry is to be made 0777 here: not when it is exactly that
+    /// already (a setuid, setgid or sticky bit still goes), and, without root,
+    /// only when it is this user's. A cache a sudo run made or downloaded into
+    /// is root's, only its owner may change its mode, and the kernel's own
+    /// checks then decide what the user can do with it.
+    static func needsModeChange(_ metadata: stat) -> Bool {
+        guard metadata.st_mode & 0o7777 != 0o777 else { return false }
+        let user = geteuid()
+        return user == 0 || metadata.st_uid == user
     }
 
     /// Owners whose entries a root process may change: root itself and the

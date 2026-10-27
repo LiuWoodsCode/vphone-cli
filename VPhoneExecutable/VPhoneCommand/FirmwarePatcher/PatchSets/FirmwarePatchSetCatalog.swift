@@ -16,19 +16,26 @@ public enum FirmwarePatchSetCatalog {
         FirmwareKernelCustomFirmwarePatchSet.manifest,
         FirmwareKernelHypervisorPatchSet.manifest,
         FirmwareKernelFridaPatchSet.manifest,
+        FirmwareResearchBoardPatchSet.manifest,
         FirmwareDeviceTreePatchSet.manifest,
         FirmwareGuestSystemPatchSet.manifest,
         FirmwareGuestDisplayPatchSet.manifest,
         FirmwareGuestIdentityPatchSet.manifest,
+        FirmwareRestoreImagePatchSet.manifest,
     ]
 
-    /// Every bundled set, as a preset references them.
+    /// Every bundled set but the restore image, as a preset references them.
     ///
-    /// Both shipped presets name all of them. A preset picks patches with its
-    /// selection, not by leaving a set out, so the editor always sees the whole
+    /// Every custom-firmware preset names all of them. A preset picks patches with
+    /// its selection, not by leaving a set out, so the editor always sees the whole
     /// catalogue and can turn any patch on or off.
+    ///
+    /// The restore image is the exception, in both directions: it customises the
+    /// system before the restore, which the custom-firmware sets do after it, and
+    /// only ``minimalPreset`` names it. See ``FirmwareRestoreImagePatchSet``.
     public static let bundledReferences: [VPhonePatchSetReference] =
-        bundled.map { .bundled($0.identifier) }
+        bundled.filter { $0.identifier != FirmwareRestoreImagePatchSet.identifier }
+            .map { .bundled($0.identifier) }
 
     public static func manifest(identifier: String) -> VPhonePatchSetManifest? {
         bundled.first { $0.identifier == identifier }
@@ -54,24 +61,58 @@ public enum FirmwarePatchSetCatalog {
     ///
     /// `dyld-exp-mis_trust_auth` is off because a userspace hook now does its
     /// job: see ``misTrustAuthPatch``.
-    ///
-    /// `kernel-exp-display_refresh_120hz` is off because it is a preference with a
-    /// cost: see ``displayRefreshPatch``.
-    ///
-    /// `kernel-cfw-paravirt_user_clients` is not in this list: `standard` turns it
-    /// on. See ``paravirtUserClientsPatch``.
+    /// `kernel-cfw-paravirt_user_clients` and `kernel-cfw-display_promotion`
+    /// are not in this list: `standard` turns them on. See
+    /// ``paravirtUserClientsPatch`` and ``proMotionPatch``.
     public static let manualOnlyPatches: Set<String> =
         Set(FirmwareKernelFridaPatchSet.manifest.patches.map(\.identifier))
             .union(hypervisorConcealmentPatches)
             .union(experimentalIdentityPatches)
-            .union([misTrustAuthPatch, displayRefreshPatch])
+            .union([FirmwareGuestSystemPatchSet.otaUserland, FirmwareGuestSystemPatchSet.homePodTopCap, FirmwareGuestSystemPatchSet.homePodSetupBypass, FirmwareGuestSystemPatchSet.homePodAudioProduct, FirmwareGuestSystemPatchSet.homePodWelcome, FirmwareGuestSystemPatchSet.homePodSiriSpeech, FirmwareGuestSystemPatchSet.homePodOTAUserland, FirmwareGuestSystemPatchSet.homePodSoundGlow, FirmwareGuestSystemPatchSet.homePodCryptexStaging, FirmwareGuestSystemPatchSet.homePodCryptexClass, FirmwareGuestSystemPatchSet.homePodAdHocInstall])
+            .union([FirmwareKernelCustomFirmwarePatchSet.tvTPROPagers, misTrustAuthPatch, FirmwareGuestSystemPatchSet.settingsRootRows, FirmwareGuestSystemPatchSet.settingsSoftwareUpdate, FirmwareGuestSystemPatchSet.tvTPRO, FirmwareGuestSystemPatchSet.tvOTAUserland, FirmwareGuestSystemPatchSet.tvSetupDisplayLookup, FirmwareGuestSystemPatchSet.tvSetupFocus, FirmwareGuestSystemPatchSet.tvLocalActivation, FirmwareGuestSystemPatchSet.tvLegacySetup])
 
-    /// The 120 Hz timing for the paravirtual display.
+    /// ProMotion: the 120 Hz timing for the paravirtual display.
     ///
-    /// Off in `standard`: the host's mode is 60 Hz, a guest rendering twice as
-    /// often costs twice the host CPU and GPU, and only a 120 Hz host display
-    /// shows the difference. See `Research/Guest/display_refresh_rate.md`.
-    public static let displayRefreshPatch = "kernel-exp-display_refresh_120hz"
+    /// On in `standard`. The host's mode is 60 Hz and Virtualization has no
+    /// setting for it; the guest renders at whatever rate the timing element
+    /// advertises, and the host scans out every frame it presents. A guest
+    /// rendering twice as often costs up to twice the host CPU and GPU while it
+    /// animates, and nothing while it is static. Blocking it per VM keeps 60 Hz.
+    ///
+    /// Introduced opt-in as `kernel-exp-display_refresh_120hz`, which shipped from
+    /// 2.4.2; renamed `kernel-cfw-display_promotion` when `standard` turned it on,
+    /// as the naming rule requires. ``renamedPatches`` maps a VM's record of the
+    /// old name. See
+    /// `Research/Guest/display_refresh_rate.md`.
+    public static let proMotionPatch = "kernel-cfw-display_promotion"
+
+    /// Paravirtual GPU Task3: keep the guest's features and supply each owning
+    /// executable's cdhash so the host retains separate shader caches across
+    /// boots. On in `standard`; tvOS presets leave it off. Introduced as
+    /// `kernel-exp-paravirt_gpu_task3` in development bundles; existing VM
+    /// records migrate through ``renamedPatches``. See
+    /// `Research/Guest/gpu_acceleration.md`.
+    public static let paravirtTask3Patch = "kernel-cfw-paravirt_gpu_task3"
+
+    /// Identifiers an installed bundle declared that a later one renamed, old to new.
+    ///
+    /// A VM's `PatchSelection.plist` and `PatchReceipt.plist` outlive the bundle
+    /// that wrote them, and `fw patch` throws `unknownPatch` for an identifier
+    /// nothing declares. Include development bundles used on real VMs as well
+    /// as releases: their records need the same migration.
+    public static let renamedPatches: [String: String] = [
+        "kernel-exp-display_refresh_120hz": proMotionPatch,
+        "kernel-exp-paravirt_gpu_task3": paravirtTask3Patch,
+    ]
+
+    /// The identifiers this bundle declares for ones a VM recorded, in order, each
+    /// once.
+    public static func currentIdentifiers(_ identifiers: [String]) -> [String] {
+        var seen = Set<String>()
+        return identifiers
+            .map { renamedPatches[$0] ?? $0 }
+            .filter { seen.insert($0).inserted }
+    }
 
     /// A narrow IOUserClient sandbox allowlist for the paravirtual devices, on a
     /// base older than 27.
@@ -173,21 +214,224 @@ public enum FirmwarePatchSetCatalog {
         selection: .block(manualOnlyPatches),
     )
 
-    /// Everything the bundle declares, including the Frida relaxations, the
+    /// The general-purpose experimental patches, including the Frida relaxations, the
     /// hypervisor concealment and the iPhone17,3 identity. Each patch's own version
     /// gate still decides whether it lands.
     public static let experimentalPreset = VPhonePatchPreset(
         identifier: "experimental",
         title: "Experimental",
         summary: """
-        Every patch this bundle declares, including the Frida Stalker relaxations, \
+        The experimental patches, including the Frida Stalker relaxations, \
         the iPhone17,3 identity rewrites, and the hv_vmm_present concealment that a \
-        freshly restored 26.4 guest does not survive.
+        freshly restored 26.4 guest does not survive. The HomePod-only top cap is off.
         """,
         patchSets: bundledReferences,
-        selection: .all,
+        selection: .block([FirmwareGuestSystemPatchSet.tvLegacySetup, FirmwareGuestSystemPatchSet.tvSetupDisplayLookup, FirmwareGuestSystemPatchSet.tvSetupFocus, FirmwareGuestSystemPatchSet.tvLocalActivation, FirmwareGuestSystemPatchSet.homePodTopCap, FirmwareGuestSystemPatchSet.homePodSetupBypass, FirmwareGuestSystemPatchSet.homePodAudioProduct, FirmwareGuestSystemPatchSet.homePodWelcome, FirmwareGuestSystemPatchSet.homePodSiriSpeech, FirmwareGuestSystemPatchSet.homePodOTAUserland, FirmwareGuestSystemPatchSet.homePodSoundGlow, FirmwareGuestSystemPatchSet.homePodCryptexStaging, FirmwareGuestSystemPatchSet.homePodCryptexClass, FirmwareGuestSystemPatchSet.homePodAdHocInstall]),
+    )
+
+    /// The iOS payloads, hooks and shared-cache patches an Apple TV guest has no
+    /// validated port of: display, camera, audio, sensors, the GPU driver (a
+    /// plain-arm64 HD cannot load it), debugserver, the environment hooks, and
+    /// the iPhone 19 ARM64E_X1 boot path.
+    public static let tvOSBlockedPatches: Set<String> = [
+        paravirtTask3Patch,
+        FirmwareGuestSystemPatchSet.arm64eX1CacheBootstrap,
+        "dyld-boot-iomfb_force_kern",
+        "dyld-boot-iomfb_swapend",
+        "dyld-boot-lockdown_mode",
+        "dyld-boot-lsd_embedded_reg",
+        "dyld-boot-maxslide",
+        "dyld-boot-xpc_lwcr",
+        "dyld-cfw-camera",
+        "kernel-boot-arm64e_x1",
+        FirmwareKernelCustomFirmwarePatchSet.cssc,
+        "preboot-cfw-devicetree_board_audio",
+        "preboot-cfw-devicetree_haptics",
+        FirmwareGuestSystemPatchSet.prebootIdentityValues,
+        "preboot-cfw-devicetree_iphone_product",
+        "preboot-cfw-devicetree_microphone_array",
+        RestoreRamDiskSealPatcher.patchIdentifier,
+        "system-apps-cfw-attitude",
+        FirmwareGuestSystemPatchSet.signInSheets,
+        FirmwareGuestSystemPatchSet.followUpGroups,
+        "system-backboardd-cfw-gyroscope",
+        "system-backboardd-cfw-accelerometer",
+        "system-campo-cfw-entitlements",
+        "system-debugserver-cfw-install",
+        FirmwareGuestSystemPatchSet.arm64eX1DyldBootstrap,
+        "system-diskimagesiod-cfw-is_mount_complete",
+        "system-extensions-boot-gpu_bundle",
+        FirmwareGuestSystemPatchSet.arm64eX1FsckBootstrap,
+        "system-installcoordination_proxy-cfw-persona_lookup",
+        "system-jetsamproperties-cfw-disable_allowed",
+        FirmwareGuestSystemPatchSet.arm64eX1LaunchdBootstrap,
+        "system-launchd-boot-jetsam_panic_guard_bypass",
+        "system-launchdaemons-boot-environment",
+        "system-locationd-cfw-disable_auto_cohort",
+        "system-mobileactivationd-boot-should_hactivate",
+        FirmwareGuestSystemPatchSet.arm64eX1MountBootstrap,
+        "system-paravirt_gpu-cfw-heap_index_offset",
+        "system-systemhook-cfw-metal_cache_reuse",
+        "system-systemversion-cfw-build_version",
+        "system-virtiosound-cfw-hal_plugin",
+        "system-virtualaudio-cfw-microphone_graph_chains",
+        "system-virtualaudio-cfw-mute_set_throw",
+        "system-virtualaudio-cfw-speaker_graph_chains",
+        "system-virtualaudio-cfw-speaker_protection_gate",
+        "system-virtualaudio-cfw-speaker_raw_chains",
+        "system-virtualaudio-cfw-speaker_route_throws",
+        "system-virtualaudio-cfw-volume_mode_precondition",
+    ]
+
+    /// The iOS 27 shared-cache patches a 27 userland needs on the 26.4 kernel,
+    /// the display swap through the kernel among them. The Apple TV 4K keeps
+    /// them on for its tvOS 27 OTA; each is gated on 27, so a 26 userland
+    /// never meets them.
+    public static let tvOS27UserlandPatches: Set<String> = [
+        "dyld-boot-iomfb_force_kern",
+        "dyld-boot-lockdown_mode",
+        "dyld-boot-lsd_embedded_reg",
+        "dyld-boot-maxslide",
+        "dyld-boot-xpc_lwcr",
+    ]
+
+    /// Standard for an Apple TV guest: the TV TPRO compatibility on, and
+    /// ``tvOSBlockedPatches`` off. The shipped `tvos.plist` must match this.
+    public static let tvOSPreset = VPhonePatchPreset(
+        identifier: VPhonePatchPreset.tvOSIdentifier,
+        title: "Apple TV",
+        summary: "Standard for an Apple TV HD guest: plain-arm64 TPRO compatibility and vphoned, without the iOS display, camera, audio, sensor and shared-cache patches tvOS has no validated port of.",
+        patchSets: bundledReferences,
+        selection: .block(
+            manualOnlyPatches
+                .subtracting([FirmwareGuestSystemPatchSet.tvTPRO, FirmwareKernelCustomFirmwarePatchSet.tvTPROPagers])
+                .union(tvOSBlockedPatches),
+        ),
+    )
+
+    /// The Apple TV preset for an arm64e Apple TV 4K whose userland comes from
+    /// its OTA: the paravirtual GPU driver, which the HD cannot load, and the
+    /// userland swap and ``tvOS27UserlandPatches`` on; the TV TPRO patches,
+    /// which only plain-arm64 dyld needs, off. The shipped `tvos-4k.plist`
+    /// must match this.
+    public static let tvOS4KPreset = VPhonePatchPreset(
+        identifier: VPhonePatchPreset.tvOS4KIdentifier,
+        title: "Apple TV 4K",
+        summary: "Research: the Apple TV preset for an Apple TV 4K restored over the Apple TV HD, with its arm64e userland from the OTA and the paravirtual GPU driver, without the plain-arm64 TPRO patches.",
+        patchSets: bundledReferences,
+        selection: .block(
+            manualOnlyPatches
+                .subtracting([FirmwareGuestSystemPatchSet.tvOTAUserland, FirmwareGuestSystemPatchSet.tvSetupDisplayLookup, FirmwareGuestSystemPatchSet.tvSetupFocus, FirmwareGuestSystemPatchSet.tvLocalActivation])
+                .union(tvOSBlockedPatches.subtracting(["system-extensions-boot-gpu_bundle"]).subtracting(tvOS27UserlandPatches)),
+        ),
+    )
+
+    /// HomePod mini uses its own monolithic arm64e TVOS IPSW. Keep the 27
+    /// kernel compatibility patches, but never swap in an Apple TV OTA or
+    /// install the iPhone GPU/routing environment. The shared virtio audio
+    /// driver selects native B520 routing through an audio-only preference,
+    /// retaining the original VM product token for other services.
+    public static let homePodMiniPreset = VPhonePatchPreset(
+        identifier: VPhonePatchPreset.homePodMiniIdentifier,
+        title: "HomePod mini",
+        summary: "Research: HomePod mini's own arm64e TVOS IPSW with vphoned, its donor-driven top cap, local setup completion and virtio audio using an audio-only B520 route, without changing the VM product token or adding Apple TV OTA replacement or iPhone display, camera and routing hooks.",
+        patchSets: bundledReferences,
+        selection: .block(
+            manualOnlyPatches.subtracting([FirmwareGuestSystemPatchSet.homePodTopCap, FirmwareGuestSystemPatchSet.homePodSetupBypass, FirmwareGuestSystemPatchSet.homePodWelcome, FirmwareGuestSystemPatchSet.homePodSiriSpeech, FirmwareGuestSystemPatchSet.homePodOTAUserland, FirmwareGuestSystemPatchSet.homePodSoundGlow, FirmwareGuestSystemPatchSet.homePodCryptexStaging, FirmwareGuestSystemPatchSet.homePodCryptexClass, FirmwareGuestSystemPatchSet.homePodAdHocInstall])
+                .union(tvOSBlockedPatches.subtracting(tvOS27UserlandPatches).subtracting([FirmwareGuestSystemPatchSet.virtioSoundDriver, FirmwareGuestSystemPatchSet.installCoordinationPersona])),
+        ),
+    )
+
+    /// The device tree patches ``minimalPreset`` keeps: the board presentation the
+    /// guest UI lays out against, and the haptics and microphone array no VM
+    /// has. They change no code, so they are no system modification.
+    public static let minimalDeviceTreePatches: Set<String> = [
+        "devicetree-cfw-serial_number",
+        "devicetree-cfw-product_name",
+        "devicetree-cfw-product_description",
+        "devicetree-cfw-model_number",
+        "devicetree-cfw-home_button_type",
+        "devicetree-cfw-artwork_device_subtype",
+        "devicetree-cfw-island_notch_location",
+        "devicetree-cfw-product_haptics_node",
+        "devicetree-cfw-product_audio_microphone_array",
+        "devicetree-cfw-watch_companion",
+    ]
+
+    /// The boot chain patches ``minimalPreset`` keeps: iBEC's and LLB's, which the
+    /// old `.less` variant applied too. A stock LLB does not get the restored
+    /// guest to its kernel (it restarts after its banner, with Apple's ROMs as
+    /// with OpenAVB and OpenSEP). AVPBooter, iBSS, TXM and the restore ramdisk
+    /// stay stock.
+    public static let minimalBootChainPatches: Set<String> = [
+        "ibec-cfw-serial_label",
+        "ibec-boot-image4_callback",
+        "ibec-boot-boot_args",
+        "ibec-boot-bootx_precondition",
+        "llb-cfw-serial_label",
+        "llb-boot-image4_callback",
+        "llb-boot-boot_args",
+        "llb-boot-rootfs",
+        "llb-boot-panic_bypass",
+        "llb-cfw-display_scale",
+    ]
+
+    /// A guest on a stock kernel and TXM, with only iBEC and LLB patched: the
+    /// system is customised before the restore instead
+    /// (``FirmwareRestoreImagePatchSet``), and nothing after it. Names only the
+    /// sets it draws on, so no kernel or guest patcher is built.
+    /// The shipped `minimal.plist` must match this.
+    public static let minimalPreset = VPhonePatchPreset(
+        identifier: VPhonePatchPreset.minimalIdentifier,
+        title: "Minimal",
+        summary: "No kernel or TXM patches and only iBEC and LLB in the boot chain: the restore installs a resealed system with vphoned, the GPU driver and activation, and nothing writes it afterwards.",
+        patchSets: [
+            .bundled(FirmwareBootChainPatchSet.identifier),
+            .bundled(FirmwareResearchBoardPatchSet.identifier),
+            .bundled(FirmwareDeviceTreePatchSet.identifier),
+            .bundled(FirmwareRestoreImagePatchSet.identifier),
+        ],
+        selection: .allow(
+            minimalBootChainPatches
+                .union(minimalDeviceTreePatches)
+                .union(FirmwareResearchBoardPatchSet.manifest.patches.map(\.identifier))
+                .union(FirmwareRestoreImagePatchSet.manifest.patches.map(\.identifier)),
+        ),
+    )
+
+    /// The device tree patches ``watchOSPreset`` keeps: the board presentation
+    /// of its own tree, the watch display and DriverKit, and what no VM has.
+    public static let watchOSDeviceTreePatches: Set<String> = [
+        "devicetree-cfw-serial_number",
+        "devicetree-cfw-product_name",
+        "devicetree-cfw-product_description",
+        "devicetree-cfw-model_number",
+        "devicetree-cfw-ipad_artwork",
+        "devicetree-cfw-ipad_product",
+        "devicetree-cfw-ipad_buttons",
+        "devicetree-cfw-ipad_identity",
+        "devicetree-cfw-ipad_audio",
+        "devicetree-cfw-watch_presentation",
+        "devicetree-cfw-watch_driverkit",
+        "devicetree-cfw-product_haptics_node",
+        "devicetree-cfw-product_audio_microphone_array",
+    ]
+
+    /// ``minimalPreset`` for an Apple Watch: its device tree presents the watch
+    /// board. The shipped `watchos.plist` must match this.
+    public static let watchOSPreset = VPhonePatchPreset(
+        identifier: VPhonePatchPreset.watchOSIdentifier,
+        title: "Apple Watch",
+        summary: "Minimal for an Apple Watch guest: the watch board's device tree, and a resealed system with vphoned, the GPU driver and activation restored onto a stock kernel and TXM.",
+        patchSets: minimalPreset.patchSets,
+        selection: .allow(
+            minimalBootChainPatches
+                .union(watchOSDeviceTreePatches)
+                .union(FirmwareResearchBoardPatchSet.manifest.patches.map(\.identifier))
+                .union(FirmwareRestoreImagePatchSet.manifest.patches.map(\.identifier)),
+        ),
     )
 
     /// The presets the bundle ships.
-    public static let builtInPresets: [VPhonePatchPreset] = [standardPreset, experimentalPreset]
+    public static let builtInPresets: [VPhonePatchPreset] = [standardPreset, experimentalPreset, tvOSPreset, tvOS4KPreset, homePodMiniPreset, minimalPreset, watchOSPreset]
 }

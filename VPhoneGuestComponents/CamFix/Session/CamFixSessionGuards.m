@@ -63,6 +63,9 @@ static void cfx_session_setRunning_hook(id self, SEL _cmd, BOOL running) {
   if (running && cfx_session_is_for_vcam(self)) {
     cfx_log_session_start(self);
     cfx_track_vcam_session(self);
+    // Only a process with a running vcam session can have a preview layer
+    // to find.
+    cfx_start_scan_timer();
   }
   if (!running && cfx_session_is_for_vcam(self)) {
     cfxlog(@"[session _setRunning:NO] suppressed for vcam session %p", self);
@@ -97,6 +100,9 @@ void cfx_install_session_guards(void) {
     cfxlog(@"installed _setRunning: hook");
   } else {
     cfxlog(@"_setRunning: not in objc table");
+    // Without the hook nothing would start the scan: keep the old
+    // always-on fallback.
+    cfx_start_scan_timer();
   }
   if (m2) {
     cfx_orig_setInterrupted = method_setImplementation(m2, (IMP)cfx_session_setInterrupted_hook);
@@ -170,6 +176,10 @@ static BOOL cfx_session_isRunning_hook(id self, SEL _cmd) {
   BOOL real = ((Fn)cfx_orig_isRunning)(self, _cmd);
   if (cfx_session_is_for_vcam(self)) {
     cfx_track_vcam_session(self);
+    // A client that believes this and skips -startRunning (Camera.app on
+    // iOS 27) never reaches _setRunning:YES, which is what starts the scan
+    // for its preview layer otherwise.
+    cfx_start_scan_timer();
     if (cfx_isRunning_logged < 3) {
       cfxlog(@"[isRunning] real=%d -> forcing YES (session=%p)", real, self);
       cfx_isRunning_logged++;

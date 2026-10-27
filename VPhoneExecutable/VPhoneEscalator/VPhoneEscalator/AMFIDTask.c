@@ -2,14 +2,19 @@
 // amfid, reading and writing its memory, and locating its singleton.
 #include "Escalator.h"
 
+#include <arpa/inet.h>
+#include <copyfile.h>
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <libproc.h>
 #include <objc/message.h>
 #include <ptrauth.h>
+#include <Security/Security.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -151,22 +156,75 @@ pid_t find_amfid(void) {
     return -1;
 }
 
-// amfid is launch-on-demand. Validating this binary — ad-hoc signed, so the
-// kernel has to ask — both starts it and makes it build the singleton.
-static void poke_amfid(const char *self_path) {
+// Run a binary to completion with its output discarded. Returns 0 on a clean
+// exit, -1 otherwise.
+static int spawn_quiet(const char *path, char *const argv[]) {
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_addopen(&fa, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addopen(&fa, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
     pid_t child = 0;
-    char *const argv[] = {(char *)self_path, (char *)"--nop", NULL};
-    if (posix_spawn(&child, self_path, NULL, NULL, argv, NULL) == 0) {
-        int status = 0;
-        waitpid(child, &status, 0);
-    }
+    int rc = posix_spawn(&child, path, &fa, NULL, argv, NULL);
+    posix_spawn_file_actions_destroy(&fa);
+    if (rc != 0) return -1;
+    int status = 0;
+    if (waitpid(child, &status, 0) != child) return -1;
+    return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
+}
+
+// amfid is launch-on-demand, and the kernel consults it only to validate a
+// binary whose cdhash it has not already cached. Re-running this escalator
+// does nothing once its own cdhash is known: the kernel answers from its cache
+// and never wakes amfid. That is why spawning self with --nop started nothing
+// on a Mac where amfid had idle-exited (JETSAM_REASON_MEMORY_IDLE_EXIT).
+//
+// So present the kernel a binary it has never seen: copy this escalator to a
+// scratch path and re-sign the copy ad hoc with a random identifier, which
+// gives it a fresh cdhash. Validating that copy at exec forces the kernel to
+// ask amfid, which both starts amfid and makes it build its AMFIRequirements-
+// Manager singleton — the state the rest of this tool needs. The copy carries
+// no private entitlements (the escalator has none), so amfid validates it
+// normally; nothing is written into anyone's code.
+static void poke_amfid(const char *self_path) {
+    char copy_path[] = "/tmp/vphone-escalator-poke.XXXXXX";
+    int fd = mkstemp(copy_path);
+    if (fd < 0) return;
+    close(fd);
+
+    int done = 0;
+    if (copyfile(self_path, copy_path, NULL, COPYFILE_DATA) != 0 ||
+        chmod(copy_path, 0755) != 0)
+        goto cleanup;
+
+    // A random identifier makes the ad-hoc signature's cdhash one the kernel
+    // has not cached, both now and on later escalator runs.
+    char identifier[64];
+    snprintf(identifier, sizeof(identifier), "vphone-escalator-poke-%08x%08x",
+             arc4random(), arc4random());
+    char *const sign_argv[] = {(char *)"/usr/bin/codesign", (char *)"-f", (char *)"-s",
+                               (char *)"-",      (char *)"--identifier", identifier,
+                               copy_path,        NULL};
+    if (spawn_quiet("/usr/bin/codesign", sign_argv) != 0) goto cleanup;
+
+    char *const run_argv[] = {copy_path, (char *)"--nop", NULL};
+    spawn_quiet(copy_path, run_argv);
+    done = 1;
+
+cleanup:
+    (void)done;
+    unlink(copy_path);
 }
 
 int attach_amfid(const char *self_path) {
     g_amfid = find_amfid();
     if (g_amfid < 0) {
         poke_amfid(self_path);
-        g_amfid = find_amfid();
+        // The poke returns once the re-signed copy has exited, but launchd may
+        // take a moment to bring amfid up. Retry briefly before giving up.
+        for (int i = 0; i < 30 && g_amfid < 0; i++) {
+            usleep(100 * 1000);
+            g_amfid = find_amfid();
+        }
     }
     if (g_amfid < 0) {
         fprintf(stderr, "error: amfid is not running\n");
@@ -185,6 +243,13 @@ int attach_amfid(const char *self_path) {
         return 0;
     }
     return 1;
+}
+
+static int peek_amfid(mach_vm_address_t addr, void *buf, size_t len) {
+    mach_vm_size_t got = 0;
+    return mach_vm_read_overwrite(g_task, addr, len, (mach_vm_address_t)buf, &got) ==
+               KERN_SUCCESS &&
+           got == len;
 }
 
 int read_amfid(mach_vm_address_t addr, void *buf, size_t len) {
@@ -278,4 +343,68 @@ mach_vm_address_t amfid_manager(const char *self_path) {
         return 0;
     }
     return (mach_vm_address_t)remote;
+}
+
+// --------------------------------------------------------------------------
+// the requirement amfid holds
+// --------------------------------------------------------------------------
+
+// Where a SecRequirementRef keeps the pointer to its blob. Found in a
+// requirement this process builds, by contents, the way singleton_slot finds
+// its slot: the word whose target is that requirement's own blob. amfid links
+// the same Security framework, so its requirements keep the pointer there too.
+static ptrdiff_t requirement_blob_offset(void) {
+    static ptrdiff_t offset = -1;
+    static bool looked = false;
+    if (looked) return offset;
+    looked = true;
+
+    SecRequirementRef req = NULL;
+    CFDataRef data = NULL;
+    if (SecRequirementCreateWithString(CFSTR("anchor apple"), kSecCSDefaultFlags, &req) !=
+            errSecSuccess ||
+        SecRequirementCopyData(req, kSecCSDefaultFlags, &data) != errSecSuccess) {
+        if (req) CFRelease(req);
+        return -1;
+    }
+    const UInt8 *want = CFDataGetBytePtr(data);
+    size_t len = (size_t)CFDataGetLength(data);
+    uint8_t got[256];
+    if (len > 0 && len <= sizeof(got)) {
+        for (ptrdiff_t at = 0; at < 256; at += sizeof(uintptr_t)) {
+            uintptr_t word = 0;
+            if (!peek_self((uintptr_t)req + at, &word, sizeof(word))) break;
+            word = (uintptr_t)strip_pac((void *)word);
+            if (!word || word == (uintptr_t)req) continue;
+            if (peek_self(word, got, len) && memcmp(got, want, len) == 0) {
+                offset = at;
+                break;
+            }
+        }
+    }
+    CFRelease(data);
+    CFRelease(req);
+    return offset;
+}
+
+// The blob of the SecRequirementRef at `req` in amfid, or NULL when it cannot
+// be read as one.
+CFDataRef copy_amfid_requirement_data(mach_vm_address_t req) {
+    ptrdiff_t off = requirement_blob_offset();
+    req = (mach_vm_address_t)strip_pac((void *)req);
+    if (off < 0 || !req) return NULL;
+    uintptr_t blob = 0;
+    if (!peek_amfid(req + (mach_vm_address_t)off, &blob, sizeof(blob))) return NULL;
+    blob = (uintptr_t)strip_pac((void *)blob);
+    uint32_t header[2] = {0, 0}; // magic and length, both big-endian
+    if (!blob || !peek_amfid(blob, header, sizeof(header))) return NULL;
+    uint32_t length = ntohl(header[1]);
+    if (ntohl(header[0]) != 0xfade0c00 || length < sizeof(header) || length > 64 * 1024)
+        return NULL;
+    UInt8 *bytes = malloc(length);
+    if (!bytes) return NULL;
+    CFDataRef data = NULL;
+    if (peek_amfid(blob, bytes, length)) data = CFDataCreate(NULL, bytes, (CFIndex)length);
+    free(bytes);
+    return data;
 }

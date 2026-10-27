@@ -4,8 +4,10 @@
 daemon, through the machine's `vphone.sock`. Params are one JSON object (omit
 for none). The reply is `{"ok":true,"result":{…}}`. On `ok:false` the CLI exits 1 with
 "The machine refused the request. Try again." and puts the guest's own error
-(for example `guest not connected` or `Unknown method: …`) on stderr;
-add `--screen` to also get the small grayscale screen image.
+(for example `guest not connected` or `Unknown method: …`) on stderr. When
+vphoned itself refused, the last stderr line is its whole error object as JSON
+(`code`, `message` and fields such as `results`, `reason`, `errno`,
+`retryable`); `vphone.sock` carries the same object as `guest_error`. Add `--screen` to also get the small screen image.
 
 The complete catalog, with REST routes and result details, is
 `Research/vphoned_http_api.md` ("Method catalog"). This file is the working
@@ -25,6 +27,7 @@ invalid-request error, read the source named there instead of guessing keys.
 - Processes, logs, services
 - System and preferences
 - Bootstrap
+- Running a script in the guest
 - Raw HTTP and WebSocket
 
 ## Conventions
@@ -33,6 +36,7 @@ invalid-request error, read the source named there instead of guessing keys.
   `device.screen` reports, not the pixels used by the socket's `tap`.
 - **force methods** refuse to run unless the params carry `"force":true`:
   `processes.kill`, `services.stop|disable|remove|signal|unload`,
+  `services.kickstart` with `kill`,
   `apps.uninstall|unregister|unregister_dir`, `system.respring`,
   `system.reboot`, `system.shutdown`, `setup.skip`. The flag is the
   confirmation: use it only for what the user asked.
@@ -71,6 +75,8 @@ invalid-request error, read the source named there instead of guessing keys.
 | `input.key` | `name` (`return`, `cmd+v`, …) |
 | `input.type` | `text`, `delay_ms?` (30) |
 | `input.paste` | `text` |
+| `input.pointer` | `x`, `y` (0...1 of the interface as shown; iPad, capability `pointer_scroll`), `seq?` (increasing; a late move is dropped) |
+| `input.scroll` | `phase` (`began`/`changed`/`ended`/`cancelled`), `dx?`, `dy?` (points, wheel signs), `x?`, `y?` |
 
 ## UI inspection
 
@@ -149,9 +155,12 @@ Paths are real-root paths. All take `path` unless noted.
 | `files.plist` | `path` |
 | `files.plist_set` | `path`, `key`, and `value` or `remove:true` |
 
-Use `files.read` with `binary:true` to pull guest binaries and crash reports
-without ssh. Keep `limit` small; large reads are the usual way to hit the reply
-size problem.
+`files.write` replaces the whole file and takes one JSON line of at most
+1 MiB, so a binary over about 700 KiB does not fit. Copy files of any size with
+`vphone-launchpad-cli guest push` and `guest pull`, which stream
+([guest-layout](guest-layout.md), "Handing a file to vphoned"). `files.read`
+with `binary:true` is for small reads; keep `limit` small, since large reads
+are the usual way to hit the reply size problem.
 
 ## Processes, logs, services
 
@@ -166,6 +175,7 @@ size problem.
 | `services.list` | none | launchd |
 | `services.status`, `services.print` | `label` | |
 | `services.start`, `services.enable` | `label` | |
+| `services.kickstart` | `label`, `kill?` | `launchctl kickstart`; answers the new `pid`. `kill` (force) replaces a running instance, so a re-deployed daemon runs its new binary; without it a running service is left alone (capability `service_kickstart`) |
 | `services.stop`, `disable`, `remove`, `unload` (force) | `label` | |
 | `launchd.getenv` / `setenv` / `unsetenv` | `key`, `value?` | |
 
@@ -182,8 +192,9 @@ size problem.
 | `settings.set` | `domain`, `key`, `value`, `type?` |
 | `settings.delete` | `domain`, `key` |
 | `clipboard.get` / `set` / `clear` | `set` takes `text` |
-| `location.set` / `clear` / `current` | `set` takes latitude/longitude; read-back can fail on some guests |
+| `location.set` / `clear` / `current` | `set` takes latitude/longitude; `set` and `current` fail with `location_services_off` while the guest's Location Services switch is off (vphoned never turns it on); read-back can fail on some guests |
 | `time.timezone` | none reads `{identifier, automatic, seconds_from_gmt}`; `identifier` (Olson name) pins the zone and turns automatic off; `automatic: true` hands it back to timed. The VM sends the Mac's zone on every connect |
+| `time.clock` | none reads `{time, automatic}` (seconds since 1970; `automatic` is timed's automatic time); `time` (the Mac's time) moves a guest more than a second away onto it unless `automatic` is off, and adds `offset` and `changed`; `automatic` turns automatic time on or off. The VM sends the Mac's time on every connect and every minute, so a time set this way lasts only with `automatic: false` |
 | `notify.post` / `notify.state` | `name`, `state?` |
 | `keychain.*` | Lists, adds and edits secrets; use only on request and never print values |
 
@@ -192,6 +203,33 @@ size problem.
 `bootstrap.install {layout, package_path?}`, `bootstrap.status`,
 `bootstrap.inspect`, `bootstrap.uninstall {roots, force, reboot?}`,
 `bootstrap.firmware`. Behavior and the install flow: [guest-layout](guest-layout.md).
+
+## Running a script in the guest
+
+`script.eval {source, timeout?}` evaluates JavaScript with vphoned's own
+identity and answers `{ok, result, output, crashed}`. It is the way to reach
+something no method covers, and on an Apple TV guest it is the only
+debugging environment there is: no shell, no package manager, no debugserver.
+`script.info` reports whether this guest has it (capability `script_js`;
+watchOS does not ship JavaScriptCore).
+
+The script runs in a session process of its own, so a crash or a runaway loop
+costs the session and nothing else; `timeout` defaults to 30 seconds. Inside
+it, `api('method', {...})` calls any method in this file, `ObjC.use('NSFoo')`
+and `ObjC.classes.NSFoo` call ObjC methods by name — an underscore stands for
+a colon, `setValue_forKey_(v, k)` — and `fs`, `proc`, `console` and `print`
+cover files, one program, and output. A returned collection stays an object;
+`$value` converts it to plain JSON.
+
+```sh
+guest rpc script.eval '{"source":"ObjC.use(\"NSProcessInfo\").processInfo().operatingSystemVersionString()"}'
+```
+
+Prefer a real method when one exists: it is checked, documented and stable.
+Reach for a script when nothing covers what is needed, then say so, because a
+missing method is usually worth adding. The interactive form is the
+`/v1/shell` WebSocket, which needs `--api-listen` — see
+`Research/vphoned_http_api.md` ("Scripting sessions").
 
 ## Raw HTTP and WebSocket
 

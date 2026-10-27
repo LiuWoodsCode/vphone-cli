@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import ImageIO
+import VPhoneCoreKit
 
 // MARK: - Host Control Socket
 
@@ -18,7 +19,7 @@ import ImageIO
 /// and the image comes from the guest's `screen.screenshot`.
 ///
 /// Every response includes an `"image"` field with a compact base64-encoded
-/// grayscale JPEG of the current screen (unless `"screen":false` is sent).
+/// color JPEG of the current screen (unless `"screen":false` is sent).
 ///
 /// Supported commands:
 ///   {"t":"screenshot"}                          → full-res save to Desktop (or explicit path)
@@ -33,12 +34,24 @@ import ImageIO
 ///   {"t":"type","text":"Hello"}                 → set guest clipboard
 ///   {"t":"ping"}                                → vphoned request/response
 ///   {"t":"rpc","method":"input.type","params":{"text":"ls\n"}}
-///                                               → any vphoned method; its result is in `"result"`
+///                                               → any vphoned method; its result is in `"result"`.
+///                                                 When vphoned refuses it, `"error"` is the message
+///                                                 and `"guest_error"` vphoned's whole error object
+///                                                 (`code`, `message`, `results`, `reason`, `errno` …)
+///   {"t":"push","local":"/abs/host/file","path":"/abs/guest/file","mode":"755"}
+///                                               → streams a host file into the guest through vphoned's
+///                                                 `PUT /v1/files/content`, any size. A `path` ending in `/`
+///                                                 takes the host file's name; `mode` defaults to the host
+///                                                 file's permissions. `"result"` has `path`, `local`, `size`
+///   {"t":"pull","path":"/abs/guest/file","local":"/abs/host/file"}
+///                                               → streams a guest file to the host; `local` may be a
+///                                                 directory. The file replaces `local` only once complete
 ///   {"t":"network"}                             → the NIC's state, in `"result"`
 ///   {"t":"network","link":"down"}               → unplug (`up` replugs); not saved
 ///
-/// All commands except "screenshot" and "rpc" wait briefly then capture a
-/// compact screen image returned as `"image":"<base64>"` in the response.
+/// All commands except "screenshot", "rpc", "push", "pull" and "network" wait
+/// briefly then capture a compact screen image returned as
+/// `"image":"<base64>"` in the response.
 /// Pass `"screen":false` to skip the capture; "rpc" captures only when sent
 /// `"screen":true`.
 @MainActor
@@ -106,27 +119,31 @@ class VPhoneHostAutomationServer {
             return
         }
 
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-        let pathBytes = socketPath.utf8CString
-        guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else {
-            print("[hostctl] socket path too long")
-            close(fd)
-            return
-        }
-        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-            ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dst in
-                for (i, byte) in pathBytes.enumerated() {
-                    dst[i] = byte
+        // A machine deep in the library (a template being built) has a path
+        // longer than sun_path; it is bound through a short link to its folder.
+        let bindResult: Int32? = VPhoneUnixSocket.withAddressablePath(socketPath) { path in
+            var addr = sockaddr_un()
+            addr.sun_family = sa_family_t(AF_UNIX)
+            let pathBytes = path.utf8CString
+            guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { return nil }
+            withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+                ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { dst in
+                    for (i, byte) in pathBytes.enumerated() {
+                        dst[i] = byte
+                    }
+                }
+            }
+            let addrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
+            return withUnsafePointer(to: &addr) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+                    bind(fd, sockPtr, addrLen)
                 }
             }
         }
-
-        let addrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
-        let bindResult = withUnsafePointer(to: &addr) { ptr in
-            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
-                bind(fd, sockPtr, addrLen)
-            }
+        guard let bindResult else {
+            print("[hostctl] socket path too long")
+            close(fd)
+            return
         }
         guard bindResult == 0 else {
             print("[hostctl] bind failed: \(String(cString: strerror(errno)))")
@@ -241,10 +258,51 @@ class VPhoneHostAutomationServer {
                 guard let params = (json["params"] ?? [String: Any]()) as? [String: Any] else {
                     return Self.reply(ok: false, error: "rpc params must be an object")
                 }
-                let result = try await connectedControl().callAfterQueuedInput(method, params: params)
+                let result: [String: Any]
+                do {
+                    result = try await connectedControl().rpcAfterQueuedInput(method, params: params)
+                } catch let failure as VPhoneGuestControl.GuestRPCFailure {
+                    // `error` stays the message older clients read.
+                    return Self.reply(ok: false, error: failure.message, guestError: failure.body)
+                }
                 let wantRPCScreen = json["screen"] as? Bool ?? false
                 let image = wantRPCScreen ? await settledCompactScreenshot(delayMs: screenDelay) : nil
                 return Self.reply(ok: true, image: image, result: result)
+
+            case "push":
+                guard let local = json["local"] as? String, local.hasPrefix("/"),
+                      var path = json["path"] as? String, path.hasPrefix("/")
+                else {
+                    return Self.reply(ok: false, error: "push requires local (an absolute host path) and path (an absolute guest path)")
+                }
+                var status = stat()
+                guard stat(local, &status) == 0, status.st_mode & S_IFMT == S_IFREG else {
+                    return Self.reply(ok: false, error: "push: \(local) is not a readable regular file")
+                }
+                if path.hasSuffix("/") {
+                    path += (local as NSString).lastPathComponent
+                }
+                // The host file's permissions unless the request names others,
+                // so a pushed executable stays executable.
+                let mode = json["mode"] as? String ?? String(status.st_mode & 0o777, radix: 8)
+                let size = try await connectedControl().pushFile(
+                    from: URL(fileURLWithPath: local), to: path, permissions: mode,
+                )
+                return Self.reply(ok: true, result: ["path": path, "local": local, "size": size])
+
+            case "pull":
+                guard let path = json["path"] as? String, path.hasPrefix("/"),
+                      let local = json["local"] as? String, local.hasPrefix("/")
+                else {
+                    return Self.reply(ok: false, error: "pull requires path (an absolute guest path) and local (an absolute host path)")
+                }
+                var destination = URL(fileURLWithPath: local)
+                var isDirectory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: local, isDirectory: &isDirectory), isDirectory.boolValue {
+                    destination.appendPathComponent((path as NSString).lastPathComponent)
+                }
+                let size = try await connectedControl().pullFile(path, to: destination)
+                return Self.reply(ok: true, result: ["path": path, "local": destination.path, "size": size])
 
             case "network":
                 guard let virtualMachine else {
@@ -285,6 +343,7 @@ class VPhoneHostAutomationServer {
         let hidKey: (page: UInt32, usage: UInt32)? = switch name {
         case "home": (0x0C, 0x40)
         case "power": (0x0C, 0x30)
+        case "side": (0x0C, 0x95) // An Apple Watch's side button.
         case "volup": (0x0C, 0xE9)
         case "voldown": (0x0C, 0xEA)
         default: nil
@@ -366,7 +425,7 @@ class VPhoneHostAutomationServer {
         return await captureCompactScreenshot()
     }
 
-    /// Capture current screen as a small grayscale JPEG, returned as base64.
+    /// Capture current screen as a small color JPEG, returned as base64.
     private func captureCompactScreenshot() async -> String? {
         guard let cgImage = await captureScreenImage() else { return nil }
         return compactJPEG(cgImage)
@@ -376,24 +435,24 @@ class VPhoneHostAutomationServer {
         let dstW = cgImage.width / Self.compactScale
         let dstH = cgImage.height / Self.compactScale
 
-        // Draw into grayscale context
-        let gray = CGColorSpaceCreateDeviceGray()
-        guard let ctx = CGContext(
-            data: nil,
-            width: dstW,
-            height: dstH,
-            bitsPerComponent: 8,
-            bytesPerRow: dstW,
-            space: gray,
-            bitmapInfo: CGImageAlphaInfo.none.rawValue,
-        ) else { return nil }
+        // Draw into an sRGB context; JPEG has no alpha, so none is kept
+        guard let sRGB = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(
+                  data: nil,
+                  width: dstW,
+                  height: dstH,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: sRGB,
+                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue,
+              )
+        else { return nil }
 
-        // High contrast: bump brightness
         ctx.setShouldAntialias(true)
         ctx.interpolationQuality = .high
         ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: dstW, height: dstH))
 
-        guard let grayImage = ctx.makeImage() else { return nil }
+        guard let scaledImage = ctx.makeImage() else { return nil }
 
         // Encode as low-quality JPEG
         let data = NSMutableData()
@@ -401,7 +460,7 @@ class VPhoneHostAutomationServer {
             return nil
         }
         let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.35]
-        CGImageDestinationAddImage(dest, grayImage, options as CFDictionary)
+        CGImageDestinationAddImage(dest, scaledImage, options as CFDictionary)
         guard CGImageDestinationFinalize(dest) else { return nil }
 
         return (data as Data).base64EncodedString()
@@ -454,8 +513,14 @@ class VPhoneHostAutomationServer {
     /// command itself runs on the main actor, where it awaits without
     /// holding a thread.
     private nonisolated static func serveClient(_ fd: Int32, controller: VPhoneHostAutomationServer?) {
-        guard let line = readLine(from: fd) else {
+        guard let (line, typedAhead) = readCommand(from: fd) else {
             close(fd)
+            return
+        }
+        // A shell has no reply: the connection becomes the terminal, so it
+        // leaves the one-line protocol here and never comes back to it.
+        if let request = shellRequest(in: line) {
+            relayShell(fd, request: request, typedAhead: typedAhead, controller: controller)
             return
         }
         Task { @MainActor in
@@ -470,7 +535,10 @@ class VPhoneHostAutomationServer {
 
     // MARK: - Socket I/O
 
-    private nonisolated static func readLine(from fd: Int32) -> String? {
+    /// The command line, and whatever arrived behind it. Only a shell has
+    /// anything behind it: its client starts typing without waiting for a
+    /// reply, and those keystrokes are already the session's input.
+    private nonisolated static func readCommand(from fd: Int32) -> (line: String, rest: Data)? {
         var buffer = [UInt8](repeating: 0, count: 4096)
         var accumulated = Data()
 
@@ -484,9 +552,69 @@ class VPhoneHostAutomationServer {
         }
 
         if let nlRange = accumulated.firstIndex(of: 0x0A) {
-            return String(data: accumulated[..<nlRange], encoding: .utf8)
+            guard let line = String(data: accumulated[..<nlRange], encoding: .utf8) else { return nil }
+            return (line, Data(accumulated[accumulated.index(after: nlRange)...]))
         }
-        return accumulated.isEmpty ? nil : String(data: accumulated, encoding: .utf8)
+        guard !accumulated.isEmpty, let line = String(data: accumulated, encoding: .utf8) else { return nil }
+        return (line, Data())
+    }
+
+    // MARK: - Interactive Shell
+
+    /// The parsed command when it is `{"t":"shell"}`, or nil for everything
+    /// else, which the one-line protocol answers as it always has.
+    private nonisolated static func shellRequest(in line: String) -> [String: Any]? {
+        guard let data = line.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              json["t"] as? String == "shell"
+        else { return nil }
+        return json
+    }
+
+    /// `{"t":"shell"}` hands the connection to the guest's terminal: every
+    /// byte after the command line is input, everything the session writes
+    /// comes back, and one JSON line at the end says how it finished. So
+    /// `nc -U .../vphone.sock` is a shell in the guest, and the terminal
+    /// window opens the same route.
+    ///
+    /// `program` picks what runs (unset for vphoned's own JavaScript session,
+    /// a bare name from the bootstrap, or an absolute path); `cols` and `rows`
+    /// set the initial terminal size.
+    private nonisolated static func relayShell(
+        _ fd: Int32,
+        request: [String: Any],
+        typedAhead: Data,
+        controller: VPhoneHostAutomationServer?,
+    ) {
+        // A terminal with nobody typing at it is the normal state, so the
+        // read timeout the line protocol wants would end a healthy session.
+        // The send timeout stays: a client that stops reading must not hold
+        // the session's output thread for good.
+        var none = timeval(tv_sec: 0, tv_usec: 0)
+        _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &none, socklen_t(MemoryLayout<timeval>.size))
+        var send = timeval(tv_sec: 30, tv_usec: 0)
+        _ = setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &send, socklen_t(MemoryLayout<timeval>.size))
+
+        let relay = VPhoneHostShellRelay(descriptor: fd)
+        let options = VPhoneGuestShellChannel.Options(
+            program: request["program"] as? String,
+            columns: (request["cols"] as? NSNumber)?.intValue ?? 80,
+            rows: (request["rows"] as? NSNumber)?.intValue ?? 24,
+        )
+        Task { @MainActor in
+            do {
+                guard let controller else { throw HostControlError.guestNotConnected }
+                let channel = try await VPhoneGuestShellChannel.open(
+                    control: try controller.connectedControl(),
+                    options: options,
+                    onOutput: { relay.deliver($0) },
+                    onEnd: { relay.end($0) },
+                )
+                relay.attach(channel, typedAhead: typedAhead)
+            } catch {
+                relay.refuse(String(describing: error))
+            }
+        }
     }
 
     /// One JSON line, ready to write.
@@ -496,10 +624,14 @@ class VPhoneHostAutomationServer {
         error: String? = nil,
         image: String? = nil,
         result: [String: Any]? = nil,
+        guestError: [String: Any]? = nil,
     ) -> Data {
         var dict: [String: Any] = ["ok": ok]
         if let result {
             dict["result"] = result
+        }
+        if let guestError {
+            dict["guest_error"] = guestError
         }
         if let path {
             dict["path"] = path

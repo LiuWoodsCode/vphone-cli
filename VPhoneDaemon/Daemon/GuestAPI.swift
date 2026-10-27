@@ -1,3 +1,4 @@
+import CoreLocation
 import CryptoKit
 import Darwin
 import Foundation
@@ -13,18 +14,26 @@ enum GuestAPIError: Error, CustomStringConvertible {
     /// The request would repeat work the guest has already done. The code is
     /// sent as the error code so a client can tell it apart from a failure.
     case alreadyDone(code: String, message: String)
+    /// The guest's Location Services switch is off, so locationd gives no
+    /// client a location. vphoned leaves the switch to the guest's Settings.
+    case locationServicesOff
 
     var description: String {
         switch self {
         case let .invalidRequest(message), let .operationFailed(message): message
         case let .unsupportedMethod(method): "Unknown method: \(method)"
         case let .alreadyDone(_, message): message
+        case .locationServicesOff:
+            "Location Services are turned off in the guest. Turn them on in Settings > Privacy & Security > Location Services."
         }
     }
 
     var code: String {
         if case let .alreadyDone(code, _) = self {
             return code
+        }
+        if case .locationServicesOff = self {
+            return "location_services_off"
         }
         return "invalid_operation"
     }
@@ -89,8 +98,10 @@ enum GuestAPI {
             "capabilities": [
                 "touch",
                 "touch2",
+                "touch_edge",
                 "hid",
                 "apps",
+                "ota_system_apps",
                 "url",
                 "files",
                 "clipboard",
@@ -114,26 +125,43 @@ enum GuestAPI {
                 "ui_inspection",
                 "processes",
                 "services",
+                "service_profile",
+                "service_kickstart",
                 "logs",
                 "network_capture",
                 "app_details",
+                "system_app_removal",
                 "system_control",
                 "system_shutdown",
                 "file_tools",
+                "apfs_snapshots",
                 "files_app_drop",
                 "packages",
                 "environment_update",
                 "udid_override",
                 "setup_skip",
                 "management_manipulation",
+                "setup_settle",
                 "network_ipv4",
                 "network_hostname",
+                "device_name",
                 "network_static_names",
                 "network_resolve",
                 "timezone",
+                "clock",
                 "audio_host_latency",
-            ],
+                "motion_gyroscope",
+                "motion_gyroscope_toggle",
+                "motion_attitude",
+            ] + pointerCapabilities() + scriptCapabilities() + GuestHomePodDisplay.capabilities
+                + GuestHomePodDebug.capabilities,
         ]
+    }
+
+    /// iPadOS takes a pointing device as it is; iOS on an iPhone only through
+    /// AssistiveTouch, so `input.pointer` and `input.scroll` are an iPad's.
+    private static func pointerCapabilities() -> [String] {
+        GuestVirtualAudioProduct.machine().hasPrefix("iPad") ? ["pointer_scroll", "pointer_buttons"] : []
     }
 
     static func execute(method: String, params: [String: Any]) throws -> [String: Any] {
@@ -148,7 +176,7 @@ enum GuestAPI {
             return try takeScreenshot(base64: true, nativeResolution: true)
         case "apps.list":
             let filter = params["filter"] as? String ?? "all"
-            let apps = try listApps()["apps"] as? [[String: Any]] ?? []
+            let apps = try listedApps()
             let running = try runningApps()["apps"] as? [[String: Any]] ?? []
             let pids = Dictionary(
                 uniqueKeysWithValues: running.compactMap { app -> (String, Int)? in
@@ -292,6 +320,15 @@ enum GuestAPI {
             guard let phase = (params["phase"] as? String).flatMap(TouchPhase.init(rawValue:)) else {
                 throw GuestAPIError.invalidRequest("phase must be down, move or up")
             }
+            // A touch that starts at a screen edge needs the digitizer edge
+            // flags, which icli does not set; vphoned injects those itself.
+            if let edge = params["edge"] as? Int, edge != 0 {
+                guard params["normalized"] as? Bool ?? true else {
+                    throw GuestAPIError.invalidRequest("edge touch coordinates are normalized 0..1 only")
+                }
+                vp_hid_touch_edge(touchPhaseCode(phase), number(params, "x"), number(params, "y"), Int32(edge))
+                return ["phase": phase.rawValue, "edge": edge]
+            }
             return try touch(
                 phase, x: number(params, "x"), y: number(params, "y"),
                 normalized: params["normalized"] as? Bool ?? true,
@@ -315,14 +352,51 @@ enum GuestAPI {
                 number(params, "x2"), number(params, "y2"),
             )
             return ["phase": phase.rawValue, "fingers": 2]
+        case "input.pointer":
+            let point: GuestPointerScroll.Point
+            let sequence: UInt64
+            let buttons: Int32
+            do {
+                point = try GuestPointerScroll.point(params)
+                sequence = try GuestPointerScroll.sequence(params)
+                buttons = try GuestPointerScroll.buttons(params)
+            } catch {
+                throw GuestAPIError.invalidRequest(error.message)
+            }
+            try movePointer(point, sequence: sequence, buttons: buttons)
+            return ["x": point.x, "y": point.y, "buttons": Int(buttons)]
+        case "input.scroll":
+            let scroll: GuestPointerScroll.Scroll
+            do {
+                scroll = try GuestPointerScroll.scroll(params)
+            } catch {
+                throw GuestAPIError.invalidRequest(error.message)
+            }
+            try scrollPointer(scroll)
+            return ["phase": scroll.phase.rawValue]
         case "input.hid":
             let page = try integer(params, "page")
             let usage = try integer(params, "usage")
+            if let value = params["long_press"] {
+                guard let flag = value as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else {
+                    throw GuestAPIError.invalidRequest("long_press must be a boolean")
+                }
+                if flag.boolValue {
+                    guard (0...65535).contains(page), (0...65535).contains(usage),
+                          let down = params["down"] as? NSNumber, CFGetTypeID(down) == CFBooleanGetTypeID()
+                    else { throw GuestAPIError.invalidRequest("long_press requires a boolean down and 16-bit page and usage") }
+                    guard vp_hid_keyboard_hold(UInt16(page), UInt16(usage), down.boolValue) else {
+                        throw GuestAPIError.operationFailed("HID long-press injection is unavailable")
+                    }
+                    return ["page": page, "usage": usage, "action": down.boolValue ? "down" : "up", "long_press": true]
+                }
+            }
             if let down = params["down"] as? Bool {
                 return try hidEvent(page: page, usage: usage, down: down)
             }
             return try hidPress(page: page, usage: usage)
         case "location.set":
+            guard CLLocationManager.locationServicesEnabled() else { throw GuestAPIError.locationServicesOff }
             return try simulateLocation(
                 latitude: number(params, "latitude"),
                 longitude: number(params, "longitude"),
@@ -335,6 +409,7 @@ enum GuestAPI {
         case "location.clear":
             return try clearSimulatedLocation()
         case "location.current":
+            guard CLLocationManager.locationServicesEnabled() else { throw GuestAPIError.locationServicesOff }
             return try currentLocation(timeout: number(params, "timeout", default: 10))
         case "developer_mode.status":
             return try developerModeStatus()
@@ -350,11 +425,15 @@ enum GuestAPI {
         case "clipboard.set":
             return try setClipboard(string(params, "text"))
         case "clipboard.clear":
+            #if os(tvOS)
+            throw GuestAPIError.operationFailed("tvOS has no system clipboard")
+            #else
             guard let pasteboard = UIPasteboard(name: .general, create: false) else {
                 throw GuestAPIError.operationFailed("The system clipboard is unavailable")
             }
             pasteboard.items = []
             return try clipboardInfo()
+            #endif
         case "files.list":
             return try fileList(string(params, "path"))
         case "files.mkdir":
@@ -473,14 +552,32 @@ enum GuestAPI {
         return result
     }
 
+    /// The LaunchServices records `apps.list` reports: those with a bundle
+    /// identifier. `setup.settle` counts this list, not icli's `count`, which
+    /// was one higher than `apps.list` on an iOS 27 guest.
+    static func listedApps() throws -> [[String: Any]] {
+        try (listApps()["apps"] as? [[String: Any]] ?? []).filter {
+            !(($0["bundle_id"] as? String) ?? "").isEmpty
+        }
+    }
+
     static func jailbreakInfo() -> [String: Any] {
         func isDirectory(_ path: String) -> Bool {
             var directory: ObjCBool = false
             return FileManager.default.fileExists(atPath: path, isDirectory: &directory) && directory.boolValue
         }
 
-        // RootHide can expose its root through the injected hook even when a
-        // system-installed vphoned has no adjacent .jbroot or libroot library.
+        // The bootstrap vphoned installed itself, by its completion record.
+        // The probes below look for a jailbreak's own traces, and a RootHide
+        // root vphoned made has none: vphoned is on the system volume, away
+        // from any .jbroot link or libroot library, and vphone's SystemHook
+        // has no get_jbroot.
+        if let installation = try? GuestIrisinInstaller.completedBootstrap(), isDirectory(installation.root) {
+            return ["layout": installation.layout, "jbroot": installation.root, "source": "vphoned bootstrap"]
+        }
+
+        // A foreign RootHide can expose its root through its injected hook even
+        // when vphoned has no adjacent .jbroot or libroot library.
         if let hook = dlopen("systemhook.dylib", RTLD_NOLOAD) {
             defer { dlclose(hook) }
             if let symbol = dlsym(hook, "get_jbroot") {

@@ -104,7 +104,9 @@ vphone-cli vm config <name> --mac auto     # a new one at the next launch
 ```
 
 A cloned machine keeps the MAC of the original, like its machine identifier.
-Give the clone a new one before running both at once.
+Clone with `vm clone --new-identity` to give the copy new ones, or give it a
+new MAC before running both at once. `--new-identity` also clears the copy's
+fixed address, port forwards and mDNS name.
 
 ## Addresses held by old MACs
 
@@ -277,6 +279,31 @@ To see what the guest's resolver returns, and whether each address connects:
 ```sh
 vphone-launchpad-cli guest rpc <name> network.resolve '{"host":"<Mac>.local","family":"ipv4","port":8000}'
 ```
+
+## Machines reaching each other
+
+In `nat`, Virtualization.framework isolates each guest from the others on the
+Mac's shared network by default: a guest reaches the Mac and the internet, not
+another VM. vphone turns that isolation off, so `nat` machines reach each other
+directly, Bonjour included. A virtual Apple Watch pairs with a virtual iPhone
+this way. A machine that should stay apart opts out:
+
+```sh
+vphone-cli vm config <name> --nat-peers off   # isolate this guest again
+vphone-cli vm config <name> --nat-peers on    # the default
+```
+
+In Launchpad it is "Reach other NAT machines" in the machine's Network
+settings. It applies from the next launch.
+
+vmnet puts the machines that reach each other on a second shared network, the
+block after the first: 192.168.65.0/24 beside 192.168.64.0/24, with the Mac at
+192.168.65.1. A fixed address (`--ip`) goes on that network; a machine whose
+fixed address is on the first network keeps its isolation unless it asks for
+its peers, and then needs an address on the second one. Isolation is a setting of each
+machine's own attachment, so a machine that opts out keeps vmnet's isolation
+whatever the others do. The switch is private to Virtualization.framework; a
+version without it leaves every guest isolated and says so when the VM starts.
 
 ## Unplugging a running VM
 

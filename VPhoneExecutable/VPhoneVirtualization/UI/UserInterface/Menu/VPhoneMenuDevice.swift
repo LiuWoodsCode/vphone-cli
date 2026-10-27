@@ -13,6 +13,13 @@ extension VPhoneMenuController {
         let menu = NSMenu(title: "Device")
         menu.autoenablesItems = false
         menu.addItem(makePanelItem(.controls, "Controls", keyEquivalent: "k", symbol: "slider.horizontal.3"))
+        let remote = makeItem(
+            "Apple TV Remote", action: #selector(showTVRemote),
+            keyEquivalent: "r", modifiers: [.command, .option], symbol: "appletvremote.gen2",
+        )
+        remote.isHidden = true
+        tvRemoteItem = remote
+        menu.addItem(remote)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(makeItem(
             "Home Screen",
@@ -21,6 +28,17 @@ extension VPhoneMenuController {
             modifiers: [.command, .shift],
             symbol: "house",
         ))
+        // Shown only for an Apple TV guest; see `showsTVControls`.
+        let controlCenter = makeItem(
+            "Control Center",
+            action: #selector(sendTVControlCenter),
+            keyEquivalent: "t",
+            modifiers: [.command, .shift],
+            symbol: "switch.2",
+        )
+        controlCenter.isHidden = true
+        tvControlCenterItem = controlCenter
+        menu.addItem(controlCenter)
         // iOS has no back key, so this item and the Esc key both replay the
         // system back gesture. The key equivalent is here so the menu can show
         // it; VPhoneApplication intercepts Esc before the menu is consulted,
@@ -32,6 +50,11 @@ extension VPhoneMenuController {
             modifiers: [],
             symbol: "arrow.uturn.backward",
         ))
+        // Shown only for an Apple Watch guest; see `showsWatchControls`.
+        let sideButton = makeItem("Side Button", action: #selector(sendWatchSideButton), symbol: "button.vertical.right.press")
+        sideButton.isHidden = true
+        watchSideButtonItem = sideButton
+        menu.addItem(sideButton)
         menu.addItem(makeItem("Power", action: #selector(sendPower), symbol: "power"))
         menu.addItem(makeItem("Volume Up", action: #selector(sendVolumeUp), symbol: "speaker.plus"))
         menu.addItem(makeItem("Volume Down", action: #selector(sendVolumeDown), symbol: "speaker.minus"))
@@ -125,8 +148,17 @@ extension VPhoneMenuController {
         return item
     }
 
+    @objc func showTVRemote() {
+        guard showsTVControls else { return }
+        tvRemoteWindowController.show()
+    }
+
     @objc func sendHome() {
         keySender.sendHome()
+    }
+
+    @objc func sendTVControlCenter() {
+        keySender.sendTVControlCenter()
     }
 
     /// iOS has no back key. Esc and this item both replay the system back
@@ -134,6 +166,10 @@ extension VPhoneMenuController {
     /// "cancel" (or, in Safari, "stop loading").
     @objc func sendBack() {
         captureView?.performBackGesture()
+    }
+
+    @objc func sendWatchSideButton() {
+        keySender.sendWatchSideButton()
     }
 
     @objc func sendPower() {

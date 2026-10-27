@@ -1,4 +1,4 @@
-// CustomFirmwareIPhoneProductTests.swift — an iPhone guest takes D47AP's product description.
+// CustomFirmwareIPhoneProductTests.swift — board capabilities preserve the fork's product names.
 //
 // `withPhoneProduct` (the Preboot repair) fills vphone600's `/product`
 // placeholders from the board tree, adds the Camera Control and Action Button
@@ -57,13 +57,13 @@ struct CustomFirmwareIPhoneProductTests {
 
     /// What the guest's nodes should become.
     private static let presentedProduct = Node("product", [
-        ("product-name", Data("iPhone 16\0".utf8)),
+        ("product-name", Data("syscfg/prde\0".utf8)),
         ("assistant", Node.uint32(1)),
         ("framebuffer-identifier", Data("syscfg/fbid\0".utf8)),
         ("graphics-featureset-class", Data("APPLE7\0".utf8)),
         ("ringer-button-location", Data(repeating: 7, count: 20)),
         ("supports-camera-button", Node.uint32(1)),
-    ], flags: ["framebuffer-identifier": placeholder])
+    ], flags: ["product-name": placeholder, "framebuffer-identifier": placeholder])
 
     private static let presentedButtons = Node("buttons", [
         ("function-button_ringeren", Data("w\0\0\0RntbNIRb".utf8)),
@@ -77,13 +77,13 @@ struct CustomFirmwareIPhoneProductTests {
         let board = Self.tree(product: Self.boardProduct, buttons: Self.boardButtons)
         let (patched, changes, delta) = try CustomFirmwarePostRestoreDeviceTree.withPhoneProduct(original, board: board)
         #expect(changes.map(\.property) == [
-            "product/product-name", "product/assistant",
+            "product/assistant",
             "product/ringer-button-location", "product/supports-camera-button",
             "buttons/function-button_ringeren",
         ])
-        #expect(changes.first?.before == "syscfg/prde")
-        #expect(changes.first?.after == "iPhone 16")
-        #expect(changes[2].before == "absent")
+        #expect(changes.first?.before == "syscfg/assi")
+        #expect(changes.first?.after == "01000000")
+        #expect(changes[1].before == "absent")
         #expect(patched.count == original.count + delta)
         #expect(patched == Self.tree(product: Self.presentedProduct, buttons: Self.presentedButtons))
     }

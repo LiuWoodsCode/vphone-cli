@@ -1,6 +1,7 @@
 import ArgumentParser
 import FirmwarePatcher
 import Foundation
+import VPhoneArchiveKit
 import VPhoneCoreKit
 import VPhonePatchKit
 import VPhoneRestore
@@ -243,6 +244,10 @@ struct VPhoneCustomFirmwareCommand: ParsableCommand {
             VPhoneCustomFirmwarePatchDropbearPlistCommand.self,
             VPhoneCustomFirmwareInjectDylibCommand.self,
             VPhoneCustomFirmwarePatchBuildVersionCommand.self,
+            VPhoneCustomFirmwarePatchLocationdCohortingCommand.self,
+            VPhoneCustomFirmwarePatchTVSetupCommand.self,
+            VPhoneCustomFirmwarePatchVirtualBluetoothCommand.self,
+            VPhoneCustomFirmwarePatchJetsamDisableAllowedCommand.self,
             VPhoneCustomFirmwarePatchVirtualAudioGraphConfigurationsCommand.self,
             VPhoneCustomFirmwarePatchVirtualAudioSpeakerRawCommand.self,
             VPhoneCustomFirmwarePatchVirtualAudioMicrophoneChainsCommand.self,
@@ -250,6 +255,8 @@ struct VPhoneCustomFirmwareCommand: ParsableCommand {
             VPhoneCustomFirmwarePatchCampoEntitlementsCommand.self,
             VPhoneCustomFirmwarePatchPostRestoreDeviceTreeCommand.self,
             VPhoneCustomFirmwarePatchBoardAudioCommand.self,
+            VPhoneCustomFirmwarePatchHomePodAudioProductCommand.self,
+            VPhoneCustomFirmwarePatchHomePodCryptexClassCommand.self,
             VPhoneCustomFirmwarePatchIPhoneProductCommand.self,
             VPhoneCustomFirmwarePatchDTIdentityValuesCommand.self,
             VPhoneCustomFirmwarePatchHapticsCommand.self,
@@ -317,6 +324,8 @@ struct VPhoneCustomFirmwareInstallCommand: ParsableCommand {
         help: "Keep the extracted firmware after install (default: removed to save space)",
     )
     var keepArtifacts = false
+    @Option(name: .customLong("work-parent"), help: "Root-owned private CFW temporary directory")
+    var workParent = VPhoneCustomFirmwareInstaller.defaultWorkParent
 
     func run() throws {
         let name = try VPhoneVirtualMachineSelection.resolveExisting(name, in: lib.library)
@@ -326,6 +335,7 @@ struct VPhoneCustomFirmwareInstallCommand: ParsableCommand {
         let code = try VPhoneCustomFirmwareInstaller.elevate(
             bundle: bundle.url,
             resources: resources,
+            workParent: workParent,
         )
         if code == 0 {
             try recordInstall(in: bundle)
@@ -340,7 +350,17 @@ struct VPhoneCustomFirmwareInstallCommand: ParsableCommand {
     private func recordInstall(in bundle: VPhoneBundle) throws {
         let keepArtifacts = keepArtifacts
         let record = {
-            if let info = try? VPhoneRestoreInfo.recordVariant("jb", toBundle: bundle), info.variant != nil {
+            let receipt = VPhonePatchPresetStore.receipt(forVM: bundle.url)
+            let metadataData = try? Data(contentsOf: bundle.url.appendingPathComponent(VPhoneOTAArchive.userlandDirectoryName)
+                .appendingPathComponent("Upgrade.plist"))
+            let metadata = metadataData.flatMap { try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: String] }
+            if receipt?.parts[VPhoneVirtualMachinePatchReceipt.guestPart]?.patches.contains(FirmwareGuestSystemPatchSet.otaUserland) == true,
+               let target = VPhoneRestoreInfo.derive(fromBundle: bundle),
+               metadata?["Build"] == target.ios.build, metadata?["Version"] == target.ios.version {
+                try VPhoneRestoreInfo(ios: target.ios, cloudOS: target.cloudOS, variant: "jb", device: bundle.manifest.guestProductType)
+                    .write(toBundle: bundle)
+                print("[cfw] recorded full OTA userland \(target.ios.version) (\(target.ios.build))")
+            } else if let info = try? VPhoneRestoreInfo.recordVariant("jb", toBundle: bundle), info.variant != nil {
                 print("[cfw] recorded variant jb, device \(info.device ?? "?")")
             }
             if !keepArtifacts, let removed = try? VPhoneRestoreInfo.removeBuiltFirmware(fromBundle: bundle) {
@@ -348,7 +368,7 @@ struct VPhoneCustomFirmwareInstallCommand: ParsableCommand {
             }
         }
         guard geteuid() == 0, let invokingUser = VPhoneInvokingUser.current else {
-            record()
+            try record()
             return
         }
         do {
@@ -400,6 +420,8 @@ struct VPhoneCustomFirmwareUpdateKernelCommand: ParsableCommand {
 
     @OptionGroup var lib: VPhoneLibraryOption
     @Argument(help: "VM name") var name: String?
+    @Option(name: .customLong("work-parent"), help: "Root-owned private CFW temporary directory")
+    var workParent = VPhoneCustomFirmwareInstaller.defaultWorkParent
 
     func run() throws {
         let name = try VPhoneVirtualMachineSelection.resolveExisting(name, in: lib.library)
@@ -408,6 +430,7 @@ struct VPhoneCustomFirmwareUpdateKernelCommand: ParsableCommand {
             bundle: bundle.url,
             resources: VPhoneResources.resolve(),
             mode: .kernelUpdate,
+            workParent: workParent,
         )
         throw ExitCode(code)
     }
@@ -446,6 +469,8 @@ struct VPhoneCustomFirmwareUpdateEnvironmentCommand: ParsableCommand {
 
     @OptionGroup var lib: VPhoneLibraryOption
     @Argument(help: "VM name") var name: String?
+    @Option(name: .customLong("work-parent"), help: "Root-owned private CFW temporary directory")
+    var workParent = VPhoneCustomFirmwareInstaller.defaultWorkParent
 
     func run() throws {
         let name = try VPhoneVirtualMachineSelection.resolveExisting(name, in: lib.library)
@@ -454,6 +479,7 @@ struct VPhoneCustomFirmwareUpdateEnvironmentCommand: ParsableCommand {
             bundle: bundle.url,
             resources: VPhoneResources.resolve(),
             mode: .environmentOnly,
+            workParent: workParent,
         )
         throw ExitCode(code)
     }

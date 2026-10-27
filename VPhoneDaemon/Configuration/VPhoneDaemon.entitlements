@@ -53,6 +53,10 @@
 	<true/>
 	<key>com.apple.backboardd.launchapplications</key>
 	<true/>
+	<key>com.apple.debuginfo.soundboard</key>
+	<true/>
+	<key>com.apple.developer.hid.virtual.device</key>
+	<true/>
 	<key>com.apple.developer.networking.HotspotHelper</key>
 	<true/>
 	<key>com.apple.developer.networking.vpn.api</key>
@@ -333,6 +337,12 @@
 	<array>
 		<string>critical-alerts</string>
 	</array>
+	<key>com.apple.private.vfs.snapshot</key>
+	<true/>
+	<key>com.apple.private.xpc.service-attach</key>
+	<true/>
+	<key>com.apple.private.xpc.service-configure</key>
+	<true/>
 	<key>com.apple.rootless.critical</key>
 	<true/>
 	<key>com.apple.rootless.datavault.metadata</key>
@@ -523,6 +533,7 @@
 		<string>IOGPUDeviceUserClient</string>
 		<string>IOHIDEventServiceFastPathUserClient</string>
 		<string>IOHIDLibUserClient</string>
+		<string>IOHIDResourceDeviceUserClient</string>
 		<string>IOMobileFramebufferUserClient</string>
 		<string>IOReportUserClient</string>
 		<string>IOSurfaceAcceleratorClient</string>
@@ -541,6 +552,10 @@
 	<true/>
 	<key>com.apple.timed</key>
 	<true/>
+	<key>com.apple.timed.sources</key>
+	<array>
+		<string>NTP</string>
+	</array>
 	<key>com.apple.tzlink.allow</key>
 	<true/>
 	<key>com.apple.usernotification.notificationregistrarproxy</key>
@@ -555,6 +570,8 @@
 	<array>
 		<string>/</string>
 	</array>
+	<key>dynamic-codesigning</key>
+	<true/>
 	<key>file-read-data</key>
 	<true/>
 	<key>file-read-metadata</key>

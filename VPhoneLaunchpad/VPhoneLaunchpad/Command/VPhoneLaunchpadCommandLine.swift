@@ -12,6 +12,13 @@ nonisolated struct VPhoneLaunchpadError: LocalizedError {
         self.detail = detail
     }
 
+    /// `error` as an action's failure: itself when it already is one, else
+    /// "Unable to Complete Action" with the error's text under it.
+    init(actionFailure error: any Error) {
+        self = error as? VPhoneLaunchpadError
+            ?? VPhoneLaunchpadError(String(localized: "Unable to Complete Action"), detail: error.localizedDescription)
+    }
+
     var errorDescription: String? {
         message
     }
@@ -65,7 +72,7 @@ nonisolated struct VPhoneLaunchpadCommandResult: Sendable {
 @MainActor
 @Observable
 final class VPhoneLaunchpadCommandHistory {
-    struct Entry: Identifiable {
+    nonisolated struct Entry: Identifiable, Sendable {
         let id = UUID()
         let date = Date()
         let text: String
@@ -121,15 +128,17 @@ struct VPhoneLaunchpadCommandLine {
     /// Runs to completion. Cancelling the calling task sends SIGINT.
     /// `onLine` and `onProgress` run on the reader thread, never on the main
     /// actor. Progress lines go only to `onProgress`, never to the output.
+    /// `environment` is added to the child's; it never appears in the history.
     func run(
         _ arguments: [String],
         recordInHistory: Bool = true,
+        environment: [String: String] = [:],
         onLine: (@Sendable (String) -> Void)? = nil,
         onProgress: (@Sendable (Double) -> Void)? = nil,
     ) async throws -> VPhoneLaunchpadCommandResult {
         let entry = recordInHistory ? history.record(Self.display(arguments)) : nil
         let collector = VPhoneLaunchpadLineCollector()
-        let child = try VPhoneLaunchpadChildProcess(executable: executable, arguments: arguments) { line in
+        let child = try VPhoneLaunchpadChildProcess(executable: executable, arguments: arguments, environment: environment) { line in
             if let fraction = Self.progress(in: line) {
                 onProgress?(fraction)
                 return
@@ -152,10 +161,11 @@ struct VPhoneLaunchpadCommandLine {
     @discardableResult
     func runChecked(
         _ arguments: [String],
+        environment: [String: String] = [:],
         onLine: (@Sendable (String) -> Void)? = nil,
         onProgress: (@Sendable (Double) -> Void)? = nil,
     ) async throws -> VPhoneLaunchpadCommandResult {
-        let result = try await run(arguments, onLine: onLine, onProgress: onProgress)
+        let result = try await run(arguments, environment: environment, onLine: onLine, onProgress: onProgress)
         try Task.checkCancellation()
         guard result.succeeded else {
             throw VPhoneLaunchpadError(

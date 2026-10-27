@@ -25,15 +25,27 @@ public final class KernelCustomFirmwarePatcher: KernelCustomFirmwarePatcherBase,
     /// set (override with --target-os).
     public var applyIOS27 = false
 
+    /// The AppleSEPKeyStore keybag-unlock count-5 acceptance. iOS 26.6 is where
+    /// Apple's external method began sending inputScalarCount == 5 (26.5 and
+    /// earlier send 4), so a 26.6-or-newer userland needs it on the 26.4 kernel —
+    /// not only a 27 base. The pipeline sets this from the iPhone base; the patch
+    /// anchor self-guards on a kernel that already accepts 5, so it no-ops where
+    /// unneeded. False here so a patcher built directly preserves the reference corpus.
+    public var applyAksUnlockBag5 = false
+
     /// Opt-in Frida Stalker kernel relaxations. Set from the plan: `standard` blocks
     /// both, `experimental` and a per-VM checkmark turn them on, and their own
     /// cloudOS 26.4+ gate then decides whether they land. Baseline CFW/EXP firmware is
     /// byte-identical when false.
     public var applyFrida = false
 
-    /// Opt-in 120 Hz display timing. Set from the plan: `standard` blocks it, so
-    /// a guest keeps the host's 60 Hz mode unless the VM asked otherwise.
-    public var applyDisplayRefresh = false
+    /// ProMotion, the 120 Hz display timing. Set from the plan, and `standard`
+    /// turns it on; a VM that blocks it keeps the host's 60 Hz mode. False here so
+    /// a patcher built directly writes what the reference records were taken from.
+    public var applyProMotion = false
+
+    /// Opt-in plain-arm64 tvOS shared-cache compatibility; off by default.
+    public var applyTVTPROPagers = false
 
     /// On a base older than 27: a narrow allowlist at the same sandbox gate, so a
     /// process outside an app sandbox can open the paravirtual GPU, video decoder,
@@ -42,12 +54,22 @@ public final class KernelCustomFirmwarePatcher: KernelCustomFirmwarePatcherBase,
     /// writes what the reference records were taken from.
     public var applyParavirtUserClients = false
 
+    /// Paravirtual GPU binary version 252 (Task3). Set from the plan; `standard`
+    /// enables it. False here so direct patchers preserve the reference corpus.
+    public var applyParavirtTask3 = false
+
     public func findAll() throws -> [PatchRecord] {
         parseMachO()
         buildADRPIndex()
         buildBLIndex()
         buildSymbolTable()
         findPanic()
+
+        if applyTVTPROPagers {
+            guard patchTVTPROPagers() else {
+                throw NSError(domain: "FirmwarePatcher.TVTPROPagers", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot validate sprr_tpro_pagers tunable; kernel unchanged by this operation"])
+            }
+        }
 
         // Group A
         patchAmfiCdhashInTrustcache()
@@ -72,8 +94,20 @@ public final class KernelCustomFirmwarePatcher: KernelCustomFirmwarePatcherBase,
             patchIoucFailedSandbox()
             patchDiskImages2ClientAbi()
             patchSharedRegionSize()
+            if gate.isEnabled("kernel-boot-arm64e_x1"), !patchArm64eX1Admission() {
+                throw PatcherError.invalidFormat("cannot validate required ARM64E_X1 kernel admission")
+            }
+            try patchCSSC()
         } else if applyParavirtUserClients {
             patchParavirtUserClientsNarrow()
+        }
+
+        // AppleSEPKeyStore keybag unlock: accept the 5 scalars an iOS 26.6-or-newer
+        // userland sends (26.5 and earlier send 4). Gated on the base, not on
+        // applyIOS27, so a 26.6/26.6.1 base on the 26.4 kernel gets it too; the
+        // anchor self-guards on a kernel that already accepts 5.
+        if applyAksUnlockBag5 {
+            patchAksUnlockBagCount5()
         }
 
         // Group B
@@ -94,18 +128,30 @@ public final class KernelCustomFirmwarePatcher: KernelCustomFirmwarePatcherBase,
         patchVmFaultEnterPrepare()
         patchVmMapProtect()
 
-        // Opt-in Frida Stalker support, from the kernel.frida patch set:
-        // existing-thread follow (thread_set_state) + repeated VM_PROT_COPY
-        // overwrite (vm_map_delete).
+        // Opt-in Frida support, from the kernel.frida patch set: existing-thread
+        // follow (thread_set_state), repeated VM_PROT_COPY overwrite
+        // (vm_map_delete), spawn (TPRO) and syscall-filtered targets. The gate
+        // writes each only when its own identifier is selected.
         if applyFrida {
             patchThreadSetStateEntitlementFlag()
             patchVmMapDeleteImmutableCode()
+            patchTproOff()
+            patchSyscallFilterOff()
         }
 
-        // Opt-in: the paravirtual display advertises 120 Hz instead of the
-        // host's fixed 60 Hz mode.
-        if applyDisplayRefresh {
+        // The paravirtual display advertises 120 Hz instead of the host's
+        // fixed 60 Hz mode, unless the VM blocked it.
+        if applyProMotion {
             patchParavirtDisplayRefreshRate()
+        }
+
+        // Negotiate Task3 and identify the executable before registration.
+        if applyParavirtTask3 {
+            guard patchParavirtTask3Version() else {
+                throw NSError(domain: "FirmwarePatcher.ParavirtTask3", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "Cannot resolve the complete Task3 shader-cache patch; kernel was not installed",
+                ])
+            }
         }
 
         // Group C

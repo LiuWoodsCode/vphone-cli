@@ -83,6 +83,13 @@ extension VPhoneMenuController {
             VPhoneLocalization.text("Irisin (rootless, deprecated)"),
         ])
         picker.selectItem(at: 0)
+        // tvOS accepts only the RootHide bootstrap. Keep the fork's three
+        // choices visible, with the unsupported rootless choices disabled.
+        if showsTVControls {
+            picker.item(at: 0)?.isEnabled = false
+            picker.item(at: 2)?.isEnabled = false
+            picker.selectItem(at: 1)
+        }
         picker.setAccessibilityLabel(VPhoneLocalization.text("Bootstrap environment"))
 
         let alert = NSAlert()
@@ -154,16 +161,22 @@ extension VPhoneMenuController {
     }
 
     private func chooseBootstrapLayout(localURL: URL) {
-        VPhoneAlert.present(
-            title: "Install Irisin from File",
-            message: VPhoneLocalization.format("Choose the Irisin layout for %@.", localURL.lastPathComponent),
-            style: .informational,
-            buttons: ["Irisin (RootHide)", "Irisin (rootless, deprecated)", "Cancel"],
-        ) { [weak self] response in
+        let offersRootless = !showsTVControls
+        let alert = NSAlert()
+        alert.messageText = VPhoneLocalization.text("Install Irisin from File")
+        alert.informativeText = VPhoneLocalization.format("Choose the Irisin layout for %@.", localURL.lastPathComponent)
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: VPhoneLocalization.text("Irisin (RootHide)"))
+        let rootless = alert.addButton(withTitle: VPhoneLocalization.text(
+            offersRootless ? "Irisin (rootless, deprecated)" : "Irisin (rootless, unavailable)",
+        ))
+        rootless.isEnabled = offersRootless
+        alert.addButton(withTitle: VPhoneLocalization.text("Cancel")).keyEquivalent = "\u{1b}"
+        VPhoneAlert.present(alert) { [weak self] response in
             switch response {
             case .alertFirstButtonReturn:
                 self?.performBootstrapInstallation(layout: "roothide", localURL: localURL)
-            case .alertSecondButtonReturn:
+            case .alertSecondButtonReturn where offersRootless:
                 self?.confirmRootlessIrisin(localURL: localURL)
             default: break
             }

@@ -37,33 +37,21 @@ extension CryptexFilesystemPatcher {
             at: filesystem,
         )
 
-        let newTrustcachePath = restoreDir.appending(path: "Firmware").appending(path: trustcache.lastPathComponent)
-        if trustcache != newTrustcachePath, FileManager.default.fileExists(atPath: newTrustcachePath.path) {
-            try FileManager.default.removeItem(at: newTrustcachePath)
-        }
-        try FileManager.default.moveItem(at: trustcache, to: newTrustcachePath)
+        let newTrustcachePath = try moveIntoFirmware(trustcache)
         identityManifest = try updateManifestComponentPath(
             identityManifest: identityManifest,
             component: "StaticTrustCache",
             at: newTrustcachePath,
         )
 
-        let newMetadataPath = restoreDir.appending(path: "Firmware").appending(path: metadata.lastPathComponent)
-        if metadata != newMetadataPath, FileManager.default.fileExists(atPath: newMetadataPath.path) {
-            try FileManager.default.removeItem(at: newMetadataPath)
-        }
-        try FileManager.default.moveItem(at: metadata, to: newMetadataPath)
+        let newMetadataPath = try moveIntoFirmware(metadata)
         identityManifest = try updateManifestComponentPath(
             identityManifest: identityManifest,
             component: "Ap,SystemVolumeCanonicalMetadata",
             at: newMetadataPath,
         )
 
-        let newRootHashPath = restoreDir.appending(path: "Firmware").appending(path: rootHash.lastPathComponent)
-        if rootHash != newRootHashPath, FileManager.default.fileExists(atPath: newRootHashPath.path) {
-            try FileManager.default.removeItem(at: newRootHashPath)
-        }
-        try FileManager.default.moveItem(at: rootHash, to: newRootHashPath)
+        let newRootHashPath = try moveIntoFirmware(rootHash)
         identityManifest = try updateManifestComponentPath(
             identityManifest: identityManifest,
             component: "SystemVolume",
@@ -74,6 +62,19 @@ extension CryptexFilesystemPatcher {
         buildIdentities[0] = buildIdentity
         root["BuildIdentities"] = buildIdentities
         return root
+    }
+
+    /// Moves `file` into the restore's `Firmware` directory, replacing an
+    /// older file of that name. createTrustcache already writes its output
+    /// there, and FileManager refuses to move a file onto itself.
+    func moveIntoFirmware(_ file: URL) throws -> URL {
+        let destination = restoreDir.appending(path: "Firmware").appending(path: file.lastPathComponent)
+        guard file.standardizedFileURL != destination.standardizedFileURL else { return destination }
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.moveItem(at: file, to: destination)
+        return destination
     }
 
     func updateManifestComponentPath(identityManifest: PlistDict, component: String, at: URL) throws -> PlistDict {
@@ -97,10 +98,14 @@ extension CryptexFilesystemPatcher {
         return remaining.joined(separator: "/")
     }
 
-    func getProductVersion() throws -> String {
-        let root = try parsePlist(data: buildManiest)
+    /// The iOS version of the system being merged, which picks the seal tool.
+    /// The hybrid `BuildManifest.plist` carries the cloudOS version; the
+    /// iPhone's own manifest, which `fw prepare` keeps beside it, the iOS one.
+    public func getProductVersion() throws -> String {
+        let data = try Data(contentsOf: restoreDir.appending(path: "iPhone-BuildManifest.plist"))
+        let root = try parsePlist(data: data)
         guard let productVersion = root["ProductVersion"] as? String else {
-            throw FirmwareManifest.ManifestError.missingKey("ProductVersion in BuildManifest")
+            throw FirmwareManifest.ManifestError.missingKey("ProductVersion in iPhone-BuildManifest")
         }
         return productVersion
     }
@@ -114,7 +119,8 @@ extension CryptexFilesystemPatcher {
     func getComponentPath(component: String, buildManifest: PlistDict) throws -> String {
         let comp = try getChildPlistDict(parent: buildManifest, key: component)
         let info = try getChildPlistDict(parent: comp, key: "Info")
-        guard let path = info["Path"] as? String else {
+        guard let path = info["Path"] as? String,
+              CustomFirmwareDaemons.isPlainRelativePath(path) else {
             throw FirmwareManifest.ManifestError.missingKey("component path")
         }
         return path

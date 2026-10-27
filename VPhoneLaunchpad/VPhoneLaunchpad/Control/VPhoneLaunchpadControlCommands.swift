@@ -63,6 +63,8 @@ struct VPhoneLaunchpadControlCommands {
         case "cfw.update-kernel": return try await updateKernelControl(request, emit: emit)
         case "guest.send": return try await sendToGuest(request)
         case "guest.rpc": return try await callGuest(request)
+        case "guest.push": return try await transferFile(request, push: true)
+        case "guest.pull": return try await transferFile(request, push: false)
         case "guest.unlock": return try await unlockGuest(request)
         case "exec": return try await exec(request, emit: emit)
         default: throw VPhoneLaunchpadError("\(command.name) is not handled by this Launchpad.")
@@ -306,7 +308,14 @@ struct VPhoneLaunchpadControlCommands {
         if let udid = machine.udid {
             report["udid"] = udid
         }
+        // Processes that have the disk open without running the machine, as
+        // `vm stop` names them: `12925 tail`. The state stays `stopped`.
+        let others = library.otherDiskHolders(of: path)
+        if !others.isEmpty {
+            report["diskOpenIn"] = others.map(\.description)
+        }
         report["unlocksAtStartup"] = machine.unlocksAtStartup ?? false
+        report["syncsHostLocation"] = machine.syncsHostLocation ?? false
         if let info = machine.restoreInfo {
             report["ios"] = "\(info.ios.version) (\(info.ios.build))"
             report["cloudOS"] = "\(info.cloudOS.version) (\(info.cloudOS.build))"
@@ -351,8 +360,21 @@ struct VPhoneLaunchpadControlCommands {
 
     private func startMachine(_ request: VPhoneLaunchpadControlRequest, emit: @escaping Emit) async throws -> Any {
         let machine = try await machine(request)
-        guard library.state(of: machine) == .stopped else {
-            throw VPhoneLaunchpadError("\(machine.name) is already running or busy.")
+        switch library.state(of: machine) {
+        case .stopped:
+            break
+        case .running:
+            throw VPhoneLaunchpadError("\(machine.name) is already running.")
+        case let .busy(activity):
+            throw VPhoneLaunchpadError("\(machine.name) is busy: \(activity)")
+        }
+        // A process that has the disk open without running the machine does
+        // not stop the start, as it does not stop `vphone-cli vm launch`:
+        // Virtualization opens the disk itself and fails the start if it
+        // cannot. It is named, so a start that fails is not a mystery.
+        let others = await library.currentOtherDiskHolders(of: machine)
+        if !others.isEmpty {
+            emit("note: the disk of \(machine.name) is open in \(VPhoneLaunchpadDiskHolder.describe(others)), which does not run it")
         }
         library.actionError = nil
         // Checks the machine's own bundle first, once per Launchpad session.
@@ -474,6 +496,10 @@ struct VPhoneLaunchpadControlCommands {
 
         let pipeline: VPhoneLaunchpadCreationPipeline
         if let from = request.option("from") {
+            // A retry runs with the options the creation started with.
+            guard request.values("block").isEmpty, request.values("allow").isEmpty else {
+                throw VPhoneLaunchpadError("--from retries with the patches the creation started with; --block and --allow cannot change them.")
+            }
             guard let step = VPhoneLaunchpadCreationPipeline.Step.allCases.first(where: { from == "\($0)" }) else {
                 let steps = VPhoneLaunchpadCreationPipeline.Step.allCases.map { "\($0)" }.joined(separator: ", ")
                 throw VPhoneLaunchpadError("--from takes one of: \(steps).")
@@ -528,7 +554,9 @@ struct VPhoneLaunchpadControlCommands {
 
         var iphone = request.option("iphone-source")
         var cloudOS = request.option("cloudos-source")
-        let device = request.option("device")
+        let device = request.option("device") ?? iphone.flatMap { source in
+            VPhoneLaunchpadIPSW.productType(forSource: source)
+        }
         if iphone == nil || cloudOS == nil {
             let result = try await commandLine.run(["fw", "catalog", "--json"], recordInHistory: false)
             guard result.succeeded, let data = result.jsonData else {
@@ -561,9 +589,50 @@ struct VPhoneLaunchpadControlCommands {
             }
             return value
         }
-        var patches = VPhoneLaunchpadPatchSelection()
-        if let preset = request.option("preset") {
-            patches.preset = preset
+        // Apple TV and HomePod restore on their own: templates
+        // and slimming drive iOS Setup Assistant and its apps.
+        let requiresStandaloneRestore = device?.hasPrefix("AppleTV") == true || device?.hasPrefix("AudioAccessory") == true
+        let (patches, guestPatches) = try await Self.patches(
+            request,
+            commandLine: commandLine,
+            defaultPreset: VPhoneLaunchpadPatchSelection.defaultPreset(forDevice: device),
+            emit: emit,
+        )
+        // The Minimal preset seals the system it restores, which a template's
+        // trim and setup boot would write.
+        let restoredSystem = patches.customisesRestoredSystem
+        let usesTemplate = !request.flag("no-template") && !requiresStandaloneRestore && !restoredSystem
+        let slimming: VPhoneLaunchpadSlimming
+        if requiresStandaloneRestore || restoredSystem {
+            if !Self.slimmingSwitches(request).isEmpty {
+                throw VPhoneLaunchpadError(requiresStandaloneRestore
+                    ? "Apple TV and HomePod are created without a template; the slimming switches do not apply."
+                    : "The \(patches.preset) preset creates a machine without a template; the slimming switches do not apply.")
+            }
+            var off = VPhoneLaunchpadSlimming()
+            off.slim = false
+            slimming = off
+        } else {
+            slimming = try Self.slimming(request, usesTemplate: usesTemplate)
+        }
+        // A 2.12.0 bundle stages a kernelcache mix with an ipsw, as New
+        // Machine's ipsw field; a 2.12.1 bundle extracts natively and ignores
+        // it. The creation runs `fw kernelcache` either way, which does nothing
+        // on a cloudOS that still has vphone600 components.
+        let kernelcacheIPSW = request.option("ipsw")
+        if let kernelcacheIPSW, !FileManager.default.isExecutableFile(atPath: kernelcacheIPSW) {
+            throw VPhoneLaunchpadError("--ipsw names \(kernelcacheIPSW), which is not an executable.")
+        }
+        // An iOS 18 guest's kernel-first mix is linked over ssh on the Mac
+        // --kmutil-ssh names; vphone-launchpad-cli passes the password from its
+        // own VPHONE_KMUTIL_SSH_PASSWORD, never as an argument.
+        let kernelcacheBuilder = request.option("kmutil-ssh").map {
+            VPhoneLaunchpadKernelcacheBuilder(destination: $0, password: request.option(VPhoneLaunchpadControlRequest.kmutilSSHPasswordOption))
+        }
+        if let kernelcacheBuilder {
+            guard VPhoneLaunchpadKernelcacheBuilder.isValid(kernelcacheBuilder.destination) else {
+                throw VPhoneLaunchpadError("--kmutil-ssh takes user@host, not \(kernelcacheBuilder.destination).")
+            }
         }
         let options = try VPhoneLaunchpadCreationPipeline.Options(
             name: machine.name,
@@ -577,9 +646,135 @@ struct VPhoneLaunchpadControlCommands {
             diskSizeGB: number("disk-size", 64),
             network: request.option("network") ?? "nat",
             patches: patches,
+            guestPatches: guestPatches,
             keepArtifacts: request.flag("keep-artifacts"),
+            usesTemplate: usesTemplate,
+            slimming: slimming,
+            kernelcacheIPSW: kernelcacheIPSW,
+            kernelcacheBuilder: kernelcacheBuilder,
         )
         return library.create(options)
+    }
+
+    /// The preset and the per-patch overrides of `--block` and `--allow`,
+    /// split as New Machine splits them: the bundle's catalog for the preset
+    /// says which patches it turns on and which lie outside the boot chain.
+    /// The boot-chain overrides go into the template's key and build; the
+    /// guest ones are applied to the clone in Apply Guest Patches.
+    private static func patches(
+        _ request: VPhoneLaunchpadControlRequest,
+        commandLine: VPhoneLaunchpadCommandLine,
+        defaultPreset: String,
+        emit: Emit,
+    ) async throws -> (VPhoneLaunchpadPatchSelection, guest: Set<String>) {
+        var selection = VPhoneLaunchpadPatchSelection()
+        selection.preset = request.option("preset") ?? defaultPreset
+        let block = request.values("block")
+        let allow = request.values("allow")
+        guard !block.isEmpty || !allow.isEmpty else {
+            return (selection, [])
+        }
+        let catalog = try await VPhoneLaunchpadPatchCatalog.read(using: commandLine, machine: nil, preset: selection.preset)
+        let overrides: VPhoneLaunchpadPatchOverrides
+        do {
+            overrides = try VPhoneLaunchpadPatchOverrides.requested(
+                preset: selection.preset,
+                block: block,
+                allow: allow,
+                declared: Set(catalog.patches.map(\.identifier)),
+                inPreset: Set(catalog.patches.filter(\.inPreset).map(\.identifier)),
+                guest: Set(catalog.patches.filter { !$0.isBootChain }.map(\.identifier)),
+            )
+        } catch {
+            throw VPhoneLaunchpadError(error.message)
+        }
+        selection.blocked = overrides.blocked
+        selection.allowed = overrides.allowed
+        let unchanged = Set(block + allow).subtracting(overrides.blocked).subtracting(overrides.allowed)
+        if !unchanged.isEmpty {
+            emit("note: preset \(selection.preset) already has \(unchanged.sorted().joined(separator: ", ")) that way")
+        }
+        let essentialOff = selection.bootEssentialOff(in: catalog).map(\.identifier)
+        if !essentialOff.isEmpty {
+            emit("warning: \(essentialOff.count) boot-essential patch(es) are off — the machine may not boot: \(essentialOff.joined(separator: ", "))")
+        }
+        let bootChain = overrides.bootChainBlocked.map { "-\($0)" } + overrides.bootChainAllowed.map { "+\($0)" }
+        let guest = overrides.blocked.intersection(overrides.guestPatches).map { "-\($0)" }
+            + overrides.allowed.intersection(overrides.guestPatches).map { "+\($0)" }
+        emit("patches: preset \(selection.preset); boot chain \(bootChain.isEmpty ? "as the preset" : bootChain.sorted().joined(separator: " ")); guest \(guest.isEmpty ? "as the preset" : guest.sorted().joined(separator: " "))")
+        return (selection, overrides.guestPatches)
+    }
+
+    /// The slimming switches the request names.
+    private static func slimmingSwitches(_ request: VPhoneLaunchpadControlRequest) -> [String] {
+        ["slim", "trim", "keep-languages", "service-profile", "remove-apps", "keep-apps"].filter { request.option($0) != nil }
+            + (request.flag("accounts-off") ? ["accounts-off"] : [])
+    }
+
+    /// The template switches, refused where `vphone-cli vm create` refuses
+    /// them: with `--no-template`, after `--slim off`, `--accounts-off`
+    /// without the trimmed profile, an app outside the removable list.
+    private static func slimming(_ request: VPhoneLaunchpadControlRequest, usesTemplate: Bool) throws -> VPhoneLaunchpadSlimming {
+        func onOff(_ option: String) throws -> Bool? {
+            guard let value = request.option(option) else {
+                return nil
+            }
+            switch value {
+            case "on": return true
+            case "off": return false
+            default: throw VPhoneLaunchpadError("--\(option) takes on or off, not \(value).")
+            }
+        }
+        let parts = slimmingSwitches(request).filter { $0 != "slim" }
+        if !usesTemplate, !parts.isEmpty || request.option("slim") != nil {
+            throw VPhoneLaunchpadError("The slimming switches shape a template; --no-template creates the machine without one.")
+        }
+        var slimming = VPhoneLaunchpadSlimming()
+        slimming.slim = try onOff("slim") ?? true
+        if !slimming.slim, !parts.isEmpty {
+            throw VPhoneLaunchpadError("--slim off turns slimming off; it cannot be combined with --\(parts.joined(separator: ", --")).")
+        }
+        if let trim = request.option("trim") {
+            guard let tier = VPhoneLaunchpadSlimming.TrimTier(rawValue: trim) else {
+                throw VPhoneLaunchpadError("--trim takes none, conservative or standard, not \(trim).")
+            }
+            slimming.trim = tier
+        }
+        if let languages = request.option("keep-languages") {
+            guard slimming.trim == .standard else {
+                throw VPhoneLaunchpadError("--keep-languages needs --trim standard.")
+            }
+            slimming.keptLanguages = languages
+        }
+        if let profile = request.option("service-profile") {
+            guard profile == "trimmed" || profile == "none" else {
+                throw VPhoneLaunchpadError("--service-profile takes trimmed or none, not \(profile).")
+            }
+            slimming.trimsServices = profile == "trimmed"
+        }
+        // Off by default as in New Machine; --keep-apps alone implies on.
+        slimming.removesApps = try onOff("remove-apps") ?? (request.option("keep-apps") != nil)
+        if let kept = request.option("keep-apps") {
+            let identifiers = Set(VPhoneLaunchpadSlimming.languageList(kept))
+            let known = Set(VPhoneLaunchpadSlimming.removableApps.map(\.id))
+            let unknown = identifiers.subtracting(known)
+            guard unknown.isEmpty else {
+                throw VPhoneLaunchpadError("--keep-apps \(unknown.sorted().joined(separator: ",")): only apps removed by default can be kept (\(known.sorted().joined(separator: ", "))).")
+            }
+            guard slimming.removesApps else {
+                throw VPhoneLaunchpadError("--keep-apps has nothing to keep with --remove-apps off.")
+            }
+            slimming.keptApps = identifiers
+        }
+        // The Apple Account daemons go with the trimmed profile whether or
+        // not the flag is given; it is still refused where the CLI refuses it.
+        if request.flag("accounts-off"), !slimming.trimsServices {
+            throw VPhoneLaunchpadError("--accounts-off needs --service-profile trimmed.")
+        }
+        if let problem = slimming.problem {
+            throw VPhoneLaunchpadError(problem)
+        }
+        return slimming
     }
 
     /// Streams the creation log and each step until the pipeline stops. The
@@ -605,7 +800,19 @@ struct VPhoneLaunchpadControlCommands {
             "bundle": pipeline.options.bundleVersion,
             "running": pipeline.isRunning,
             "log": pipeline.logFile.path,
-            "steps": VPhoneLaunchpadCreationPipeline.Step.allCases.map { step -> [String: Any] in
+            "template": pipeline.templateID ?? NSNull(),
+            "builtTemplate": pipeline.builtTemplate,
+            // Only once Find Template has decided to build: a creation that
+            // clones a template it found never makes this machine.
+            "buildMachine": pipeline.plan.buildingName ?? NSNull(),
+            "patches": [
+                "preset": pipeline.options.patches.preset,
+                "blocked": pipeline.options.patches.blocked.sorted(),
+                "allowed": pipeline.options.patches.allowed.sorted(),
+                // Applied to the clone; the others went into the template.
+                "guest": pipeline.options.guestPatches.sorted(),
+            ],
+            "steps": pipeline.steps.map { step -> [String: Any] in
                 var item: [String: Any] = ["step": "\(step)", "status": pipeline.status(step).rawValue]
                 if let duration = pipeline.durations[step] {
                     item["seconds"] = Int(duration)
@@ -619,6 +826,8 @@ struct VPhoneLaunchpadControlCommands {
 
     /// Rebinds one machine. `setBundle` skips the environment update of a
     /// running machine without saying so, so that is refused here instead.
+    /// A disk held by another process it refuses itself, before rebinding;
+    /// an update that fails after rebinding is reported as such.
     private func setBundle(_ request: VPhoneLaunchpadControlRequest, emit: @escaping Emit) async throws -> Any {
         let machine = try await machine(request)
         let version = request.arguments[1]
@@ -637,10 +846,10 @@ struct VPhoneLaunchpadControlCommands {
             throw VPhoneLaunchpadError("Stop \(machine.name) before updating its guest environment.")
         }
         library.actionError = nil
-        if updatesEnvironment {
+        // Only once the update starts: a held disk refuses the change first.
+        await library.setBundle(version, for: [machine], updateEnvironment: updatesEnvironment) { machine in
             emit("updating the guest environment; console log: \(VPhoneLaunchpadMachineLibrary.consoleLog(machine).path)")
         }
-        await library.setBundle(version, for: [machine], updateEnvironment: updatesEnvironment)
         if let error = takeLibraryError() {
             throw error
         }
@@ -662,19 +871,53 @@ struct VPhoneLaunchpadControlCommands {
         return version
     }
 
+    /// `cfw install` and the updates need the disk to themselves and refuse
+    /// any other holder, so a process that only reads it refuses them here
+    /// too, by name, before the helper is asked.
+    private func requireDiskUnheld(_ machine: VPhoneLaunchpadMachinePath) async throws {
+        let others = await library.currentOtherDiskHolders(of: machine)
+        guard others.isEmpty else {
+            throw VPhoneLaunchpadError(
+                "The disk of \(machine.name) is open in \(VPhoneLaunchpadDiskHolder.describe(others)), which does not run it. "
+                    + "Try again once that process closes it.",
+            )
+        }
+    }
+
+    /// A maintenance command for a client: it shows in the app as a run of
+    /// Launchpad's own would, without opening its sheet, and its output
+    /// streams to the client too.
+    private func maintenance(
+        _ kind: VPhoneLaunchpadMaintenanceRun.Kind,
+        on machine: VPhoneLaunchpadMachinePath,
+        emit: @escaping Emit,
+        _ command: (@escaping @Sendable (String) -> Void) async throws -> Int32,
+    ) async throws -> Int32 {
+        try await library.runMaintenance(
+            VPhoneLaunchpadMaintenanceRun(kind: kind, machine: machine),
+            presents: false,
+            forward: emit,
+            command,
+        )
+    }
+
     private func installCustomFirmware(_ request: VPhoneLaunchpadControlRequest, emit: @escaping Emit) async throws -> Any {
         let machine = try await machine(request)
         let version = try bundleVersion(of: machine)
         guard library.state(of: machine) == .stopped else {
             throw VPhoneLaunchpadError("Stop \(machine.name) before installing CFW.")
         }
-        let status = try await model.helper.installCustomFirmware(
-            bundleVersion: version,
-            machineName: machine.name,
-            libraryRoot: machine.libraryRoot,
-            keepArtifacts: request.flag("keep-artifacts"),
-            onLine: emit,
-        )
+        try await requireDiskUnheld(machine)
+        let keepArtifacts = request.flag("keep-artifacts")
+        let status = try await maintenance(.installCustomFirmware, on: machine, emit: emit) { [helper = model.helper] onLine in
+            try await helper.installCustomFirmware(
+                bundleVersion: version,
+                machineName: machine.name,
+                libraryRoot: machine.libraryRoot,
+                keepArtifacts: keepArtifacts,
+                onLine: onLine,
+            )
+        }
         guard status == 0 else {
             throw VPhoneLaunchpadError("Unable to install custom firmware. Check the log for details.")
         }
@@ -688,12 +931,15 @@ struct VPhoneLaunchpadControlCommands {
         guard library.state(of: machine) == .stopped else {
             throw VPhoneLaunchpadError("Stop \(machine.name) before updating its guest environment.")
         }
-        let status = try await model.helper.updateGuestEnvironment(
-            bundleVersion: version,
-            machineName: machine.name,
-            libraryRoot: machine.libraryRoot,
-            onLine: emit,
-        )
+        try await requireDiskUnheld(machine)
+        let status = try await maintenance(.updateGuestEnvironment, on: machine, emit: emit) { [helper = model.helper] onLine in
+            try await helper.updateGuestEnvironment(
+                bundleVersion: version,
+                machineName: machine.name,
+                libraryRoot: machine.libraryRoot,
+                onLine: onLine,
+            )
+        }
         guard status == 0 else {
             throw VPhoneLaunchpadError("Unable to update the guest environment. Check the log for details.")
         }
@@ -707,12 +953,15 @@ struct VPhoneLaunchpadControlCommands {
         guard library.state(of: machine) == .stopped else {
             throw VPhoneLaunchpadError("Stop \(machine.name) before updating its kernel.")
         }
-        let status = try await model.helper.updateKernel(
-            bundleVersion: version,
-            machineName: machine.name,
-            libraryRoot: machine.libraryRoot,
-            onLine: emit,
-        )
+        try await requireDiskUnheld(machine)
+        let status = try await maintenance(.updateKernel, on: machine, emit: emit) { [helper = model.helper] onLine in
+            try await helper.updateKernel(
+                bundleVersion: version,
+                machineName: machine.name,
+                libraryRoot: machine.libraryRoot,
+                onLine: onLine,
+            )
+        }
         guard status == 0 else {
             throw VPhoneLaunchpadError("Unable to update the kernel. Check the log for details.")
         }
@@ -775,6 +1024,28 @@ struct VPhoneLaunchpadControlCommands {
             "screen": request.flag("screen"),
         ]
         return try await VPhoneLaunchpadGuestSocket.send(object, socketPath: Self.controlSocket(machine))
+    }
+
+    /// `guest push` and `guest pull`: vphone-vm streams the file between the
+    /// Mac and vphoned's `/v1/files/content`, so neither the 1 MiB limit on a
+    /// vphone.sock line nor one on a JSON body applies.
+    private func transferFile(_ request: VPhoneLaunchpadControlRequest, push: Bool) async throws -> Any {
+        let machine = try await machine(request)
+        var object: [String: Any] = push
+            ? ["t": "push", "local": request.arguments[1], "path": request.arguments[2]]
+            : ["t": "pull", "path": request.arguments[1], "local": request.arguments[2]]
+        if let mode = request.option("mode") {
+            object["mode"] = mode
+        }
+        do {
+            // As long as vphone-vm's own limit on one transfer.
+            return try await VPhoneLaunchpadGuestSocket.send(object, socketPath: Self.controlSocket(machine), timeout: 2 * 60 * 60)
+        } catch let error as VPhoneLaunchpadError where error.detail?.hasPrefix("unknown command: p") == true {
+            throw VPhoneLaunchpadError(
+                "The Core Bundle \(machine.name) runs cannot copy files.",
+                detail: "guest push and guest pull need a newer VPhone.bundle. Bind the machine to one with vm set-bundle and start it again.",
+            )
+        }
     }
 
     /// vphoned's `screen.unlock`: the display on and the Lock Screen passed,
@@ -866,7 +1137,14 @@ nonisolated enum VPhoneLaunchpadGuestSocket {
             throw VPhoneLaunchpadError("The machine sent a reply that could not be read. Try again.", detail: String(decoding: response.prefix(512), as: UTF8.self))
         }
         if let dictionary = json as? [String: Any], dictionary["ok"] as? Bool == false {
-            throw VPhoneLaunchpadError("The machine refused the request. Try again.", detail: dictionary["error"] as? String)
+            // Newer bundles add vphoned's whole error object to a refused
+            // rpc; its last line is that object as JSON, for scripts.
+            let guestError = (dictionary["guest_error"] as? [String: Any]).flatMap {
+                try? JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys, .withoutEscapingSlashes])
+            }
+            let detail = [dictionary["error"] as? String, guestError.map { String(decoding: $0, as: UTF8.self) }]
+                .compactMap(\.self).joined(separator: "\n")
+            throw VPhoneLaunchpadError("The machine refused the request. Try again.", detail: detail.isEmpty ? nil : detail)
         }
         return json
     }

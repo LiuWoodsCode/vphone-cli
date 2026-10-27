@@ -12,6 +12,8 @@ enum VPhoneGuestPanel: CaseIterable {
     case crashLogs
     case services
     case controls
+    case gyroscope
+    case attitude
 
     /// The `/v1/health` capability an agent must report before the panel can
     /// talk to it. Older agents answer "Unknown method" for everything else.
@@ -22,6 +24,8 @@ enum VPhoneGuestPanel: CaseIterable {
         case .console, .crashLogs: "logs"
         case .services: "services"
         case .controls: "display"
+        case .gyroscope: "motion_gyroscope_toggle"
+        case .attitude: "motion_attitude"
         }
     }
 }
@@ -34,6 +38,10 @@ enum VPhoneGuestPanel: CaseIterable {
 final class VPhoneGuestPanelsWindowController {
     private let control: VPhoneGuestControl
     private var windows: [VPhoneGuestPanel: VPhoneGuestToolWindow] = [:]
+    private var attitudeDials: VPhoneAttitudeDialsWindowController?
+    weak var displayWindow: NSWindow? {
+        didSet { attitudeDials?.attach(to: displayWindow) }
+    }
 
     init(control: VPhoneGuestControl) {
         self.control = control
@@ -43,6 +51,14 @@ final class VPhoneGuestPanelsWindowController {
         let window = windows[panel] ?? makeWindow(panel)
         windows[panel] = window
         window.show()
+    }
+
+    func attitudeConnectionChanged() {
+        attitudeDials?.connectionChanged(control.isConnected && control.guestCapabilities.contains("motion_attitude"))
+    }
+
+    func closeAttitudeDials() {
+        attitudeDials?.close()
     }
 
     private func makeWindow(_ panel: VPhoneGuestPanel) -> VPhoneGuestToolWindow {
@@ -96,6 +112,34 @@ final class VPhoneGuestPanelsWindowController {
                 size: NSSize(width: 480, height: 640),
                 minSize: NSSize(width: 460, height: 400),
             ) { VPhoneControlsView(model: model) }
+        case .gyroscope:
+            let model = VPhoneMotionModel(
+                read: { try await control.readGyroscope() },
+                write: { try await control.setGyroscope($0) },
+            )
+            return VPhoneGuestToolWindow(
+                title: String(localized: "3D Gyroscope", bundle: VPhoneLocalization.bundle),
+                autosaveName: "vphone-panel-gyroscope",
+                size: NSSize(width: 440, height: 380),
+                minSize: NSSize(width: 400, height: 340),
+            ) { VPhoneMotionView(model: model, sensor: .gyroscope, connected: { control.isConnected }) }
+        case .attitude:
+            let model = VPhoneMotionModel(
+                ranges: VPhoneMotionSensor.attitude.ranges,
+                rejectionMessage: "Guest did not apply the attitude configuration",
+                read: { try await control.readAttitude() },
+                write: { try await control.setAttitude($0) },
+            )
+            let dials = VPhoneAttitudeDialsWindowController(model: model)
+            attitudeDials = dials
+            dials.attach(to: displayWindow)
+            attitudeConnectionChanged()
+            return VPhoneGuestToolWindow(
+                title: String(localized: "Device Attitude", bundle: VPhoneLocalization.bundle),
+                autosaveName: "vphone-panel-attitude",
+                size: NSSize(width: 480, height: 520),
+                minSize: NSSize(width: 440, height: 480),
+            ) { VPhoneMotionView(model: model, sensor: .attitude, connected: { control.isConnected }, attitudeDials: dials) }
         }
     }
 }

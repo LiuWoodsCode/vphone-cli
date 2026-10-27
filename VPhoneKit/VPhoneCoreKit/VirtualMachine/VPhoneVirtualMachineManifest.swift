@@ -110,6 +110,15 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
         unlocksAtStartup ?? false
     }
 
+    /// Whether vphone-vm forwards the Mac's location to the guest while it
+    /// runs. Missing in older manifests, which keep the Mac's location to
+    /// itself.
+    public let syncsHostLocation: Bool?
+
+    public var sharesHostLocation: Bool {
+        syncsHostLocation ?? false
+    }
+
     // MARK: - Display
 
     /// Screen configuration
@@ -202,6 +211,12 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
         /// reaches the Mac at, through a record vphoned registers with the
         /// guest's mDNSResponder. Nil means yes; see `VPhoneNetworking.plan`.
         public let resolvesMacName: Bool?
+        /// Whether, in `nat`, the guest reaches the other machines on the Mac's
+        /// shared network and they reach it, as a watch and the phone it pairs
+        /// with must. Nil means yes, except for a fixed address on the first
+        /// shared network, set before this existed; false keeps vmnet's
+        /// isolation, where each guest reaches only the Mac and beyond.
+        public let reachesPeers: Bool?
 
         public enum NetworkMode: String, Codable, Sendable {
             case nat
@@ -227,6 +242,7 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
             portForwards: [PortForward]? = nil,
             localHostName: String? = nil,
             resolvesMacName: Bool? = nil,
+            reachesPeers: Bool? = nil,
         ) {
             self.mode = mode
             self.macAddress = macAddress
@@ -235,6 +251,7 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
             self.portForwards = portForwards
             self.localHostName = localHostName
             self.resolvesMacName = resolvesMacName
+            self.reachesPeers = reachesPeers
         }
 
         /// The same configuration with one field replaced.
@@ -246,6 +263,7 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
             portForwards: [PortForward]?? = nil,
             localHostName: String?? = nil,
             resolvesMacName: Bool?? = nil,
+            reachesPeers: Bool?? = nil,
         ) -> NetworkConfig {
             NetworkConfig(
                 mode: mode ?? self.mode,
@@ -255,6 +273,7 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
                 portForwards: portForwards ?? self.portForwards,
                 localHostName: localHostName ?? self.localHostName,
                 resolvesMacName: resolvesMacName ?? self.resolvesMacName,
+                reachesPeers: reachesPeers ?? self.reachesPeers,
             )
         }
 
@@ -351,6 +370,7 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
         guestProductType: String? = nil,
         hardwareKeyboardEnabled: Bool? = nil,
         unlocksAtStartup: Bool? = nil,
+        syncsHostLocation: Bool? = nil,
     ) {
         schemaVersion = Self.currentSchemaVersion
         self.platformType = platformType
@@ -367,6 +387,7 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
         self.guestProductType = guestProductType
         self.hardwareKeyboardEnabled = hardwareKeyboardEnabled
         self.unlocksAtStartup = unlocksAtStartup
+        self.syncsHostLocation = syncsHostLocation
     }
 
     // MARK: - Creation
@@ -535,6 +556,7 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
         networkConfig: NetworkConfig? = nil,
         hardwareKeyboardEnabled: Bool? = nil,
         unlocksAtStartup: Bool? = nil,
+        syncsHostLocation: Bool? = nil,
     ) -> VPhoneVirtualMachineManifest {
         VPhoneVirtualMachineManifest(
             platformType: platformType,
@@ -551,6 +573,28 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
             guestProductType: guestProductType,
             hardwareKeyboardEnabled: hardwareKeyboardEnabled ?? self.hardwareKeyboardEnabled,
             unlocksAtStartup: unlocksAtStartup ?? self.unlocksAtStartup,
+            syncsHostLocation: syncsHostLocation ?? self.syncsHostLocation,
+        )
+    }
+
+    /// This manifest with other ROM file names.
+    public func updating(romImages: ROMImages) -> VPhoneVirtualMachineManifest {
+        VPhoneVirtualMachineManifest(
+            platformType: platformType,
+            platformFusing: platformFusing,
+            machineIdentifier: machineIdentifier,
+            cpuCount: cpuCount,
+            memorySize: memorySize,
+            screenConfig: screenConfig,
+            networkConfig: networkConfig,
+            diskImage: diskImage,
+            nvramStorage: nvramStorage,
+            romImages: romImages,
+            sepStorage: sepStorage,
+            guestProductType: guestProductType,
+            hardwareKeyboardEnabled: hardwareKeyboardEnabled,
+            unlocksAtStartup: unlocksAtStartup,
+            syncsHostLocation: syncsHostLocation,
         )
     }
 
@@ -573,6 +617,7 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
             guestProductType: device == .default ? nil : device.productType,
             hardwareKeyboardEnabled: hardwareKeyboardEnabled,
             unlocksAtStartup: unlocksAtStartup,
+            syncsHostLocation: syncsHostLocation,
         )
     }
 }

@@ -47,7 +47,26 @@
  *    (Photo/CamFixMomentCapture.m)
  *
  * 8. AVCaptureVideoDataOutput delivery for vcam sessions whose capture graph
- *    never runs. (Session/CamFixVideoDelivery.m)
+ *    never runs, at the size, orientation and pixel format the session and
+ *    connection ask for. (Session/CamFixVideoDelivery.m,
+ *    Frame/CamFixFrameGeometry.c)
+ *
+ * 9. Front-camera alias: an empty front or back device lookup gets the vcam
+ *    device, whose position follows the side asked for.
+ *    (Device/CamFixFrontCamera.m)
+ *
+ * 10. Exposure state: aperture, ISO, exposure and frame durations on the vcam
+ *     device, and the same numbers in each delivered frame's {Exif}.
+ *     (Device/CamFixExposure.m)
+ *
+ * 11. -[AVCaptureVideoDataOutput recommendedVideoSettingsForAssetWriterWithOutputFileType:]:
+ *     H.264 at the delivered size instead of 0x0.
+ *     (Session/CamFixAssetWriterSettings.m)
+ *
+ * 12. AVCaptureMovieFileOutput recording: the shm frames are written to the
+ *     requested movie file and the recording delegate gets its start and
+ *     finish callbacks, so Camera.app's VIDEO mode saves a movie.
+ *     (Movie/CamFixMovieRecording.m)
  *
  * Frames come from the vphoned shared frame file through the shared data
  * plane (Frame/CamFixFrameSource.m). Diagnostics go to the shared camera
@@ -73,6 +92,9 @@ static void cfx_install_all_hooks(void) {
     cfxlog(@"installing hooks (process=%@, pid=%d)",
            NSProcessInfo.processInfo.processName ?: @"?", getpid());
     cfx_install_setActiveFormat_hook();
+    cfx_install_front_camera_alias();
+    cfx_install_exposure_hooks();
+    cfx_install_asset_writer_settings();
     cfx_install_capturePhoto_hook();
     cfx_install_moment_capture_hooks();
     cfx_install_session_guards();
@@ -81,8 +103,14 @@ static void cfx_install_all_hooks(void) {
     cfx_install_preview_layer_hooks();
     cfx_install_photo_representation_hooks();
     cfx_install_capturerequest_stubs();
+    cfx_install_movie_recording_hooks();
+    cfx_install_video_mode_capability();
     cfx_install_remote_queue_tap();
-    cfx_start_scan_timer();
+    // The 1 Hz preview layer scan starts with the first running vcam session
+    // (Session/CamFixSessionGuards.m), not here: this hook also loads into
+    // SpringBoard, PosterBoard and every widget extension that links
+    // AVFoundation, and an always-on scan woke each of their main threads
+    // once a second to walk its whole layer tree.
   });
 }
 

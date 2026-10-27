@@ -65,15 +65,6 @@ extension DeviceTreePatcher {
         ),
         PropertyPatch(
             nodePath: ["device-tree", "product"],
-            property: "watch-companion",
-            length: 4,
-            flags: 0,
-            value: .integer(1),
-            patchID: "devicetree-cfw-watch_companion",
-            description: "Enable Apple Watch companion support"
-        ),
-        PropertyPatch(
-            nodePath: ["device-tree", "product"],
             property: "assistant",
             length: 4,
             flags: 0,

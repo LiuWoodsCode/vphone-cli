@@ -33,8 +33,19 @@ final class VPhoneApplication: NSApplication {
     /// match forwards the key to the guest as a plain Escape — which is what
     /// made the back gesture take a second press.
     private static let escapeKeyCode: UInt16 = 53
+    /// `kVK_Home`: fn-← on a Mac laptop keyboard.
+    private static let homeKeyCode: UInt16 = 0x73
 
     override func sendEvent(_ event: NSEvent) {
+        // The remote's Return/Esc are consumer Select/Menu, including while
+        // AppKit would otherwise match the Device menu's bare Escape item.
+        if (event.type == .keyDown || event.type == .keyUp),
+           event.keyCode != 49, // Space activates the focused native button.
+           event.window?.attachedSheet == nil,
+           let remote = event.window?.contentView as? VPhoneTVRemoteView,
+           remote.handleKey(event, down: event.type == .keyDown) {
+            return
+        }
         // While a sheet is up, its keys are its own: Esc must reach its
         // Cancel button, not the guest's back gesture.
         guard event.type == .keyDown || event.type == .keyUp || event.type == .flagsChanged,
@@ -66,6 +77,23 @@ final class VPhoneApplication: NSApplication {
         }
         if event.type == .flagsChanged {
             forwardGlobe(event, view: view)
+            return false
+        }
+        // No keyboard key reaches tvOS as the TV button, which goes Home on a
+        // press and opens Control Center when held. The Mac's Home key stands
+        // in for it through vphoned, held for as long as the key is.
+        if event.keyCode == Self.homeKeyCode, view.isTVGuest {
+            if event.type == .keyDown, !event.isARepeat {
+                view.control?.sendHIDDown(page: 0x0C, usage: 0x40)
+            } else if event.type == .keyUp {
+                view.control?.sendHIDUp(page: 0x0C, usage: 0x40)
+            }
+            return true
+        }
+        // tvOS consumes Escape as Back/Menu through its native keyboard.
+        // Bypass both the phone swipe and the menu equivalent, forwarding the
+        // matching press/release. Backspace remains available for text editing.
+        if event.keyCode == Self.escapeKeyCode, view.isTVGuest {
             return false
         }
         // Esc replays the guest's back gesture: iOS has no back key, and a

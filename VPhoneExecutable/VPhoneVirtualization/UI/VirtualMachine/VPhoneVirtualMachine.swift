@@ -12,8 +12,11 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
     let usesHardwareKeyboard: Bool
     /// The manifest's unlock-at-startup setting as the VM started with it.
     let unlocksAtStartup: Bool
+    /// The manifest's Sync Host Location setting as the VM started with it.
+    let syncsHostLocation: Bool
     /// ECID hex string resolved from machineIdentifier (e.g. "0x0012345678ABCDEF").
     let ecidHex: String?
+    private nonisolated let shaderCache: VPhoneShaderCache.Session?
     /// Read handle for VM serial output.
     private var serialOutputReadHandle: FileHandle?
     private var serialInputSource: DispatchSourceRead?
@@ -45,9 +48,15 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         var kernelDebugPort: Int?
         /// The guest runs iPadOS: Esc is a key there, not the back gesture.
         var isPadGuest = false
+        var isTVGuest = false
+        var isHomePodGuest = false
+        /// The guest runs watchOS: its side button is a key of its own (consumer
+        /// Help), apart from the crown (Home) and the power key.
+        var isWatchGuest = false
     }
 
     private struct DeviceIdentity {
+        let ecid: UInt64
         let cpidHex: String
         let ecidHex: String
         let udid: String
@@ -101,8 +110,19 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
 
         if let identity = Self.resolveDeviceIdentity(machineIdentifier: machineIdentifier) {
             ecidHex = identity.ecidHex
-            print("[vphone] ECID: \(ecidHex!)")
+            print("[vphone] ECID: \(identity.ecidHex)")
             print("[vphone] Predicted UDID: \(identity.udid)")
+            // The cache only saves recompiling; a VM that cannot keep one boots without it.
+            do {
+                let shaderCache = try VPhoneShaderCache.prepare(
+                    machineDirectory: options.configURL.deletingLastPathComponent(), ecid: identity.ecid,
+                )
+                self.shaderCache = shaderCache
+                print("[vphone] Shader cache: \(shaderCache.cacheURL.path)")
+            } catch {
+                shaderCache = nil
+                print("[vphone] Warning: shader cache not kept for this run: \(error.localizedDescription)")
+            }
             let outputURL = options.configURL.deletingLastPathComponent().appendingPathComponent(
                 "udid-prediction.txt",
             )
@@ -115,6 +135,7 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
             }
         } else {
             ecidHex = nil
+            shaderCache = nil
             print("[vphone] Warning: failed to resolve ECID from machineIdentifier")
         }
 
@@ -131,17 +152,11 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         platform.auxiliaryStorage = auxStorage
         platform.hardwareModel = hwModel
 
-        // Set NVRAM boot-args to enable serial output
-        let bootArgs = "serial=3 debug=0x104c04"
-        if let bootArgsData = bootArgs.data(using: .utf8) {
-            let ok =
-                Dynamic(auxStorage)
-                    ._setDataValue(bootArgsData, forNVRAMVariableNamed: "boot-args", error: nil)
-                    .asBool ?? false
-            if ok {
-                print("[vphone] NVRAM boot-args: \(bootArgs)")
-            }
-        }
+        // No boot-args are set here. The guest's come from the iBEC/LLB patch
+        // (IBootPatcher.bootArgs and extraBootArgs), applied by `cfw install`:
+        // the research iBoot reads its own NVRAM banks in this file, not the
+        // store VZMacAuxiliaryStorage writes, so an NVRAM value set from the
+        // host never reaches the guest.
 
         // --- Boot loader with custom ROM ---
         let bootloader = VZMacOSBootLoader()
@@ -183,7 +198,7 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         guard try VPhoneVirtualMachineManifest.requireRegularFileIfPresent(at: options.diskURL) else {
             throw VPhoneVirtualMachineError.diskNotFound(options.diskURL.path)
         }
-        let attachment = try VZDiskImageStorageDeviceAttachment(url: options.diskURL, readOnly: false)
+        let attachment = try VPhoneDiskAttachment.make(url: options.diskURL, readOnly: false)
         config.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
 
         // Network (mode, MAC, address and forwards from the bundle manifest)
@@ -250,6 +265,7 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         print("[vphone] Entropy device configured")
 
         unlocksAtStartup = manifest.unlocksScreenAtStartup
+        syncsHostLocation = manifest.sharesHostLocation
         usesHardwareKeyboard = manifest.usesHardwareKeyboard
         config.keyboards = usesHardwareKeyboard ? [VZUSBKeyboardConfiguration()] : []
         print("[vphone] Hardware keyboard: \(usesHardwareKeyboard ? "enabled" : "disabled")")
@@ -324,6 +340,7 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
 
     /// Cancel serial forwarding before another VM takes the same host stdin.
     func stopHostDevices() {
+        finishShaderCache()
         serialInputSource?.cancel()
         serialInputSource = nil
         serialOutputReadHandle?.readabilityHandler = nil
@@ -364,7 +381,7 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         let cpidHex = String(format: "%08X", VPhoneHardware.udidChipID)
         let ecidHex = String(format: "%016llX", ecidValue)
         let udid = "\(cpidHex)-\(ecidHex)"
-        return DeviceIdentity(cpidHex: cpidHex, ecidHex: ecidHex, udid: udid)
+        return DeviceIdentity(ecid: ecidValue, cpidHex: cpidHex, ecidHex: ecidHex, udid: udid)
     }
 
     private static func writeUDIDPrediction(identity: DeviceIdentity, to outputURL: URL) throws {
@@ -508,13 +525,21 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
     // MARK: - Delegate
 
     nonisolated func guestDidStop(_: VZVirtualMachine) {
+        finishShaderCache()
         print("[vphone] Guest stopped")
         exit(EXIT_SUCCESS)
     }
 
     nonisolated func virtualMachine(_: VZVirtualMachine, didStopWithError error: Error) {
+        finishShaderCache()
         print("[vphone] Stopped with error: \(error)")
         exit(EXIT_FAILURE)
+    }
+
+    private nonisolated func finishShaderCache() {
+        guard let shaderCache else { return }
+        do { try shaderCache.checkpoint() }
+        catch { print("[vphone] Cannot save shader cache: \(error)") }
     }
 
     nonisolated func virtualMachine(

@@ -181,7 +181,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/zsh;
-			shellScript = "set -euo pipefail\nroot=\"$(cd \"$SRCROOT/..\" && pwd)\"\n/usr/bin/env -i HOME=\"$HOME\" TMPDIR=\"${TMPDIR:-/tmp}\" PATH=\"/usr/bin:/bin:/usr/sbin:/sbin\" /usr/bin/xcodebuild -project \"$root/VPhoneExecutable/VPhoneCommand/VPhoneCommand.xcodeproj\" -scheme VPhoneSign -configuration \"$CONFIGURATION\" -destination 'generic/platform=iOS' -derivedDataPath \"$root/.build/XcodeSignGuest-$CONFIGURATION\" CODE_SIGNING_ALLOWED=NO build\n";
+			shellScript = "set -euo pipefail\nroot=\"$(cd \"$SRCROOT/..\" && pwd)\"\n# Use this build's device SDK and product suffix without requiring a simulator runtime.\n/usr/bin/env -i HOME=\"$HOME\" TMPDIR=\"${TMPDIR:-/tmp}\" PATH=\"/usr/bin:/bin:/usr/sbin:/sbin\" /usr/bin/xcodebuild -project \"$root/VPhoneExecutable/VPhoneCommand/VPhoneCommand.xcodeproj\" -scheme VPhoneSign -configuration \"$CONFIGURATION\" -sdk \"$PLATFORM_NAME\" -derivedDataPath \"$root/.build/XcodeSignGuest-$CONFIGURATION\" CODE_SIGNING_ALLOWED=NO SUPPORTS_MACCATALYST=NO EFFECTIVE_PLATFORM_NAME=\"$EFFECTIVE_PLATFORM_NAME\" build\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -226,9 +226,11 @@
 					"$(PROJECT_DIR)/Native/Include",
 				);
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				TVOS_DEPLOYMENT_TARGET = 15.0;
 				OTHER_LDFLAGS = "-ObjC";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos appletvos";
 				SKIP_INSTALL = YES;
 			};
 			name = Debug;
@@ -248,9 +250,11 @@
 					"$(PROJECT_DIR)/Native/Include",
 				);
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				TVOS_DEPLOYMENT_TARGET = 15.0;
 				OTHER_LDFLAGS = "-ObjC";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos appletvos";
 				SKIP_INSTALL = YES;
 			};
 			name = Release;
@@ -262,11 +266,17 @@
 				DEFINES_MODULE = YES;
 				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Native/Include";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
-				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../.build/XcodeSignGuest-$(CONFIGURATION)/Build/Products/$(CONFIGURATION)-iphoneos";
-				OTHER_LDFLAGS = "-lVPhoneSign";
+				TVOS_DEPLOYMENT_TARGET = 15.0;
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../.build/XcodeSignGuest-$(CONFIGURATION)/Build/Products/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)";
+				OTHER_LDFLAGS = (
+					"-lVPhoneSign",
+					"-weak_framework",
+					Vision,
+				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../.build/XcodeSignGuest-$(CONFIGURATION)/Build/Products/$(CONFIGURATION)-iphoneos";
+				SUPPORTED_PLATFORMS = "iphoneos appletvos";
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../.build/XcodeSignGuest-$(CONFIGURATION)/Build/Products/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)";
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
 			};
@@ -279,11 +289,17 @@
 				DEFINES_MODULE = YES;
 				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Native/Include";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
-				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../.build/XcodeSignGuest-$(CONFIGURATION)/Build/Products/$(CONFIGURATION)-iphoneos";
-				OTHER_LDFLAGS = "-lVPhoneSign";
+				TVOS_DEPLOYMENT_TARGET = 15.0;
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../.build/XcodeSignGuest-$(CONFIGURATION)/Build/Products/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)";
+				OTHER_LDFLAGS = (
+					"-lVPhoneSign",
+					"-weak_framework",
+					Vision,
+				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../.build/XcodeSignGuest-$(CONFIGURATION)/Build/Products/$(CONFIGURATION)-iphoneos";
+				SUPPORTED_PLATFORMS = "iphoneos appletvos";
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../.build/XcodeSignGuest-$(CONFIGURATION)/Build/Products/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)";
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
 			};
@@ -295,7 +311,9 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGNING_ALLOWED = NO;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				TVOS_DEPLOYMENT_TARGET = 15.0;
 				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos appletvos";
 				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
@@ -306,7 +324,9 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGNING_ALLOWED = NO;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				TVOS_DEPLOYMENT_TARGET = 15.0;
 				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos appletvos";
 				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
@@ -349,7 +369,7 @@
 			repositoryURL = "https://github.com/owngoal-dev/icli.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.7.16;
+				minimumVersion = 0.10.0;
 			};
 		};
 		C10000000000000000000072 /* XCRemoteSwiftPackageReference "swift-nio" */ = {

@@ -5,6 +5,7 @@
 // produced by apfs_sealvolume, and the Ap,SystemVolumeCanonicalMetadata container.
 
 import Foundation
+import VPhoneCoreKit
 import Img4tool
 
 extension CryptexFilesystemPatcher {
@@ -55,8 +56,9 @@ extension CryptexFilesystemPatcher {
     private func identifyApfsSealvolume() throws -> URL {
         let iosVersion = try getProductVersion()
         // The optional filesystem merge reads a seal tool staged inside the VM.
-        let sealDir = ProcessInfo.processInfo.environment["VPHONE_SEAL_DIR"].map { URL(fileURLWithPath: $0) }
-            ?? restoreDir.appendingPathComponent(".tools")
+        let sealDir = geteuid() == 0 ? restoreDir.appendingPathComponent(".tools")
+            : ProcessInfo.processInfo.environment["VPHONE_SEAL_DIR"].map { URL(fileURLWithPath: $0) }
+                ?? restoreDir.appendingPathComponent(".tools")
         let path = sealDir.appendingPathComponent("apfs_sealvolume_\(iosVersion)")
         guard FileManager.default.fileExists(atPath: path.path) else {
             throw FirmwareManifest.ManifestError.fileNotFound(path.path)
@@ -67,8 +69,11 @@ extension CryptexFilesystemPatcher {
         return path
     }
 
-    func createDigestAndHash(filesystem: URL, mtree: URL, remap: Bool) throws -> (URL, URL) {
-        let (device, mount) = try attachImage(path: filesystem)
+    func createDigestAndHash(filesystem: URL, mtree: URL, remap: Bool, editedSince: Date) throws -> (URL, URL) {
+        // Not mounted: apfs_sealvolume needs only the device, and a mount would
+        // change the volume after the mtree described it, so the root hash here
+        // would differ from the one the restore computes from that mtree.
+        let device = try attachImageWithoutMounting(path: filesystem)
         defer { try? detachImage(deviceNode: device) }
 
         let tmpDir = try createTmpDir()
@@ -77,10 +82,8 @@ extension CryptexFilesystemPatcher {
         let mtreeRemapPath = tmpDir.appending(path: "mtree_remap.xml")
         let sealLogPath = tmpDir.appending(path: "seal.log")
 
-        // We want to get the nanosecond timestamp of the last modification before the mtree collection.
-        // We know that we remove directories in /private/var in removeSpecificSystemFiles last.
-        // Therefore, we parse the modification time of /private/var.
-        let modificationTime = try parsePrivateVarTime(mtree: mtree)
+        // The modification time the restore will derive from the mtree.
+        let modificationTime = try remap ? parseEditTime(mtree: mtree, since: editedSince) : ""
         let remapContent = """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -96,55 +99,59 @@ extension CryptexFilesystemPatcher {
         print("Modification time: \(remap ? modificationTime : "none")")
         FileManager.default.createFile(atPath: mtreeRemapPath.path, contents: remapContent.data(using: .utf8))
 
-        try unmount(mount: mount)
         let sealvolume = try identifyApfsSealvolume()
         FileManager.default.createFile(atPath: sealLogPath.path, contents: nil)
-        _ = try runProcess(sealvolume.path, [
-            "-R", mtreeRemapPath.path,
-            "-U", digestDbPath.path, // Save digest records
-            "-M", rootHashPath.path, // Save root hash
-            device,
-        ], output: sealLogPath)
+        do {
+            _ = try runProcess(sealvolume.path, [
+                "-R", mtreeRemapPath.path,
+                "-U", digestDbPath.path, // Save digest records
+                "-M", rootHashPath.path, // Save root hash
+                device,
+            ], output: sealLogPath)
+        } catch {
+            // apfs_sealvolume says why it rejects a volume only in its log
+            // (exit 65 = EX_DATAERR), which goes with the temporary directory.
+            let log = (try? String(contentsOf: sealLogPath, encoding: .utf8)) ?? ""
+            print("apfs_sealvolume log (last 60 lines):")
+            print(log.split(separator: "\n", omittingEmptySubsequences: false).suffix(60).joined(separator: "\n"))
+            throw error
+        }
         return (digestDbPath, rootHashPath)
     }
 
-    func parsePrivateVarTime(mtree: URL) throws -> String {
+    /// The modification time of the first mtree entry edited since `since`, in
+    /// nanoseconds.
+    ///
+    /// The restore seals the volume with the time its own `mtree -m` derives,
+    /// and `mtree -m` takes it from the first entry, in walk order, whose time
+    /// differs from the mtree. The restore gets the image as it was encrypted,
+    /// before `removeSpecificSystemFiles`, so that is the first entry this run
+    /// edited afterwards: the root when removing a host `.fseventsd` edited
+    /// it, otherwise `/private/var` (`-nobrowse` mounts get no `.fseventsd`,
+    /// so the root keeps the IPSW's time). The mtree lists entries in
+    /// walk order. Any other value gives this side a root hash the restore
+    /// rejects ("Invalid root hash").
+    func parseEditTime(mtree: URL, since: Date) throws -> String {
         guard let mtreeData = FileManager.default.contents(atPath: mtree.path),
               let text = String(data: mtreeData, encoding: .utf8)
         else {
             throw FirmwareManifest.ManifestError.fileNotFound(mtree.path)
         }
-        let lines = text.split(whereSeparator: \.isNewline).map(String.init)
-
-        // Find the section header for /private/var
-        guard let sectionIndex = lines.firstIndex(of: "# ./private/var") else {
-            throw FirmwareManifest.ManifestError.fileNotFound("the /private/var entry in \(mtree.path)")
-        }
-
-        // Look at the lines after that header until the next section header
-        for line in lines[(sectionIndex + 1)...] {
-            // Stop if we hit the next section
-            if line.hasPrefix("# ./") {
-                break
+        // File times have nanoseconds, so the edits are in the second `since`
+        // falls in or later; everything before the edits is older.
+        let threshold = Int(since.timeIntervalSince1970.rounded(.down))
+        // An entry continues on the next line after a trailing backslash, so
+        // each line is searched on its own and entries need not be joined.
+        for line in text.split(whereSeparator: \.isNewline) where !line.hasPrefix("/set") {
+            guard let match = line.range(of: #"time=[0-9]+\.[0-9]+"#, options: .regularExpression) else {
+                continue
             }
-
-            // The metadata line for /private/var starts with "var "
-            guard line.hasPrefix("var ") else { continue }
-
-            // Extract time=...
-            guard let match = line.range(of: #"time=([0-9]+(?:\.[0-9]+)?)"#,
-                                         options: .regularExpression)
-            else {
-                throw FirmwareManifest.ManifestError.fileNotFound("the /private/var modification time in \(mtree.path)")
-            }
-
-            let matchedText = String(line[match])
-            return matchedText
-                .replacingOccurrences(of: "time=", with: "")
-                .replacingOccurrences(of: ".", with: "")
+            let value = line[match].dropFirst("time=".count)
+            let parts = value.split(separator: ".")
+            guard let seconds = Int(parts[0]), seconds >= threshold else { continue }
+            return parts.joined()
         }
-
-        throw FirmwareManifest.ManifestError.fileNotFound("the /private/var entry in \(mtree.path)")
+        throw FirmwareManifest.ManifestError.fileNotFound("an entry edited since \(since) in \(mtree.path)")
     }
 
     func createMtree(filesystem: URL) throws -> URL {
@@ -166,15 +173,22 @@ extension CryptexFilesystemPatcher {
         defer { try? detachImage(deviceNode: device) }
 
         let removedPaths = [
-            "/private/var/MobileAsset/PreinstalledAssets",
-            "/private/var/MobileAsset/PreinstalledAssetsV2",
-            "/private/var/staged_system_apps",
+            "private/var/MobileAsset/PreinstalledAssets",
+            "private/var/MobileAsset/PreinstalledAssetsV2",
+            "private/var/staged_system_apps",
         ]
+        try removeHostEventLog(mount: mount)
+        let directory = try VPhoneConfinedDirectory.pin(absolutePath: mount)
         var didEdit = false
         for path in removedPaths {
-            if FileManager.default.fileExists(atPath: mount.appending(path)) {
-                try FileManager.default.removeItem(atPath: mount.appending(path))
-                didEdit = true
+            do {
+                if try directory.exists(path) {
+                    try directory.removeItem(path)
+                    didEdit = true
+                }
+            } catch VPhoneConfinedDirectoryError.missing {
+                // Some guest families have no MobileAsset directory at all.
+                continue
             }
         }
         return didEdit

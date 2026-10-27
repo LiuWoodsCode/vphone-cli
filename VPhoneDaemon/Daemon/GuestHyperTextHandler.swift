@@ -121,7 +121,7 @@ final class GuestHyperTextHandler: ChannelInboundHandler, RemovableChannelHandle
             Self.send(APIWire.error("Port must be a decimal number from 1 to 65535"), on: channel)
             return
         }
-        if path == "/v1/events" || path.hasPrefix("/v1/ports/") {
+        if path == "/v1/events" || path == "/v1/shell" || path.hasPrefix("/v1/ports/") {
             Self.send(APIWire.error("WebSocket upgrade required", status: 426), on: channel)
             return
         }
@@ -237,6 +237,8 @@ final class GuestHyperTextHandler: ChannelInboundHandler, RemovableChannelHandle
         case (.POST, "/v1/bootstrap/firmware"): "bootstrap.firmware"
         case (.POST, "/v1/input/touch"): "input.touch"
         case (.POST, "/v1/input/touch2"): "input.touch2"
+        case (.POST, "/v1/input/pointer"): "input.pointer"
+        case (.POST, "/v1/input/scroll"): "input.scroll"
         case (.POST, "/v1/input/hid"): "input.hid"
         case (.GET, "/v1/location"): "location.current"
         case (.PUT, "/v1/location"): "location.set"
@@ -245,6 +247,7 @@ final class GuestHyperTextHandler: ChannelInboundHandler, RemovableChannelHandle
         case (.POST, "/v1/developer-mode/enable"): "developer_mode.enable"
         case (.GET, "/v1/low-power-mode"), (.PUT, "/v1/low-power-mode"): "power.low_power_mode"
         case (.GET, "/v1/timezone"), (.PUT, "/v1/timezone"): "time.timezone"
+        case (.GET, "/v1/clock"), (.PUT, "/v1/clock"): "time.clock"
         case (.GET, "/v1/clipboard"), (.PUT, "/v1/clipboard"): verb == .GET ? "clipboard.get" : "clipboard.set"
         case (.DELETE, "/v1/clipboard"): "clipboard.clear"
         case (.GET, "/v1/files"): "files.list"

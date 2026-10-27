@@ -1,4 +1,4 @@
-#include "Include/VphonedNative.h"
+#include "vphoned_session.h"
 
 #include <crt_externs.h>
 #include <errno.h>
@@ -36,6 +36,7 @@ static int worker_fd(void) {
 int vp_native_process_mode(void) {
     int argc = *_NSGetArgc();
     if (argc == 1) return 0;
+    if (vp_session_arguments_present()) return 2;
     return worker_fd() >= 0 ? 1 : -1;
 }
 
@@ -96,15 +97,15 @@ int vp_native_run_proxy(void) {
         int pipe_fds[2];
         if (pipe(pipe_fds) != 0) return 1;
         posix_spawn_file_actions_t file_actions;
-        int error = posix_spawn_file_actions_init(&file_actions);
+        int error = vp_spawn_file_actions_init(&file_actions);
         if (error != 0) {
             close(pipe_fds[0]);
             close(pipe_fds[1]);
             return 1;
         }
-        error = posix_spawn_file_actions_addclose(&file_actions, pipe_fds[1]);
+        error = vp_spawn_file_actions_addclose(&file_actions, pipe_fds[1]);
         if (error != 0) {
-            posix_spawn_file_actions_destroy(&file_actions);
+            vp_spawn_file_actions_destroy(&file_actions);
             close(pipe_fds[0]);
             close(pipe_fds[1]);
             return 1;
@@ -114,8 +115,8 @@ int vp_native_run_proxy(void) {
         snprintf(fd_argument, sizeof(fd_argument), "%d", pipe_fds[0]);
         char *arguments[] = {executable, "--io", fd_argument, NULL};
         pid_t child = -1;
-        error = posix_spawn(&child, executable, &file_actions, NULL, arguments, environ);
-        posix_spawn_file_actions_destroy(&file_actions);
+        error = vp_spawn(&child, executable, &file_actions, NULL, arguments, environ);
+        vp_spawn_file_actions_destroy(&file_actions);
         close(pipe_fds[0]);
         if (error != 0) {
             fprintf(stderr, "vphoned proxy: posix_spawn failed: %s\n", strerror(error));

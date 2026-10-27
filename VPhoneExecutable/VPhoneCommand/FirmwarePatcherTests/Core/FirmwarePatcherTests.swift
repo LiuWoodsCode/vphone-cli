@@ -2,7 +2,9 @@
 
 @testable import FirmwarePatcher
 import Foundation
+import Img4tool
 import Testing
+import VPhoneCoreKit
 import VPhonePatchKit
 
 struct ARM64ConstantTests {
@@ -547,7 +549,30 @@ struct IM4PPayloadParityTests {
 
         let (roundTripPayload, _) = try IM4PHandler.load(contentsOf: tempURL)
         #expect(roundTripPayload == payload)
-        #expect(try (Data(contentsOf: tempURL)).count > originalFile.count)
+        // Written back LZFSE-compressed, as Apple ships it: OpenAVB decodes
+        // nothing else.
+        #expect(originalFile.range(of: Data("bvx2".utf8)) != nil)
+        #expect(try Data(contentsOf: tempURL).range(of: Data("bvx2".utf8)) != nil)
+    }
+
+    @Test func `iBSS is saved LZFSE-compressed and other images as they were`() throws {
+        let payload = Data((0 ..< 200_000).map { UInt8(truncatingIfNeeded: $0 >> 5) })
+        let marker = Data("bvx2".utf8)
+        for fourcc in ["ibss", "ibec", "illb"] {
+            let original = try IM4P(fourcc: fourcc, description: "iBoot-13822", payload: payload)
+            let url = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("im4p")
+            defer { try? FileManager.default.removeItem(at: url) }
+
+            try IM4PHandler.save(patchedData: payload, originalIM4P: original, to: url)
+
+            let saved = try Data(contentsOf: url)
+            #expect((saved.range(of: marker) != nil) == (fourcc == "ibss"), "\(fourcc)")
+            let (roundTrip, container) = try IM4PHandler.load(contentsOf: url)
+            #expect(roundTrip == payload, "\(fourcc)")
+            #expect(container?.fourcc == fourcc)
+        }
     }
 
     @Test func `saving TXMIM 4 P preserves PAYP trailer`() throws {
@@ -583,7 +608,7 @@ struct FirmwarePipelineTests {
     @Test func `public JB includes the former EXP device tree patchers, not the hv_vmm rename`() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
         let pipeline = FirmwarePipeline(vmDirectory: root, variant: .jb, verbose: false)
-        let components = pipeline.buildComponentList(
+        let components = try pipeline.buildComponentList(
             restoreDir: root,
             iOSBase: VPhoneVersion("27.0"),
         )
@@ -604,6 +629,29 @@ struct FirmwarePipelineTests {
         #expect(components.first { $0.name == "Manifest" }?.patcherFactories.isEmpty == true)
     }
 
+    @Test func `the minimal preset builds no kernel or TXM patcher`() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        func patched(_ preset: VPhonePatchPreset) throws -> [String] {
+            let plan = try VPhonePatchPlan.resolve(
+                preset: preset,
+                patchSets: FirmwarePatchSetCatalog.bundled,
+                iOSBase: VPhoneVersion("26.4"),
+                cloudOS: VPhoneVersion("26.4"),
+            )
+            let pipeline = FirmwarePipeline(vmDirectory: root, variant: .jb, verbose: false)
+            return try pipeline.buildComponentList(restoreDir: root, iOSBase: VPhoneVersion("26.4"), plan: plan)
+                .filter { !$0.patcherFactories.isEmpty }
+                .map(\.name)
+        }
+        let minimal = try patched(FirmwarePatchSetCatalog.minimalPreset)
+        #expect(!minimal.contains("kernelcache"))
+        #expect(!minimal.contains("TXM"))
+        #expect(Set(["iBEC", "LLB", "DeviceTree", "Filesystem", "Manifest"]).isSubset(of: Set(minimal)))
+        let standard = try patched(FirmwarePatchSetCatalog.standardPreset)
+        #expect(!standard.contains("Filesystem"))
+        #expect(!standard.contains("Manifest"))
+    }
+
     @Test func `standard turns the paravirtual user-client allowlist on before 27`() throws {
         // The flag the kernel CFW patcher is built with, from the standard plan and
         // from the no-plan fallback, which has to give the same answer.
@@ -617,7 +665,7 @@ struct FirmwarePipelineTests {
                 preset: standard ? FirmwarePatchSetCatalog.standardPreset : nil,
             )
             let plan = try pipeline.resolvePlan(iOSBase: version, cloudOS: VPhoneVersion("26.4"))
-            let components = pipeline.buildComponentList(
+            let components = try pipeline.buildComponentList(
                 restoreDir: root,
                 iOSBase: version,
                 plan: plan,
@@ -635,6 +683,63 @@ struct FirmwarePipelineTests {
             #expect(try !flag("27.0", standard: standard))
             #expect(try !flag(nil, standard: standard))
         }
+    }
+
+    @Test func `standard turns ProMotion on unless the VM blocks it`() throws {
+        // From the standard plan and from the no-plan fallback, on every base.
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        func flag(_ base: String?, standard: Bool, blocked: Set<String> = []) throws -> Bool {
+            let version = VPhoneVersion(base)
+            let pipeline = FirmwarePipeline(
+                vmDirectory: root,
+                variant: .jb,
+                verbose: false,
+                preset: standard ? FirmwarePatchSetCatalog.standardPreset : nil,
+                blockedPatches: blocked,
+            )
+            let plan = try pipeline.resolvePlan(iOSBase: version, cloudOS: VPhoneVersion("26.4"))
+            let components = try pipeline.buildComponentList(
+                restoreDir: root,
+                iOSBase: version,
+                plan: plan,
+                gate: plan.map { VPhonePatchGate(plan: $0) } ?? .unrestricted,
+            )
+            let kernel = try #require(components.first { $0.name == "kernelcache" })
+            let patcher = try #require(
+                kernel.patcherFactories.lazy.compactMap { try? $0(Data(), false) as? KernelCustomFirmwarePatcher }.first,
+            )
+            return patcher.applyProMotion
+        }
+        for base in ["18.6.2", "26.6.2", "27.0", nil] {
+            for standard in [true, false] {
+                #expect(try flag(base, standard: standard))
+            }
+            #expect(try !flag(base, standard: true, blocked: [FirmwarePatchSetCatalog.proMotionPatch]))
+        }
+    }
+
+    @Test func `a machine booting OpenAVB has no AVPBooter component to patch`() throws {
+        let fm = FileManager.default
+        let vm = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: vm, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: vm) }
+        // An Apple ROM stays in the folder after a switch; it is not the one that boots.
+        try Data([0xAA]).write(to: vm.appendingPathComponent("AVPBooter.vresearch1.bin"))
+        try Data("OpenBootROM: SEP bootstrap complete\n".utf8).write(to: vm.appendingPathComponent("OpenAVB.bin"))
+
+        func components(booting rom: String) throws -> [String] {
+            try VPhoneVirtualMachineManifest(
+                cpuCount: 2,
+                memorySize: 2 << 30,
+                romImages: .init(avpBooter: rom, avpSEPBooter: "AVPSEPBooter.vresearch1.bin"),
+            ).write(to: vm.appendingPathComponent("config.plist"))
+            let pipeline = FirmwarePipeline(vmDirectory: vm, variant: .jb, verbose: false)
+            return try pipeline.buildComponentList(restoreDir: vm, iOSBase: VPhoneVersion("26.6.2")).map(\.name)
+        }
+
+        #expect(try !components(booting: "OpenAVB.bin").contains("AVPBooter"))
+        #expect(try components(booting: "OpenAVB.bin").first == "iBSS")
+        #expect(try components(booting: "AVPBooter.vresearch1.bin").first == "AVPBooter")
     }
 
     @Test func `find file supports glob patterns`() throws {

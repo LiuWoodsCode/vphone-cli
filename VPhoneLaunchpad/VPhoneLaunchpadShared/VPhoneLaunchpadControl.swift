@@ -69,13 +69,25 @@ nonisolated struct VPhoneLaunchpadControlRequest: Codable, Sendable {
     var arguments: [String] = []
     /// Valued options by name; a flag that is set has the value "true".
     var options: [String: String] = [:]
+    /// Repeatable options (`--block a --block b`) by name, in the order
+    /// given. Optional, so a request without them still decodes.
+    var repeated: [String: [String]]?
 
     func option(_ name: String) -> String? {
         options[name]
     }
 
+    /// Where `vm create --kmutil-ssh` carries the builder's password, which
+    /// vphone-launchpad-cli reads from its environment: no argument holds it.
+    static let kmutilSSHPasswordOption = "kmutil-ssh-password"
+
     func flag(_ name: String) -> Bool {
         options[name] == "true"
+    }
+
+    /// Every value of a repeatable option; empty when it was not given.
+    func values(_ name: String) -> [String] {
+        repeated?[name] ?? []
     }
 }
 
@@ -121,11 +133,13 @@ nonisolated struct VPhoneLaunchpadControlCommand: Sendable {
     let options: [String]
     /// Options without a value.
     let flags: [String]
+    /// Options that take a value and may be given more than once.
+    var repeated: [String] = []
     let summary: String
 
     var usage: String {
         let positional = arguments.map { "<\($0)>" }
-        let named = options.map { "[--\($0) <value>]" } + flags.map { "[--\($0)]" }
+        let named = options.map { "[--\($0) <value>]" } + repeated.map { "[--\($0) <value>]..." } + flags.map { "[--\($0)]" }
         // exec reads its options only before the arguments it passes on.
         let parts = name == "exec" ? named + positional : positional + named
         return ([name.replacingOccurrences(of: ".", with: " ")] + parts).joined(separator: " ")
@@ -167,9 +181,10 @@ nonisolated struct VPhoneLaunchpadControlCommand: Sendable {
         Self(name: "vm.log", arguments: ["name"], options: ["root", "lines", "kind"], flags: [],
              summary: "The last lines of the console log (--kind create, dfu or patch for those logs)."),
         Self(name: "vm.create", arguments: ["name"], options: [
-            "root", "bundle", "iphone-source", "cloudos-source", "device", "cpu", "memory", "disk-size", "network", "preset", "from",
-        ], flags: ["keep-artifacts", "no-wait"],
-        summary: "Create a machine through every step, as New Machine does, bound to --bundle (default: the default bundle). --from <step> retries a failed creation from that step."),
+            "root", "bundle", "iphone-source", "cloudos-source", "device", "cpu", "memory", "disk-size", "network", "preset", "from", "ipsw", "kmutil-ssh",
+            "slim", "trim", "keep-languages", "service-profile", "remove-apps", "keep-apps",
+        ], flags: ["keep-artifacts", "no-wait", "no-template", "accounts-off"], repeated: ["block", "allow"],
+        summary: "Create a machine through every step, as New Machine does, bound to --bundle (default: the default bundle): cloned from a template, built first when missing, or restored on its own with --no-template. --block and --allow turn one patch of --preset off or on, as New Machine's patch list and vphone-cli fw set-patches do: boot-chain ones go into the template, guest ones are applied to the clone. --slim, --trim, --keep-languages, --service-profile, --remove-apps, --keep-apps and --accounts-off shape the template, as in vphone-cli vm create. --ipsw <path> is the ipsw a 2.12.0 bundle stages a kernelcache mix with, as New Machine's ipsw field; a 2.12.1 bundle extracts natively and needs none. --kmutil-ssh <user@host> links an iOS 18 guest's kernel-first mix on that Mac over ssh, as New Machine's macOS builder field, with the password (for ssh and sudo there) from this tool's VPHONE_KMUTIL_SSH_PASSWORD. --from <step> retries a failed creation from that step, with the options it started with."),
         Self(name: "vm.set-bundle", arguments: ["name", "version"], options: ["root"], flags: ["update-environment"],
              summary: "Bind a machine to another installed version; its host programs change at the next start. --update-environment also redeploys that version's guest environment into the stopped machine. The boot chain stays as created."),
         Self(name: "vm.leases", arguments: [], options: [], flags: ["release"],
@@ -187,6 +202,10 @@ nonisolated struct VPhoneLaunchpadControlCommand: Sendable {
              summary: "Send one raw vphone.sock request, such as {\"t\":\"tap\",\"x\":645,\"y\":1398}."),
         Self(name: "guest.rpc", arguments: ["name", "method", "params..."], options: ["root"], flags: ["screen"],
              summary: "Call a vphoned method; params is one JSON object."),
+        Self(name: "guest.push", arguments: ["name", "local", "path"], options: ["root", "mode"], flags: [],
+             summary: "Copy a file from this Mac into the guest, streamed, any size. A path ending in / keeps the file's name; --mode is octal, the Mac file's permissions by default."),
+        Self(name: "guest.pull", arguments: ["name", "path", "local"], options: ["root"], flags: [],
+             summary: "Copy a file from the guest to this Mac, streamed, any size. local may be a folder; the file replaces it only once complete."),
         Self(name: "guest.unlock", arguments: ["name"], options: ["root", "passcode", "timeout"], flags: [],
              summary: "Turn the screen on and unlock the guest (vphoned screen.unlock). --passcode enters the passcode of a guest that has one; --timeout is in seconds, 10 by default."),
 
@@ -196,5 +215,120 @@ nonisolated struct VPhoneLaunchpadControlCommand: Sendable {
 
     static func named(_ name: String) -> Self? {
         all.first { $0.name == name }
+    }
+}
+
+// MARK: - Parsing
+
+/// Why `vphone-launchpad-cli` cannot send a command line: printed as
+/// `error: <message>`, then the detail.
+nonisolated struct VPhoneLaunchpadControlUsageError: Error, Equatable {
+    var message: String
+    var detail: String?
+}
+
+extension VPhoneLaunchpadControlRequest {
+    /// The request for the words after `vphone-launchpad-cli`. `foreground`
+    /// is set when `--foreground` is among a command's options.
+    static func parse(_ words: [String], foreground: inout Bool) throws(VPhoneLaunchpadControlUsageError) -> Self {
+        typealias Failure = VPhoneLaunchpadControlUsageError
+        guard let first = words.first else {
+            throw Failure(message: "no command. Run vphone-launchpad-cli help.")
+        }
+        // Two words name a grouped command ("vm start"), one word the others.
+        var rest = words
+        var command: VPhoneLaunchpadControlCommand?
+        if rest.count >= 2, let grouped = VPhoneLaunchpadControlCommand.named("\(rest[0]).\(rest[1])") {
+            command = grouped
+            rest.removeFirst(2)
+        } else if let single = VPhoneLaunchpadControlCommand.named(first) {
+            command = single
+            rest.removeFirst()
+        }
+        guard let command else {
+            let group = VPhoneLaunchpadControlCommand.all.filter { $0.name.hasPrefix("\(first).") }
+            if !group.isEmpty {
+                throw Failure(message: "\(first) needs a command.", detail: group.map { "  \($0.usage)" }.joined(separator: "\n"))
+            }
+            throw Failure(message: "unknown command \(words.prefix(2).joined(separator: " ")). Run vphone-launchpad-cli help.")
+        }
+        var request = Self(command: command.name)
+        // exec hands everything after it to vphone-cli untouched, except a
+        // leading --bundle that picks whose vphone-cli runs.
+        if command.name == "exec" {
+            if let first = rest.first, first == "--bundle" || first.hasPrefix("--bundle=") {
+                rest.removeFirst()
+                if first == "--bundle" {
+                    guard !rest.isEmpty else {
+                        throw Failure(message: "--bundle needs a value.")
+                    }
+                    request.options["bundle"] = rest.removeFirst()
+                } else {
+                    request.options["bundle"] = String(first.dropFirst("--bundle=".count))
+                }
+            }
+            request.arguments = rest
+            return request
+        }
+
+        var positional: [String] = []
+        var repeated: [String: [String]] = [:]
+        var index = 0
+        while index < rest.count {
+            let word = rest[index]
+            index += 1
+            if word == "--" {
+                positional += rest[index...]
+                break
+            }
+            guard word.hasPrefix("--"), word.count > 2 else {
+                positional.append(word)
+                continue
+            }
+            var name = String(word.dropFirst(2))
+            var value: String?
+            if let equals = name.firstIndex(of: "=") {
+                value = String(name[name.index(after: equals)...])
+                name = String(name[..<equals])
+            }
+            if name == "foreground", value == nil {
+                foreground = true
+            } else if command.flags.contains(name), value == nil {
+                request.options[name] = "true"
+            } else if command.options.contains(name) || command.repeated.contains(name) {
+                if value == nil, index < rest.count {
+                    value = rest[index]
+                    index += 1
+                }
+                guard let value else {
+                    throw Failure(message: "--\(name) needs a value.")
+                }
+                if command.repeated.contains(name) {
+                    repeated[name, default: []].append(value)
+                } else {
+                    request.options[name] = value
+                }
+            } else {
+                throw Failure(message: "unknown option --\(name).", detail: "usage: vphone-launchpad-cli \(command.usage)")
+            }
+        }
+
+        // A trailing `...` argument may be empty.
+        let named = command.takesRest ? command.arguments.count - 1 : command.arguments.count
+        guard positional.count >= named, command.takesRest || positional.count == named else {
+            throw Failure(message: "wrong number of arguments.", detail: "usage: vphone-launchpad-cli \(command.usage)")
+        }
+        // The app runs elsewhere; a relative path means nothing to it.
+        if let index = ["bundle.install-local": 0, "guest.push": 1, "guest.pull": 2][command.name] {
+            positional[index] = URL(fileURLWithPath: positional[index]).standardizedFileURL.path
+        }
+        if let root = request.options["root"] {
+            request.options["root"] = URL(fileURLWithPath: root).standardizedFileURL.path
+        }
+        request.arguments = positional
+        if !repeated.isEmpty {
+            request.repeated = repeated
+        }
+        return request
     }
 }

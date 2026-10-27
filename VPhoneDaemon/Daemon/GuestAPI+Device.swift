@@ -6,6 +6,8 @@ import VphonedNative
 // MARK: - Device, Display, Audio, Network
 
 extension GuestAPI {
+    private static let rotationLock = NSLock()
+
     static func executeDevice(_ method: String, _ params: [String: Any]) throws -> [String: Any]? {
         switch method {
         case "device.info":
@@ -19,6 +21,7 @@ extension GuestAPI {
             info["low_power_mode"] = (try? lowPowerMode()) ?? [:]
             info["developer_mode"] = (try? developerModeStatus()) ?? [:]
             info["agent"] = ["binary_hash": binaryHash, "pid": getpid()]
+            info["device_name"] = deviceNameInfo()
             return info
         case "device.network":
             return networkInfo()
@@ -47,6 +50,15 @@ extension GuestAPI {
         case "network.hostname.set":
             // An absent or null name puts back the one vphoned replaced.
             return try networkHostName(set: .some(params["local_host_name"] as? String))
+        case "device.name.get":
+            return deviceNameState()
+        case "device.name.set":
+            // An absent or null name gives the guest its own back.
+            let name = params["name"].flatMap { $0 is NSNull ? nil : $0 }
+            guard name == nil || name is String else {
+                throw GuestAPIError.invalidRequest("name must be a string or null")
+            }
+            return try setDeviceName(name as? String)
         case "device.ioreg":
             return try ioregistry(plane: optionalString(params, "plane") ?? "IOService")
         case "device.environment":
@@ -59,10 +71,41 @@ extension GuestAPI {
             }
             return brightnessState()
         case "display.rotation":
+            rotationLock.lock()
+            defer { rotationLock.unlock() }
             if let orientation = optionalString(params, "orientation") {
-                return try setRotation(orientation)
+                // Preserve the physical pose across SpringBoard relaunches.
+                // CoreMotion's app pose provider cannot feed this HID sink.
+                let accelerometer = vp_accelerometer_get()
+                let previousPose = (accelerometer["degrees"] as? NSNumber).map { String($0.intValue) }
+                let publishesPose = accelerometer["provider_running"] as? Bool == true
+                let previousInterface = interfaceRotationDegrees()
+                if publishesPose {
+                    guard vp_accelerometer_set_orientation(orientation) else {
+                        throw GuestAPIError.operationFailed("Could not publish the accelerometer orientation")
+                    }
+                }
+                do {
+                    return try setRotation(orientation)
+                } catch {
+                    // A refused rotation leaves the guest as it was. The pose
+                    // is persisted, and a refused request still turns iPadOS's
+                    // pointer: with the screen off, an upside-down request
+                    // left the interface portrait and the pointer upside down,
+                    // so the mouse ran backwards. Asking again for the
+                    // interface's own orientation turns the pointer back.
+                    if publishesPose, let previousPose {
+                        _ = vp_accelerometer_set_orientation(previousPose)
+                    }
+                    if let previousInterface {
+                        _ = try? setRotation(String(previousInterface))
+                    }
+                    throw error
+                }
             }
-            return rotationInfo()
+            var rotation = rotationInfo()
+            rotation["accelerometer"] = vp_accelerometer_get()
+            return rotation
         case "display.orientation":
             return interfaceOrientation()
         case "display.rotation_lock":
@@ -72,6 +115,11 @@ extension GuestAPI {
             return try setRotationLock(locked)
         case "display.auto_lock":
             return GuestLockScreenIdle.describe()
+        case "display.auto_lock.set":
+            guard let seconds = (params["seconds"] as? NSNumber)?.intValue else {
+                throw GuestAPIError.invalidRequest("seconds must be an integer")
+            }
+            return try GuestLockScreenIdle.setAutoLockSeconds(seconds)
         case "screen.unlock":
             return try GuestScreenUnlock.unlock(
                 passcode: optionalString(params, "passcode"),
@@ -106,16 +154,12 @@ extension GuestAPI {
         }
     }
 
-    /// The interface orientation in `display.rotation`'s degrees, cheap
-    /// enough for the host to ask every second. SpringBoard is asked
-    /// directly; `rotationInfo()` captures the screen, and is only the
-    /// fallback when SpringBoard does not answer.
+    /// Reads SpringBoard directly; the UIScreen path can abort before display registration.
     private static func interfaceOrientation() -> [String: Any] {
-        if let degrees = interfaceRotationDegrees() {
-            return ["degrees": degrees, "source": "springboard"]
-        }
-        let degrees = (rotationInfo()["degrees"] as? NSNumber)?.intValue ?? 0
-        return ["degrees": degrees, "source": "screen"]
+        [
+            "degrees": interfaceRotationDegrees().map { $0 as Any } ?? NSNull(),
+            "source": "springboard",
+        ]
     }
 
     private static func brightnessState() -> [String: Any] {
@@ -167,6 +211,121 @@ extension GuestAPI {
             throw GuestAPIError.operationFailed(error.map(String.init) ?? "host name change failed")
         }
         return result
+    }
+}
+
+// MARK: - Device name
+
+/// The device name the host pins: what Xcode, devicectl and Finder show.
+/// `libdevicename.dylib` in configd and lockdownd reads it from
+/// `deviceNameConfigPath` (see `Research/Guest/device_name_pinning.md`):
+/// configd publishes it as `Setup:/System`'s ComputerName and lockdownd refuses
+/// every rename. The guest's own name stays in preferences.plist.
+///
+/// The file outlives a reboot, so configd's first publication at boot already
+/// carries the name. A change applies at once: both daemons check the file on
+/// every decision, and applying the preferences unchanged makes configd's
+/// preferences monitor publish again.
+extension GuestAPI {
+    /// Must match `VP_DEVICE_NAME_CONFIG_PATH` and `VP_DEVICE_NAME_CONFIG_KEY`
+    /// in `VPhoneGuestComponents/DeviceName/DeviceNamePolicy.h`.
+    static let deviceNameConfigPath = "/var/db/vphone/devicename.plist"
+    static let deviceNameConfigKey = "DeviceName"
+    /// What lockdownd posts after a rename; lockdown clients read the name again.
+    static let deviceNameChangedNotification = "com.apple.mobile.lockdown.device_name_changed"
+
+    /// `{name}`: the pinned name, or null when the guest shows its own.
+    static func deviceNameState() -> [String: Any] {
+        ["name": storedDeviceName() ?? NSNull()]
+    }
+
+    /// Pin `name`, or with nil give the guest its own back. Returns the state
+    /// plus `changed` and `reboot_required`: lockdown readers (Finder,
+    /// `ideviceinfo`, `idevicename`) follow a change at once, but CoreDevice (Xcode,
+    /// `devicectl`) reads the name once per handshake and the DHCP lease keeps
+    /// the host name it was requested with, so both show the new name only
+    /// after the guest restarts. A clone of a template boots with the
+    /// template's pin until `vphone-vm` connects and sets its own.
+    static func setDeviceName(_ name: String?) throws -> [String: Any] {
+        if let name {
+            try validateDeviceName(name)
+        }
+        let changed = storedDeviceName() != name
+        if changed {
+            try writeDeviceName(name)
+            guard storedDeviceName() == name else {
+                throw GuestAPIError.operationFailed("\(deviceNameConfigPath) did not read back as written")
+            }
+            var error: NSString?
+            guard vp_preferences_apply(&error) else {
+                throw GuestAPIError.operationFailed(
+                    "The name is stored but configd was not asked to publish it: \(error.map(String.init) ?? "apply failed")",
+                )
+            }
+            _ = try? postDarwinNotification(deviceNameChangedNotification, state: nil)
+        }
+        var state = deviceNameState()
+        state["changed"] = changed
+        state["reboot_required"] = changed
+        return state
+    }
+
+    /// For `device.info`: the pinned name, and the guest's own ComputerName in
+    /// configd's preferences, which a clone inherits from its template. Two
+    /// small file reads.
+    static func deviceNameInfo() -> [String: Any] {
+        let path = "/private/var/preferences/SystemConfiguration/preferences.plist"
+        let preferences = FileManager.default.contents(atPath: path).flatMap {
+            try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any]
+        }
+        let system = (preferences?["System"] as? [String: Any])?["System"] as? [String: Any]
+        return [
+            "name": storedDeviceName() ?? NSNull(),
+            "own_name": system?["ComputerName"] as? String ?? NSNull(),
+        ]
+    }
+
+    /// `GuestDeviceNameRule`: not blank, at most 255 UTF-8 bytes, no control
+    /// character.
+    private static func validateDeviceName(_ name: String) throws {
+        if let problem = GuestDeviceNameRule.problem(name) {
+            throw GuestAPIError.invalidRequest(problem)
+        }
+    }
+
+    private static func storedDeviceName() -> String? {
+        guard let data = FileManager.default.contents(atPath: deviceNameConfigPath),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let name = plist[deviceNameConfigKey] as? String, !name.isEmpty
+        else { return nil }
+        return name
+    }
+
+    /// Replaces the file in one rename, which is what the hook's stamp check
+    /// expects, or removes it.
+    private static func writeDeviceName(_ name: String?) throws {
+        guard let name else {
+            if unlink(deviceNameConfigPath) != 0, errno != ENOENT {
+                throw GuestAPIError.operationFailed("Could not remove \(deviceNameConfigPath): \(String(cString: strerror(errno)))")
+            }
+            return
+        }
+        let directory = (deviceNameConfigPath as NSString).deletingLastPathComponent
+        do {
+            try FileManager.default.createDirectory(
+                atPath: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o755],
+            )
+            let data = try PropertyListSerialization.data(
+                fromPropertyList: [deviceNameConfigKey: name], format: .binary, options: 0,
+            )
+            try data.write(to: URL(fileURLWithPath: deviceNameConfigPath), options: .atomic)
+        } catch {
+            throw GuestAPIError.operationFailed("Could not write \(deviceNameConfigPath): \(error.localizedDescription)")
+        }
+        // World-readable: the hooks only ever read it.
+        chmod(deviceNameConfigPath, 0o644)
     }
 }
 

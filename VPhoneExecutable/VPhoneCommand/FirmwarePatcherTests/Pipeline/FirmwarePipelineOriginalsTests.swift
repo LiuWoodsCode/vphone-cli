@@ -17,6 +17,7 @@
 @testable import FirmwarePatcher
 import Foundation
 import Testing
+import VPhoneCoreKit
 import VPhonePatchKit
 
 // MARK: - Harness
@@ -114,6 +115,30 @@ private struct FakeVM {
 // MARK: - Tests
 
 struct FirmwarePipelineOriginalsTests {
+    @Test(arguments: [VPhoneGuestDevice.appleTV14_1, .appleTV18_1])
+    func `patch discovery preserves each OTA board over the HD restore manifest`(device: VPhoneGuestDevice) throws {
+        let vm = try FakeVM()
+        defer { vm.remove() }
+        let manifest: [String: Any] = [
+            "SupportedProductTypes": ["AppleTV5,3"],
+            "ProductVersion": "26.6",
+            "ProductBuildVersion": "23L773",
+        ]
+        try PropertyListSerialization.data(fromPropertyList: manifest, format: .xml, options: 0)
+            .write(to: vm.restoreDir.appendingPathComponent("iPhone-BuildManifest.plist"))
+        try VPhoneVirtualMachineManifest.newVM().updating(guestDevice: device)
+            .write(to: vm.root.appendingPathComponent("config.plist"))
+        #expect(vm.pipeline().readGuestDevice(vm.restoreDir) == device)
+        let ota = ["ProductVersion": "27.2", "ProductBuildVersion": "24K120"]
+        try PropertyListSerialization.data(fromPropertyList: ota, format: .xml, options: 0)
+            .write(to: vm.restoreDir.appendingPathComponent(FirmwarePipeline.otaVersionFileName))
+        #expect(FirmwarePipeline.readBaseProductVersion(vm.restoreDir) == "27.2")
+        // An IPSW-backed board still follows the manifest when it disagrees.
+        try VPhoneVirtualMachineManifest.newVM().updating(guestDevice: .iPad16_1)
+            .write(to: vm.root.appendingPathComponent("config.plist"))
+        #expect(vm.pipeline().readGuestDevice(vm.restoreDir) == .appleTV5_3)
+    }
+
     @Test func `patching twice succeeds and lands on the same bytes`() throws {
         let vm = try FakeVM()
         defer { vm.remove() }
@@ -192,25 +217,6 @@ struct FirmwarePipelineOriginalsTests {
         #expect(vm.componentBytes == Data([0xAA, 0x11, 0x22]))
     }
 
-    @Test func `a less run leaves an already patched boot chain alone`() throws {
-        let vm = try FakeVM()
-        defer { vm.remove() }
-
-        _ = try vm.pipeline().patchComponents([vm.descriptor()], restoreDir: vm.restoreDir, plan: nil)
-        #expect(vm.componentBytes == Data([0xAA, 0x11, 0x22]))
-
-        // `.less` gives every boot-chain component an empty factory list. That must
-        // not read as "these patches are off, put the firmware back".
-        let less = FirmwarePipeline(
-            vmDirectory: vm.root,
-            variant: .less,
-            verbose: false,
-            loader: RawFirmwareLoader(),
-        )
-        _ = try less.patchComponents([vm.descriptor(patched: false)], restoreDir: vm.restoreDir, plan: nil)
-        #expect(vm.componentBytes == Data([0xAA, 0x11, 0x22]))
-    }
-
     @Test func `the stash never claims a file outside the VM directory or itself`() throws {
         let vm = try FakeVM()
         defer { vm.remove() }
@@ -222,10 +228,10 @@ struct FirmwarePipelineOriginalsTests {
         #expect(pipeline.originalURL(for: vm.stashURL) == nil)
     }
 
-    @Test func `only the two whole-tree components opt out of keeping an original`() {
+    @Test func `only the two whole-tree components opt out of keeping an original`() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
-        let pipeline = FirmwarePipeline(vmDirectory: root, variant: .less, verbose: false)
-        let components = pipeline.buildComponentList(restoreDir: root, iOSBase: VPhoneVersion("26.6.2"))
+        let pipeline = FirmwarePipeline(vmDirectory: root, variant: .jb, verbose: false)
+        let components = try pipeline.buildComponentList(restoreDir: root, iOSBase: VPhoneVersion("26.6.2"))
 
         let notRestorable = components.filter { !$0.restorable }.map(\.name).sorted()
         #expect(notRestorable == ["Filesystem", "Manifest"])

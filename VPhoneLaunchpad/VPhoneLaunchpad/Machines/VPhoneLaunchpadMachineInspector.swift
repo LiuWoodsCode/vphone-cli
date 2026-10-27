@@ -6,18 +6,26 @@ import SwiftUI
 /// A machine's run state as the table and the inspector show it.
 struct VPhoneLaunchpadMachineStateLabel: View {
     let state: VPhoneLaunchpadMachineLibrary.RunState
-    /// An export's or a creation's IPSW download progress, shown as a bar in
-    /// place of the activity text, which becomes its help tag.
+    /// An export's or a creation's IPSW download progress, shown as a bar.
     var progress: Double?
+    /// The activity beside the bar, as the inspector has room for (Exporting…
+    /// 6%); the table's column keeps only the bar, with the text as help.
+    var namesActivity = false
+    /// A stopped machine whose Core Bundle is not installed.
+    var isDamaged = false
 
     var body: some View {
         let (status, text): (VPhoneLaunchpadStatus, String) = switch state {
         case .running: (.passed, String(localized: "Running"))
+        case .stopped where isDamaged: (.failed, String(localized: "Damaged"))
         case .stopped: (.pending, String(localized: "Stopped"))
         case let .busy(activity): (.running, activity)
         }
         if let progress {
             HStack(spacing: 6) {
+                if namesActivity {
+                    Text(text).lineLimit(1).fixedSize()
+                }
                 ProgressView(value: progress)
                     .controlSize(.small)
                 Text(progress, format: .percent.precision(.fractionLength(0)))
@@ -31,6 +39,7 @@ struct VPhoneLaunchpadMachineStateLabel: View {
             } icon: {
                 VPhoneLaunchpadStatusIcon(status: status)
             }
+            .help(isDamaged && state == .stopped ? String(localized: "Its Core Bundle is not installed. Choose Change Core Bundle… to run it with another version.") : "")
         }
     }
 }
@@ -75,10 +84,7 @@ struct VPhoneLaunchpadMachineBundleLabel: View {
 struct VPhoneLaunchpadMachineInspector: View {
     let machine: VPhoneLaunchpadMachine
     let onShowProgress: (VPhoneLaunchpadMachinePath) -> Void
-    let onOpenConsole: (VPhoneLaunchpadMachinePath) -> Void
-    var onChangeBundle: (VPhoneLaunchpadMachine) -> Void = { _ in }
     @Environment(VPhoneLaunchpadModel.self) private var model
-    @State private var showsCommands = false
     @State private var patchCatalog: VPhoneLaunchpadPatchCatalog?
     @State private var patchCatalogError: String?
     /// The machine the catalogue above was read for, so another machine's
@@ -88,6 +94,15 @@ struct VPhoneLaunchpadMachineInspector: View {
     @State private var editedPatches: VPhoneLaunchpadPatchSelection?
     /// Bumped after a save or an update, so the patches are read again.
     @State private var patchRevision = 0
+    /// The page under the state summary. It stays as the selection moves to
+    /// another machine.
+    @State private var page = Page.general
+
+    enum Page: Hashable {
+        case general
+        case hardware
+        case patches
+    }
 
     private var library: VPhoneLaunchpadMachineLibrary {
         model.machines
@@ -96,90 +111,61 @@ struct VPhoneLaunchpadMachineInspector: View {
     var body: some View {
         Form {
             Section {
-                if let creation = library.creations[machine.path] {
+                let creation = library.creation(for: machine.path)
+                if let creation {
                     creationSummary(creation)
                 }
-                LabeledContent("State") {
-                    VPhoneLaunchpadMachineStateLabel(
-                        state: library.state(of: machine.path),
-                        progress: library.progress(of: machine.path),
-                    )
+                // A running creation's summary already says what is going on.
+                if creation?.isRunning != true {
+                    LabeledContent("State") {
+                        VPhoneLaunchpadMachineStateLabel(
+                            state: library.state(of: machine.path),
+                            progress: library.progress(of: machine.path),
+                            namesActivity: true,
+                            isDamaged: library.isDamaged(machine.path),
+                        )
+                    }
+                }
+                if let run = library.maintenance[machine.path] {
+                    maintenanceRow(run)
                 }
                 if let started = library.startedAt[machine.path] {
                     LabeledContent("Started", value: started.formatted(date: .omitted, time: .shortened))
                 }
-                if let firmwareName = machine.firmwareName {
-                    LabeledContent("Firmware", value: firmwareName)
-                }
             } header: {
-                Text(machine.name)
-                    .font(.headline)
-            }
-
-            Section("Firmware") {
-                if let info = machine.restoreInfo {
-                    LabeledContent("iOS", value: "\(info.ios.version) (\(info.ios.build))")
-                    LabeledContent("cloudOS", value: "\(info.cloudOS.version) (\(info.cloudOS.build))")
-                } else {
-                    Text("Not restored").foregroundStyle(.secondary)
-                }
-            }
-
-            coreBundleSection
-
-            patchesSection
-
-            Section("Hardware") {
-                LabeledContent("CPU", value: String(localized: "\(machine.cpuCount) cores"))
-                LabeledContent("Memory", value: VPhoneLaunchpadMachinesView.memory(machine.memoryMB))
-                LabeledContent("Disk", value: VPhoneLaunchpadMachinesView.disk(machine.diskSizeBytes))
-                LabeledContent("Network", value: machine.networkDescription)
-                if let address = machine.addressDescription {
-                    LabeledContent("IPv4 Address", value: address)
-                }
-                if !machine.network.macAddress.isEmpty {
-                    LabeledContent("MAC Address", value: machine.network.macAddress)
-                }
-                if let name = machine.network.localHostName {
-                    LabeledContent("mDNS Name", value: "\(name).local")
-                }
-                ForEach(machine.network.portForwards ?? [], id: \.self) { forward in
-                    LabeledContent("Port Forward", value: "\(forward.transport.uppercased()) \(forward.hostAddress ?? "127.0.0.1"):\(forward.hostPort) → \(forward.guestPort)")
-                }
-                if machine.unlocksAtStartup == true {
-                    LabeledContent("Unlock at Startup", value: String(localized: "On"))
-                }
-            }
-
-            Section("Identity") {
-                if let udid = machine.udid {
-                    value("UDID", udid)
-                }
-                value(
-                    "Location",
-                    VPhoneLaunchpadHostSetup.abbreviated(machine.path.url),
-                )
-            }
-
-            Section("Console") {
+                // The page picker beside the name: it switches the whole
+                // inspector, not a row. The console is in the Logs menu.
                 HStack {
-                    Button {
-                        onOpenConsole(machine.path)
-                    } label: {
-                        Label("Open Console", systemImage: "arrow.up.right")
-                    }
+                    Text(machine.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                     Spacer()
-                    Button("Recent Commands") { showsCommands = true }
+                    Picker("Page", selection: $page) {
+                        Text("General").tag(Page.general)
+                        Text("Hardware").tag(Page.hardware)
+                        Text("Patches").tag(Page.patches)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    .controlSize(.small)
                 }
+                .foregroundStyle(.primary)
+            }
+
+            switch page {
+            case .general: generalPage
+            case .hardware: hardwarePage
+            case .patches: patchesPage
             }
         }
         .formStyle(.grouped)
+        // The machine name sits under the toolbar, level with the table's
+        // header, without the grouped form's top margin above it.
+        .contentMargins(.top, 0, for: .scrollContent)
         .task(id: patchReadKey) {
             await loadPatches()
-        }
-        .sheet(isPresented: $showsCommands) {
-            VPhoneLaunchpadCommandHistoryView()
-                .environment(model)
         }
         .sheet(item: $editedPatches) { initial in
             let path = machine.path
@@ -187,13 +173,64 @@ struct VPhoneLaunchpadMachineInspector: View {
                 initial: initial,
                 bundleVersion: library.bundleVersion(for: path),
                 machine: path,
-            ) { selection in
-                Task {
-                    await library.setPatches(selection, for: path)
-                    patchRevision += 1
+                isReadOnly: true,
+            ) { _ in }
+            .environment(model)
+        }
+    }
+
+    // MARK: - Pages
+
+    @ViewBuilder
+    private var generalPage: some View {
+        Section("Firmware") {
+            if let info = machine.restoreInfo {
+                LabeledContent(machine.osName, value: "\(info.ios.version) (\(info.ios.build))")
+                LabeledContent("cloudOS", value: "\(info.cloudOS.version) (\(info.cloudOS.build))")
+            } else {
+                Text("Not restored").foregroundStyle(.secondary)
+            }
+        }
+
+        coreBundleSection
+    }
+
+    @ViewBuilder
+    private var hardwarePage: some View {
+        Section("Hardware") {
+            statGrid(hardwareStats)
+        }
+
+        Section("Network") {
+            LabeledContent("Mode", value: machine.networkDescription)
+            if let address = machine.addressDescription {
+                LabeledContent("IPv4 Address", value: address)
+            }
+            if !machine.network.macAddress.isEmpty {
+                LabeledContent("MAC Address", value: machine.network.macAddress)
+            }
+            if let name = machine.network.localHostName {
+                LabeledContent("mDNS Name", value: "\(name).local")
+            }
+            ForEach(machine.network.portForwards ?? [], id: \.self) { forward in
+                LabeledContent("Port Forward", value: "\(forward.transport.uppercased()) \(forward.hostAddress ?? "127.0.0.1"):\(forward.hostPort) → \(forward.guestPort)")
+            }
+        }
+
+        Section("Identity") {
+            if let udid = machine.udid {
+                value("UDID", udid)
+            }
+            if let origin = machine.templateOrigin {
+                LabeledContent("Template") {
+                    templateLabel(origin)
+                        .textSelection(.enabled)
                 }
             }
-            .environment(model)
+            value(
+                "Location",
+                VPhoneLaunchpadHostSetup.abbreviated(machine.path.url),
+            )
         }
     }
 
@@ -228,10 +265,54 @@ struct VPhoneLaunchpadMachineInspector: View {
                 binding?.bootChain ?? String(localized: "Unknown"),
                 help: String(localized: "The Core Bundle that built the boot chain when the machine was created."),
             )
-            HStack {
-                Spacer()
-                Button("Change…") { onChangeBundle(machine) }
-                    .disabled(model.bundles.selectableVersions.isEmpty || library.creations[machine.path]?.isRunning == true)
+            // Only while the guest environment lags the host programs and an
+            // update can run now; changing the version is in the actions menu.
+            if binding?.hasMixedVersions == true, isInstalled,
+               library.state(of: machine.path) == .stopped,
+               machine.restoreInfo != nil, machine.customFirmwareInstalled != false
+            {
+                HStack {
+                    Spacer()
+                    Button("Update…") {
+                        Task { await library.updateGuestEnvironment(machine.path) }
+                    }
+                    .help("Update the guest environment to match the host programs")
+                }
+            }
+        }
+    }
+
+    // MARK: - Maintenance
+
+    /// The machine's latest CFW install or update this session: the step it
+    /// is on, or how it ended, and a way back to its progress and output.
+    private func maintenanceRow(_ run: VPhoneLaunchpadMaintenanceRun) -> some View {
+        LabeledContent {
+            HStack(spacing: 6) {
+                VPhoneLaunchpadMaintenanceElapsed(run: run)
+                Button("Show…") { model.machineSheetRequest = .maintenance(machine.path) }
+                    .controlSize(.small)
+            }
+        } label: {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: run.kind.title)
+                        .lineLimit(1)
+                    if let line = run.isRunning ? run.progress.stage : run.failure?.message {
+                        Text(verbatim: line)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(line)
+                    } else if run.progress.warningCount > 0 {
+                        Text("^[\(run.progress.warningCount) warning](inflect: true)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } icon: {
+                VPhoneLaunchpadStatusIcon(status: run.status)
             }
         }
     }
@@ -263,9 +344,9 @@ struct VPhoneLaunchpadMachineInspector: View {
     /// Apply to Guest updates the guest environment, which is what brings
     /// guest patches in line. Boot-chain patches only a restore changes.
     @ViewBuilder
-    private var patchesSection: some View {
-        if library.creations[machine.path]?.isRunning != true {
-            Section("Patches") {
+    private var patchesPage: some View {
+        if library.creation(for: machine.path)?.isRunning != true {
+            Section {
                 if let catalog = patchCatalog, patchCatalogMachine == machine.path {
                     LabeledContent(
                         "Preset",
@@ -302,6 +383,20 @@ struct VPhoneLaunchpadMachineInspector: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
+                } else if let patchCatalogError {
+                    Text("Unavailable")
+                        .foregroundStyle(.secondary)
+                        .help(patchCatalogError)
+                } else {
+                    ProgressView()
+                    .controlSize(.small)
+                        .frame(maxWidth: .infinity)
+                }
+            } header: {
+                Text("Patches")
+            } footer: {
+                // Under the card rather than in it, as the page picker is.
+                if let catalog = patchCatalog, patchCatalogMachine == machine.path {
                     HStack {
                         Spacer()
                         if catalog.installed == true, catalog.pendingKernelPatches > 0 {
@@ -328,17 +423,17 @@ struct VPhoneLaunchpadMachineInspector: View {
                                 ? String(localized: "Updates the guest environment, which turns guest patches on or off to match this machine’s choice.")
                                 : String(localized: "Stop the machine to apply its patch choice to the guest."))
                         }
-                        Button("Edit…") { editedPatches = catalog.selection }
+                        // A created machine's patches are shown, not changed.
+                        Button("View…") { editedPatches = catalog.selection }
                     }
-                } else if let patchCatalogError {
-                    Text("Unavailable")
-                        .foregroundStyle(.secondary)
-                        .help(patchCatalogError)
-                } else {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity)
+                    .foregroundStyle(.primary)
+                    .padding(.top, 4)
                 }
+            }
+        } else {
+            Section("Patches") {
+                Text("Available once the machine is created.")
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -379,7 +474,7 @@ struct VPhoneLaunchpadMachineInspector: View {
             patchCatalogError = nil
             patchCatalogMachine = path
         }
-        guard library.creations[path]?.isRunning != true else { return }
+        guard library.creation(for: path)?.isRunning != true else { return }
         do {
             let catalog = try await VPhoneLaunchpadPatchCatalog.read(
                 using: library.commandLine(for: path),
@@ -415,6 +510,74 @@ struct VPhoneLaunchpadMachineInspector: View {
         }
     }
 
+    // MARK: - Hardware grid
+
+    private struct Stat {
+        let title: LocalizedStringKey
+        let value: String
+        var help = ""
+    }
+
+    private var hardwareStats: [Stat] {
+        var stats = [
+            Stat(title: "CPU", value: String(localized: "\(machine.cpuCount) cores")),
+            Stat(title: "Memory", value: VPhoneLaunchpadMachinesView.memory(machine.memoryMB)),
+            Stat(title: "Disk", value: VPhoneLaunchpadMachinesView.disk(machine.diskSizeBytes)),
+        ]
+        if let usage = library.diskUsage[machine.path] {
+            if let exclusive = usage.exclusive {
+                stats.append(Stat(
+                    title: "Exclusive",
+                    value: VPhoneLaunchpadDiskUsage.format(exclusive),
+                    help: String(localized: "The blocks no other machine or template holds: what deleting it frees, once no local Time Machine snapshot keeps them. The rest is shared with its template or clones."),
+                ))
+            }
+            stats.append(Stat(
+                title: "Allocated",
+                value: VPhoneLaunchpadDiskUsage.format(usage.allocated),
+                help: String(localized: "Every block the machine's files hold, shared or not."),
+            ))
+        }
+        if machine.unlocksAtStartup == true {
+            stats.append(Stat(title: "Unlock at Startup", value: String(localized: "On")))
+        }
+        if machine.syncsHostLocation == true {
+            stats.append(Stat(title: "Sync Host Location", value: String(localized: "On")))
+        }
+        return stats
+    }
+
+    /// Short values two to a row, each a caption over its value, so the
+    /// section takes half the height of one row per value.
+    private func statGrid(_ stats: [Stat]) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+            ForEach(Array(stride(from: 0, to: stats.count, by: 2)), id: \.self) { index in
+                GridRow {
+                    statCell(stats[index])
+                    if index + 1 < stats.count {
+                        statCell(stats[index + 1])
+                    } else {
+                        Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func statCell(_ stat: Stat) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(stat.title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(stat.value)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .help(stat.help)
+    }
+
     private func value(_ title: LocalizedStringKey, _ value: String) -> some View {
         LabeledContent(title) {
             Text(value)
@@ -425,6 +588,24 @@ struct VPhoneLaunchpadMachineInspector: View {
         }
     }
 
+    /// The template's identifier. A clone of an earlier build of the same
+    /// key, or of a deleted template, says so, and shares no key with the
+    /// template that has the identifier now.
+    @ViewBuilder
+    private func templateLabel(_ origin: VPhoneLaunchpadTemplateOrigin) -> some View {
+        switch origin.match {
+        case .current:
+            Text(verbatim: origin.identifier)
+                .help(String(localized: "Created from this template. It shares the template's SEP root secret and Data volume keys with every machine created from it."))
+        case .earlierBuild:
+            Text("\(origin.identifier) (earlier build, deleted)")
+                .help(String(localized: "Created from an earlier build of this template, since deleted. It shares its SEP root secret and Data volume keys only with the machines created from that build, not with the template that has this identifier now or the machines created from it."))
+        case .deleted:
+            Text("\(origin.identifier) (deleted)")
+                .help(String(localized: "Created from this template, which was deleted. It shares the template's SEP root secret and Data volume keys with every machine created from it."))
+        }
+    }
+
     private func creationSummary(_ creation: VPhoneLaunchpadCreationPipeline) -> some View {
         LabeledContent {
             Button(creation.isRunning ? LocalizedStringKey("Show Progress") : LocalizedStringKey("View Details")) {
@@ -432,7 +613,7 @@ struct VPhoneLaunchpadMachineInspector: View {
             }
         } label: {
             if creation.isRunning {
-                Label { Text("Creating: \(creation.current?.title ?? "")") } icon: { VPhoneLaunchpadStatusIcon(status: .running) }
+                Label { Text(verbatim: creation.current?.title ?? "") } icon: { VPhoneLaunchpadStatusIcon(status: .running) }
             } else if creation.isFinished {
                 Label { Text("Created") } icon: { VPhoneLaunchpadStatusIcon(status: .passed) }
             } else {

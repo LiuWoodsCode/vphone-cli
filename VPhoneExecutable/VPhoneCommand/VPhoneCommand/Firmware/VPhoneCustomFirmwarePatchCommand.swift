@@ -179,6 +179,90 @@ struct VPhoneCustomFirmwareInjectDylibCommand: ParsableCommand {
     }
 }
 
+// MARK: - patch-virtual-bluetooth
+
+struct VPhoneCustomFirmwarePatchVirtualBluetoothCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "patch-virtual-bluetooth",
+        abstract: "Enable LE connections over the virtual Bluetooth controller in a staged feature plist",
+        shouldDisplay: false,
+    )
+
+    @Argument(transform: URL.init(fileURLWithPath:))
+    var plist: URL
+
+    @Flag(name: .customLong("dry-run"))
+    var dryRun = false
+
+    func run() throws {
+        let changed = try CustomFirmwareBluetoothVirtualController.patch(at: plist, dryRun: dryRun)
+        print("  [\(changed ? "+" : ".")] \(CustomFirmwareBluetoothVirtualController.feature).Enabled = true\(dryRun ? " (dry-run)" : "")")
+    }
+}
+
+// MARK: - patch-locationd-cohorting
+
+struct VPhoneCustomFirmwarePatchLocationdCohortingCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "patch-locationd-cohorting",
+        abstract: "Disable automatic CoreLocation cohort queues in a staged iOS 27 feature plist",
+        shouldDisplay: false,
+    )
+
+    @Argument(transform: URL.init(fileURLWithPath:))
+    var plist: URL
+
+    @Flag(name: .customLong("dry-run"))
+    var dryRun = false
+
+    func run() throws {
+        let changed = try CustomFirmwareLocationdCohorting.patch(at: plist, dryRun: dryRun)
+        print("  [\(changed ? "+" : ".")] CLAutoCohort.Enabled = false\(dryRun ? " (dry-run)" : "")")
+    }
+}
+
+// MARK: - patch-tv-setup
+
+struct VPhoneCustomFirmwarePatchTVSetupCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "patch-tv-setup",
+        abstract: "Select the native tvOS 27.2 setup flow for virtual remote input",
+        shouldDisplay: false,
+    )
+
+    @Argument(transform: URL.init(fileURLWithPath:))
+    var plist: URL
+
+    @Flag(name: .customLong("dry-run"))
+    var dryRun = false
+
+    func run() throws {
+        let changed = try CustomFirmwareTVSetup.patch(at: plist, dryRun: dryRun)
+        print("  [\(changed ? "+" : ".")] TVSetupV2 / TVSetupV2HW = false\(dryRun ? " (dry-run)" : "")")
+    }
+}
+
+// MARK: - patch-jetsam-disable-allowed
+
+struct VPhoneCustomFirmwarePatchJetsamDisableAllowedCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "patch-jetsam-disable-allowed",
+        abstract: "Remove DisableAllowed = false from a staged jetsam properties plist",
+        shouldDisplay: false,
+    )
+
+    @Argument(transform: URL.init(fileURLWithPath:))
+    var plist: URL
+
+    @Flag(name: .customLong("dry-run"))
+    var dryRun = false
+
+    func run() throws {
+        let removed = try CustomFirmwareJetsamDisableAllowed.patch(at: plist, dryRun: dryRun)
+        print("  [\(removed > 0 ? "+" : ".")] \(plist.lastPathComponent): \(removed) DisableAllowed = false removed\(dryRun ? " (dry-run)" : "")")
+    }
+}
+
 // MARK: - patch-build-version
 
 struct VPhoneCustomFirmwarePatchBuildVersionCommand: ParsableCommand {
@@ -445,6 +529,44 @@ struct VPhoneCustomFirmwarePatchBoardAudioCommand: ParsableCommand {
             board: board,
             dryRun: dryRun,
             verbose: true,
+        )
+    }
+}
+
+// MARK: - patch-dt-homepod-audio-product
+
+struct VPhoneCustomFirmwarePatchHomePodCryptexClassCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "patch-dt-homepod-cryptex-class",
+        abstract: "Give a HomePod device tree its native Cryptex product class",
+    )
+    @Argument(transform: URL.init(fileURLWithPath:)) var deviceTree: URL
+    @Flag(name: .customLong("dry-run")) var dryRun = false
+
+    func run() throws {
+        try CustomFirmwarePostRestoreDeviceTree.presentHomePodCryptexClass(at: deviceTree, dryRun: dryRun)
+    }
+}
+
+struct VPhoneCustomFirmwarePatchHomePodAudioProductCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "patch-dt-homepod-audio-product",
+        abstract: "Give a HomePod mini device tree its donor's native audio product identity",
+        discussion: "Copies only the concrete 20-byte /product/product-id from the HomePod mini's own DeviceTree IM4P. Refuses other models, placeholders and malformed values; preserves the installed IMG4 manifest, restore info and compression.",
+    )
+
+    @Argument(help: "Path to devicetree.img4 or devicetree.im4p", transform: URL.init(fileURLWithPath:))
+    var deviceTree: URL
+
+    @Argument(help: "Path to the HomePod mini's DeviceTree.<board>.im4p", transform: URL.init(fileURLWithPath:))
+    var board: URL
+
+    @Flag(name: .customLong("dry-run"), help: "Report what would change and exit")
+    var dryRun = false
+
+    func run() throws {
+        try CustomFirmwarePostRestoreDeviceTree.presentHomePodAudioProduct(
+            at: deviceTree, board: board, dryRun: dryRun, verbose: true,
         )
     }
 }

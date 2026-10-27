@@ -40,9 +40,41 @@ class VPhoneVirtualMachineKeySender {
 
     // MARK: - Hardware Keys (Consumer Page 0x0C)
 
+    /// The TV's Back/Menu key through the same native keyboard as arrows and
+    /// Return. This works without the guest daemon, including during setup.
+    func sendTVBack() {
+        guard let keyboard = firstKeyboard else { return }
+        for type in [0, 1] {
+            if let event = Dynamic._VZKeyEvent(type: type, keyCode: UInt16(0x35)).asAnyObject {
+                Dynamic(keyboard).sendKeyEvents([event] as NSArray)
+            }
+        }
+    }
+
     func sendHome() {
         guard requireConnection() else { return }
         control.sendHIDPress(page: 0x0C, usage: 0x40)
+    }
+
+    /// tvOS reads consumer Menu (0x0C/0x40) as the TV button and opens
+    /// Control Center when it is held. A USB keyboard has no such key, so
+    /// this goes through vphoned like Home.
+    func sendTVControlCenter() {
+        guard requireConnection() else { return }
+        control.sendHIDDown(page: 0x0C, usage: 0x40)
+        Task { [control] in
+            try? await Task.sleep(for: .milliseconds(1200))
+            control.sendHIDUp(page: 0x0C, usage: 0x40)
+        }
+    }
+
+    /// An Apple Watch's side button is consumer Help (0x0C/0x95), the device
+    /// tree's `/buttons` "help" beside the crown's "menu". Carousel reads it
+    /// as the side button (Control Center, Wallet, SOS); consumer Power
+    /// (0x30) only sleeps or wakes the display there.
+    func sendWatchSideButton() {
+        guard requireConnection() else { return }
+        control.sendHIDPress(page: 0x0C, usage: 0x95)
     }
 
     func sendPower() {

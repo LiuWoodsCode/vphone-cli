@@ -22,16 +22,38 @@ class VPhoneMenuController {
     }
 
     var hardwareKeyboardItem: NSMenuItem?
+    var tvControlCenterItem: NSMenuItem?
+    var tvRemoteItem: NSMenuItem?
+    lazy var tvRemoteWindowController = VPhoneTVRemoteWindowController(control: control)
+
+    /// An Apple TV guest has a TV button that opens Control Center when held.
+    var showsTVControls = false {
+        didSet {
+            tvControlCenterItem?.isHidden = !showsTVControls
+            tvRemoteItem?.isHidden = !showsTVControls
+            if oldValue && !showsTVControls { tvRemoteWindowController.close() }
+        }
+    }
+    var watchSideButtonItem: NSMenuItem?
+
+    /// An Apple Watch guest has a side button beside the Digital Crown.
+    var showsWatchControls = false {
+        didSet { watchSideButtonItem?.isHidden = !showsWatchControls }
+    }
     var onHardwareKeyboardChange: ((Bool) async throws -> Void)?
     var onFrameRateDisplayChange: ((Bool) -> Void)?
     /// Saves the unlock-at-startup setting to this machine's config.plist.
     var onUnlockAtStartupChange: ((Bool) throws -> Void)?
     var unlockAtStartupItem: NSMenuItem?
+    /// Saves the Sync Host Location setting to this machine's config.plist.
+    var onHostLocationSyncChange: ((Bool) throws -> Void)?
 
+    var onSessionPressed: (() -> Void)?
     var onFilesPressed: (() -> Void)?
     var onKeychainPressed: (() -> Void)?
     var onFindPressed: (() -> Void)?
     var onAppsPressed: (() -> Void)?
+    var connectSessionItem: NSMenuItem?
     var connectFileBrowserItem: NSMenuItem?
     var connectKeychainBrowserItem: NSMenuItem?
     var connectDevModeStatusItem: NSMenuItem?

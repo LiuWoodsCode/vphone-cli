@@ -129,6 +129,15 @@ struct VPhoneTCPForwarderTests {
             queue.sync { forwarder.stop() }
         }
 
+        /// Run the idle reaper as if `seconds` had passed with nothing sent.
+        func reap(after seconds: TimeInterval) {
+            queue.sync { forwarder.reapIdle(now: Date().addingTimeInterval(seconds)) }
+        }
+
+        var connectionCount: Int {
+            forwarder.connectionCount
+        }
+
         /// Wait for something a background socket is responsible for.
         ///
         /// Polls rather than sleeping a fixed time: the far end of these tests is
@@ -151,12 +160,12 @@ struct VPhoneTCPForwarderTests {
     /// has something real to terminate against.
     private final class LoopbackServer: @unchecked Sendable {
         let port: UInt16
-        private let listener: Int32
         private let received = Box(0)
         private let finished = Box(false)
+        private let stopped = Box(false)
 
-        /// - Parameter session: runs with the accepted socket on a background
-        ///   queue and owns closing it.
+        /// - Parameter session: runs with the accepted socket on the server's
+        ///   own thread and owns closing it.
         init(session: @escaping @Sendable (Int32, LoopbackServer) -> Void) throws {
             let descriptor = socket(AF_INET, SOCK_STREAM, 0)
             guard descriptor >= 0 else { throw Error.socketFailed }
@@ -185,16 +194,29 @@ struct VPhoneTCPForwarderTests {
                 }
             }
             port = UInt16(bigEndian: assigned.sin_port)
-            listener = descriptor
 
             let server = self
-            DispatchQueue.global().async {
+            // A thread of its own, not a global queue: in a full CoreKit run a
+            // block queued there started 2 to 3.5 s late, all of it counted
+            // against the throughput test.
+            Thread {
+                // Only this thread closes the listener. Closed by stop() while
+                // the accept had yet to run, its number went to the next test's
+                // listener, and the late accept below took that test's
+                // connection: a forwarder handshake does not wait for accept.
+                defer { close(descriptor) }
+                var listening = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+                while poll(&listening, 1, 50) <= 0 {
+                    if server.stopped.withLock({ $0 }) {
+                        return
+                    }
+                }
                 let client = accept(descriptor, nil, nil)
                 defer { server.finished.withLock { $0 = true } }
                 guard client >= 0 else { return }
                 defer { close(client) }
                 session(client, server)
-            }
+            }.start()
         }
 
         /// Bytes pulled out of the socket by the session.
@@ -231,8 +253,9 @@ struct VPhoneTCPForwarderTests {
             }
         }
 
+        /// Stop waiting for a connection; the server's thread closes the listener.
         func stop() {
-            close(listener)
+            stopped.withLock { $0 = true }
         }
 
         enum Error: Swift.Error {
@@ -364,7 +387,11 @@ struct VPhoneTCPForwarderTests {
     /// to be told to stop -- a zero window -- and answering that by spinning
     /// would starve every other flow sharing the queue.
     @Test func `the upload direction applies back pressure instead of spinning`() throws {
-        let total = 1 << 20
+        // More than the kernel can buffer. A megabyte was not: the server's
+        // receive buffer grew to 1.1 MiB unread in one run and took it all, so
+        // the window never had to shut. Each side grows to 4 MiB at most
+        // (net.inet.tcp.autorcvbufmax, autosndbufmax).
+        let total = 16 << 20
         let server = try LoopbackServer { client, server in
             sleep(1) // refuse to read, so the socket buffers fill
             server.drain(client, until: total)
@@ -515,6 +542,53 @@ struct VPhoneTCPForwarderTests {
             return counts.values.contains { $0 > 1 }
         }
         #expect(nudged, "nothing was ever sent twice, so a lost segment would stall forever")
+    }
+
+    // MARK: - Idle connections
+
+    /// An ssh session nobody types into sends nothing. Reaped after 120 s of
+    /// silence, it dropped two to four minutes after its user stopped typing.
+    @Test func `an established connection survives minutes of silence`() throws {
+        let server = try LoopbackServer { client, server in server.drain(client) }
+        defer { server.stop() }
+
+        let harness = Harness(guestPort: 51006, destinationPort: server.port)
+        harness.start()
+        defer { harness.stop() }
+
+        try handshake(harness)
+        #expect(harness.connectionCount == 1)
+
+        harness.reap(after: 30 * 60)
+        #expect(harness.connectionCount == 1, "an idle established connection was reaped after 30 minutes")
+
+        harness.reap(after: 3 * 3600)
+        #expect(harness.connectionCount == 0, "a connection silent for three hours was kept")
+    }
+
+    /// A handshake the guest never finished still goes after the short bound.
+    @Test func `a half-open connection is still reaped quickly`() throws {
+        let server = try LoopbackServer { client, server in server.drain(client) }
+        defer { server.stop() }
+
+        let harness = Harness(guestPort: 51007, destinationPort: server.port)
+        harness.start()
+        defer { harness.stop() }
+
+        harness.feed(VPhoneTCPSegment(
+            sourcePort: harness.guestPort,
+            destinationPort: server.port,
+            sequenceNumber: 1000,
+            acknowledgmentNumber: 0,
+            flags: VPhoneTCPFlags.syn,
+            windowSize: 65535,
+            maximumSegmentSize: 1460,
+        ))
+        try #require(harness.waitUntil("the SYN-ACK") { harness.ourISN != nil })
+        #expect(harness.connectionCount == 1)
+
+        harness.reap(after: 180)
+        #expect(harness.connectionCount == 0, "a handshake left unanswered for three minutes was kept")
     }
 
     // MARK: - Throughput
