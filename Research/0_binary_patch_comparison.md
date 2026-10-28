@@ -1,5 +1,20 @@
 # Patch Comparison: Regular / Development / Jailbreak / Experimental
 
+> **Duo display identities (2026-10-27).**
+> `preboot-cfw-devicetree_foldable_displays` (guest system set, iOS 27,
+> enabled in standard, blocked in TV/HomePod presets; verb `cfw
+> patch-dt-foldable-displays`) copies the validated iPhone19,4 donor's
+> product-id, primary framebuffer identifier, and `/product/display0` and
+> `display1` into the installed Preboot tree. Donor phandles are stripped;
+> virtual GPU and hardware properties are preserved. The repair participates
+> in the existing shared device-tree backup and inverse composition. The
+> host adds a 1878 × 2670 inner framebuffer with its own window and associated
+> USB touchscreen; the outer 1398 × 2034 surface remains attached. Controls
+> drives discrete hinge poses through the existing `display.posture` API.
+> This is a device-tree data patch, with no new instruction rewrite. See
+> [Duo bring-up](Guest/iphone_duo_bringup.md#inner-display-and-hinge-controls-2026-10-27)
+> for evidence and live-validation status.
+
 > **Interrupted X1 cache installation (2026-10-27).** A first-boot
 > `initproc failed to start -- exit reason namespace 3 subcode 0x2`
 > followed a `patch-arm64e-x1-cache` child killed with status 9. Namespace

@@ -1,4 +1,61 @@
-# iPhone Duo single-display bring-up
+# iPhone Duo bring-up
+
+## Inner display and hinge controls (2026-10-27)
+
+The host now configures two persistent VZ framebuffers for iPhone19,4 and
+opens the inner one in its own window. The original window keeps the outer
+panel attached for Camera preview and Kid Cue. Closing the inner window
+hides it without stopping the guest; Window → Show Inner Display restores
+it. Both framebuffers stay connected in every hinge pose; SpringBoard owns
+panel power and content placement.
+
+Evidence was collected over SSH from iPhone19,4 / 24A94425, and from its
+original IPSW with `ipsw dtree --json`. Before the change, the live guest
+had one `AppleParavirtDisplay` (1398 × 2034), one UIKit screen (466 × 678
+points), no `/product/display0` or `display1`, and the research product-id.
+`CADisplay` reported `LCD`, device name `primary`, scale 3 and tag 0.
+The donor describes:
+
+| Property | Outer | Inner |
+| --- | --- | --- |
+| display-index | 0 | 1 |
+| surface-type | 1 | 2 |
+| display-rotation | 0 | 270 |
+| display-scale | 3 | 3 |
+| framebuffer-identifier | 1C896A2B-F0D7-405C-8D0F-66E4B80AD044 | BF0DC480-5EE2-4EC1-B02B-C75E94759832 |
+| Host framebuffer | 1398 × 2034 | 1878 × 2670 |
+
+The inner display's native rotation presents an 890 × 626-point interface.
+Its donor metadata includes a `BlankableRR` region at (63, 710, 111, 111)
+and a `Fold` region at (0, 1335, 1878, 0). These are copied as data, rather
+than recreated from host window geometry.
+
+`preboot-cfw-devicetree_foldable_displays` is an iOS 27 guest-system patch,
+enabled in standard and blocked in the TV/HomePod presets. It validates the
+installed and donor model, distinct UUIDs, panel indexes, surface types,
+rotations and scales before editing. It copies the donor's product-id,
+primary framebuffer identifier and two display nodes, stripping donor
+phandles. It preserves the virtual GPU, memory and hardware nodes.
+The existing device-tree repair backup supplies inverse composition when
+the patch is disabled. Existing machines need a guest-environment update
+and a cold start to acquire the metadata and second VZ framebuffer.
+
+Host API evidence: Virtualization's `VZMacGraphicsDisplayConfiguration`
+exposes `_setDisplayIdentifier:`; `VZVirtualMachineView` exposes
+`_setGraphicsDisplay:`. Its graphics configuration UUID is separate from
+the guest framebuffer identifier: two USB touchscreens associate with the
+VZ UUIDs, and each view sends touches to its own associated device.
+
+Controls exposes Closed (0°), Partially Open (90°) and Open Flat (180°)
+through the existing `display.posture` test-automation path. It includes
+the current orientation. The API acknowledges an override without live
+hinge readback, so the selection represents the last accepted request and
+resets on reconnect. It does not emulate continuous physical hinge angles.
+
+Validation: build and synthetic-tree checks are in progress. Dual-panel
+SpringBoard rendering, panel-specific touch routing and folded Camera/Kid
+Cue behavior still require live confirmation. The single-display
+observations below describe the original implementation.
 
 ## Kernel CSSC fallback (2026-10-25)
 

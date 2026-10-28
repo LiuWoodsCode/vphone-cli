@@ -658,6 +658,21 @@ struct VPhoneCustomFirmwarePatchFoldableVMSubtypeCommand: ParsableCommand {
 
 // MARK: - patch-dt-haptics
 
+struct VPhoneCustomFirmwarePatchFoldableDisplaysCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "patch-dt-foldable-displays",
+        abstract: "Present the Duo's built-in outer and inner display identities",
+    )
+
+    @Argument(transform: URL.init(fileURLWithPath:)) var deviceTree: URL
+    @Argument(transform: URL.init(fileURLWithPath:)) var boardDeviceTree: URL
+    @Flag(name: .customLong("dry-run")) var dryRun = false
+
+    func run() throws {
+        try CustomFirmwarePostRestoreDeviceTree.presentFoldableDisplays(at: deviceTree, board: boardDeviceTree, dryRun: dryRun)
+    }
+}
+
 struct VPhoneCustomFirmwarePatchHapticsCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "patch-dt-haptics",

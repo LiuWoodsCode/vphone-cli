@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Dynamic
 import Virtualization
 import VPhoneCoreKit
 
@@ -10,6 +11,8 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     private weak var virtualMachineView: VPhoneVirtualMachineView?
     private(set) var homePodDisplayView: VPhoneHomePodDisplayView?
     private var homePodGuest = false
+    private var displayIndex = 0
+    private var nativeOrientation: VPhoneDisplayOrientation = .portrait
     private(set) var touchIDMonitor: VPhoneTouchIDMonitor?
     private var homeButton: NSButton?
     /// An Apple TV's TV button: holding the titlebar button holds it in the
@@ -42,13 +45,21 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         name: String,
         sceneIdentifier: String,
         homePodGuest: Bool = false,
+        displayIndex: Int = 0,
+        nativeOrientation: VPhoneDisplayOrientation = .portrait,
     ) {
         self.control = control
         self.homePodGuest = homePodGuest
+        self.displayIndex = displayIndex
+        self.nativeOrientation = nativeOrientation
         homeButton = nil
 
         let view = VPhoneVirtualMachineView()
         view.virtualMachine = vm
+        view.displayIndex = displayIndex
+        if let displays = vm.graphicsDevices.first?.displays, displays.indices.contains(displayIndex) {
+            Dynamic(view)._setGraphicsDisplay(displays[displayIndex])
+        }
         view.hardwareKeyboardEnabled = hardwareKeyboardEnabled
         view.capturesSystemKeys = hardwareKeyboardEnabled && !homePodGuest
         view.keySender = keySender
@@ -100,7 +111,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.level = .normal
-        VPhoneAlert.hostWindow = window
+        if displayIndex == 0 { VPhoneAlert.hostWindow = window }
         window.contentAspectRatio = windowSize
         window.title = name
         window.contentView = container
@@ -108,7 +119,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         // The scene belongs to the VM, not to the app: every VM directory keeps
         // its own window frame, and a newly created VM opens centered instead
         // of inheriting the last frame another VM saved.
-        let sceneName = "vphone-scene-\(sceneIdentifier)"
+        let sceneName = "vphone-scene-\(sceneIdentifier)" + (displayIndex == 0 ? "" : "-inner")
         window.identifier = NSUserInterfaceItemIdentifier(sceneName)
         if !window.setFrameUsingName(sceneName) {
             window.center()
@@ -141,7 +152,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         // after the toolbar and actual screen are known, including a wide TV
         // panel whose saved frame may otherwise be clamped out of proportion.
         // The guest starts unturned; the orientation poll follows it later.
-        if !homePodGuest { applyOrientation(.portrait, to: window, force: true) }
+        if !homePodGuest { applyOrientation(nativeOrientation, to: window, force: true) }
 
         keySender.window = window
         NSApp.activate(ignoringOtherApps: true)
@@ -171,11 +182,14 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         if !homePodGuest {
             control.observeInterfaceOrientation { [weak self, weak window] orientation in
                 guard let self, let window else { return }
-                applyOrientation(orientation ?? .portrait, to: window)
+                let degrees = (orientation ?? .portrait).rawValue + nativeOrientation.rawValue
+                applyOrientation(VPhoneDisplayOrientation(degrees: degrees) ?? nativeOrientation, to: window)
             }
-            timers.append(Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                Task { @MainActor in self?.pollOrientation() }
-            })
+            if displayIndex == 0 {
+                timers.append(Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                    Task { @MainActor in self?.pollOrientation() }
+                })
+            }
         }
         setFrameRateDisplay(VPhoneFrameRateDisplay.isEnabled)
     }
@@ -196,9 +210,15 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     /// same question as ⌘Q, with the window still up, instead of closing
     /// first. `closeForRestart` closes without asking.
     func windowShouldClose(_: NSWindow) -> Bool {
+        if displayIndex != 0 { return true }
         homePodDisplayView?.releaseControls()
         NSApp.terminate(nil)
         return false
+    }
+
+    func bringToFront() {
+        windowController?.showWindow(nil)
+        displayWindow?.makeKeyAndOrderFront(nil)
     }
 
     /// Disconnect the old display and input devices before rebuilding the VM.

@@ -67,6 +67,24 @@ public struct VPhoneGuestDevice: Sendable, Equatable {
         family == .iPad
     }
 
+    /// The Duo's second panel, in its framebuffer's native coordinates.
+    /// `/product/display1` rotates this 1878 × 2670 surface by 270°;
+    /// the open interface is 2670 × 1878 pixels (890 × 626 points).
+    public var innerScreen: VPhoneVirtualMachineManifest.ScreenConfig? {
+        productType == "iPhone19,4"
+            ? .init(width: 1878, height: 2670, pixelsPerInch: 460, scale: 3)
+            : nil
+    }
+
+    /// Match the donor tree's per-panel framebuffer identifiers. These are
+    /// product identities, not per-machine UUIDs. Other guests keep VZ defaults.
+    public var framebufferIdentifiers: [String] {
+        productType == "iPhone19,4" ? [
+            "1C896A2B-F0D7-405C-8D0F-66E4B80AD044",
+            "BF0DC480-5EE2-4EC1-B02B-C75E94759832",
+        ] : []
+    }
+
     public var usesTVOS: Bool {
         family.usesTVOS
     }
@@ -136,8 +154,8 @@ public struct VPhoneGuestDevice: Sendable, Equatable {
     /// iPhone 18 Pro (V63AP): 1206x2622, 402x874 points.
     public static let iPhone19_2 = iPhone("iPhone19,2", "v63ap", "iPhone 18 Pro", width: 1206, height: 2622)
 
-    /// iPhone Duo (V68AP), using only its outer display for initial bring-up.
-    /// The inner display and hinge are not represented by the VM's single panel.
+    /// iPhone Duo (V68AP). `screen` is the outer panel; `innerScreen` is the
+    /// independent inner framebuffer, kept attached even while folded shut.
     public static let iPhone19_4 = iPhone("iPhone19,4", "v68ap", "iPhone Duo", width: 1398, height: 2034)
 
     /// iPhone XS Max: 1242x2688 at 458 ppi, 414x896 points. Its IPSW carries the

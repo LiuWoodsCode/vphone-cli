@@ -531,6 +531,27 @@ public enum CustomFirmwarePostRestoreDeviceTree {
     /// ("Restore pose on VM") instead of waiting for hinge hardware.
     public static let foldableVMSubtypes = ["V68AP": "V68VM2025"]
 
+    public static func withFoldableDisplays(_ blob: Data, board: Data) throws -> (Data, [Change], Int) {
+        let root = try parseTree(blob, label: "DT")
+        let source = try parseTree(board, label: "board DT")
+        let changes = try DeviceTreePatcher.presentFoldableDisplays(in: root, from: source)
+        guard !changes.isEmpty else { return (blob, [], 0) }
+        let result = serializeNode(root)
+        let records = changes.map {
+            Change(property: $0.path, before: $0.before?.hex ?? "absent", after: $0.after.hex)
+        }
+        return (result, records, result.count - blob.count)
+    }
+
+    @discardableResult
+    public static func presentFoldableDisplays(at url: URL, board boardURL: URL, dryRun: Bool = false, verbose: Bool = true) throws -> Outcome {
+        let board = try openDeviceTree(Data(contentsOf: boardURL), path: boardURL.path).blob
+        return try rewrite(at: url, dryRun: dryRun, verbose: verbose) { blob in
+            let (result, changes, _) = try withFoldableDisplays(blob, board: board)
+            return (result, changes, result.count)
+        }
+    }
+
     /// `blob` with its root `target-sub-type` replaced by the board's VM
     /// sub-type. A tree whose sub-type has none, or already has it, comes back
     /// unchanged.

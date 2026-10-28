@@ -1,1161 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "Apple TV Remote" : {
-    },
-    "Click or hold. Arrow keys navigate.\nReturn selects. Esc goes back." : {
-    },
-    "Down" : {
-    },
-    "Left" : {
-    },
-    "Play / Pause" : {
-    },
-    "Right" : {
-    },
-    "Select" : {
-    },
-    "Siri" : {
-    },
-    "TV / Control Center" : {
-    },
-    "Up" : {
-    },
-    "%lld of %lld defaults · %lld unsaved changes" : {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "%1$lld of %2$lld defaults · %3$lld unsaved changes"
-          }
-        }
-      }
-    },
-    "Change the search or filter to browse other defaults." : {},
-    "Debug Session" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Debug Session"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "デバッグセッション"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "디버그 세션"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Phiên gỡ lỗi"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "调试会话"
-          }
-        }
-      }
-    },
-    "Default Value" : {},
-    "Discard Changes" : {},
-    "Discard Edit" : {},
-    "Discard unsaved changes?" : {},
-    "Done" : {},
-    "Edited" : {},
-    "Enabled" : {},
-    "HomePod User Defaults" : {},
-    "HomePod user defaults" : {},
-    "Maximum" : {},
-    "Metadata" : {},
-    "Minimum" : {},
-    "No Matching Defaults" : {},
-    "Override" : {},
-    "Overrides Only" : {},
-    "Read current values and metadata. Unsaved edits are preserved." : {},
-    "Reading defaults from SoundBoard…" : {},
-    "Remove this setting's override in SoundBoard." : {},
-    "Requires reinitialization; restart SoundBoard after applying this change." : {},
-    "Reset to Default" : {},
-    "Restart SoundBoard" : {},
-    "rootless (unavailable)" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "rootless (unavailable)"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "rootless(利用不可)"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "rootless (사용할 수 없음)"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "rootless (không khả dụng)"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "rootless（不可用）"
-          }
-        }
-      }
-    },
-    "Search names and descriptions" : {},
-    "Session ended on signal %lld" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Session ended on signal %lld"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "セッションはシグナル %lld で終了しました"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "세션이 시그널 %lld(으)로 종료되었습니다"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Phiên đã kết thúc do tín hiệu %lld"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "会话因信号 %lld 结束"
-          }
-        }
-      }
-    },
-    "Session exited with status %lld" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Session exited with status %lld"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "セッションはステータス %lld で終了しました"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "세션이 상태 %lld(으)로 종료되었습니다"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Phiên đã kết thúc với trạng thái %lld"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "会话已退出，状态码 %lld"
-          }
-        }
-      }
-    },
-    "Stored Override" : {},
-    "Terminal" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Terminal"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ターミナル"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "터미널"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Terminal"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "终端"
-          }
-        }
-      }
-    },
-    "This value type is available for browsing only." : {},
-    "User Defaults" : {},
-    "User Defaults…" : {},
-    "Animation": {
-    },
-    "Commands without a reply report submission. SoundBoard applies them asynchronously.": {
-    },
-    "Copy Reply": {
-    },
-    "HomePod": {
-    },
-    "Phase": {
-    },
-    "Reload Controls": {
-    },
-    "Send Command": {
-    },
-    "SoundBoard Debug Control": {
-    },
-    "SoundBoard Reply": {
-    },
-    "This operation's native signature is unavailable on the guest firmware.": {
-    },
-    "Control Center" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Control Center" } },
-        "ja" : { "stringUnit" : { "state" : "translated", "value" : "コントロールセンター" } },
-        "ko" : { "stringUnit" : { "state" : "translated", "value" : "제어 센터" } },
-        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Trung tâm điều khiển" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "控制中心" } }
-      }
-    },
-    "Side Button" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Side Button" } },
-        "ja" : { "stringUnit" : { "state" : "translated", "value" : "サイドボタン" } },
-        "ko" : { "stringUnit" : { "state" : "translated", "value" : "측면 버튼" } },
-        "vi" : { "stringUnit" : { "state" : "translated", "value" : "Nút sườn" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "侧边按钮" } }
-      }
-    },
-    "Show Attitude Dials" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show Attitude Dials" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示姿态刻度盘" } }
-      }
-    },
-    "Drag or scroll a dial to adjust its angle. Hover to show its rotation axis." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Drag or scroll a dial to adjust its angle. Hover to show its rotation axis." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按住拖动或滚动刻度盘可调整角度，悬停时显示对应旋转轴。" } }
-      }
-    },
-    "Angles describe a stationary pose. Zero is face up. Enable simulation before launching the guest app." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Angles describe a stationary pose. Zero is face up. Enable simulation before launching the guest app."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "角度表示静止姿态。归零时屏幕朝上。请在启动来宾 App 前启用模拟。"
-          }
-        }
-      }
-    },
-    "Device Attitude" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Device Attitude"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "设备姿态"
-          }
-        }
-      }
-    },
-    "Enable the device attitude patch and relaunch the guest app." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Enable the device attitude patch and relaunch the guest app."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请启用设备姿态补丁并重新启动来宾 App。"
-          }
-        }
-      }
-    },
-    "Guest did not apply the attitude configuration" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Guest did not apply the attitude configuration"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "来宾未应用设备姿态设定"
-          }
-        }
-      }
-    },
-    "Pitch" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Pitch"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "俯仰"
-          }
-        }
-      }
-    },
-    "Roll" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Roll"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "横滚"
-          }
-        }
-      }
-    },
-    "Roll and yaw: -180 to 180°. Pitch: -90 to 90°." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Roll and yaw: -180 to 180°. Pitch: -90 to 90°."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "横滚和偏航：-180 到 180°。俯仰：-90 到 90°。"
-          }
-        }
-      }
-    },
-    "Yaw" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Yaw"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "偏航"
-          }
-        }
-      }
-    },
-    "%@ axis" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ axis"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 轴"
-          }
-        }
-      }
-    },
-    "3D Gyroscope" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "3D Gyroscope"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "3D 陀螺仪"
-          }
-        }
-      }
-    },
-    "Angular Velocity" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Angular Velocity"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "角速度"
-          }
-        }
-      }
-    },
-    "Changes sync to the guest immediately. Disabling keeps your axis values." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Changes sync to the guest immediately. Disabling keeps your axis values."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "修改会实时同步给来宾。禁用时保留三轴设定。"
-          }
-        }
-      }
-    },
-    "Enable Simulation" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Enable Simulation"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "启用模拟"
-          }
-        }
-      }
-    },
-    "Enter a number from -1000 to 1000 for each axis." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Enter a number from -1000 to 1000 for each axis."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每个轴请输入 -1000 到 1000 之间的数字。"
-          }
-        }
-      }
-    },
-    "Guest did not apply the gyroscope configuration" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Guest did not apply the gyroscope configuration"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "来宾未应用陀螺仪设定"
-          }
-        }
-      }
-    },
-    "Motion Sensors" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Motion Sensors"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "运动传感器"
-          }
-        }
-      }
-    },
-    "Reset" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reset"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "复位"
-          }
-        }
-      }
-    },
-    "Retry" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Retry"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重试"
-          }
-        }
-      }
-    },
-    "Set all three axes to zero" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Set all three axes to zero"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "将三个轴归零"
-          }
-        }
-      }
-    },
-    "Synced" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Synced"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已同步"
-          }
-        }
-      }
-    },
-    "Syncing…" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Syncing…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在同步…"
-          }
-        }
-      }
-    },
-    "Waiting for sensor service…" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Waiting for sensor service…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "等待运动传感器服务…"
-          }
-        }
-      }
-    },
-    "Use Hardware Keyboard" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Use Hardware Keyboard"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用硬件键盘"
-          }
-        }
-      }
-    },
-    "Changing the hardware keyboard requires restarting the virtual machine." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Changing the hardware keyboard requires restarting the virtual machine."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更改硬件键盘需要重新启动虚拟机。"
-          }
-        }
-      }
-    },
-    "Enable Hardware Keyboard?" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Enable Hardware Keyboard?"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "启用硬件键盘？"
-          }
-        }
-      }
-    },
-    "Disable Hardware Keyboard?" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Disable Hardware Keyboard?"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "停用硬件键盘？"
-          }
-        }
-      }
-    },
-    "Changing the hardware keyboard requires restarting the virtual machine. Save your work in the guest first. The setting is saved for this machine. With the hardware keyboard disabled, tap a text field to use the guest's software keyboard." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Changing the hardware keyboard requires restarting the virtual machine. Save your work in the guest first. The setting is saved for this machine. With the hardware keyboard disabled, tap a text field to use the guest's software keyboard."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更改硬件键盘需要重新启动虚拟机。请先保存客体系统中的工作。设置会保存在这台虚拟机中。停用硬件键盘后，点击文本框即可使用客体系统的软件键盘。"
-          }
-        }
-      }
-    },
-    "Restart and Apply" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Restart and Apply"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新启动并应用"
-          }
-        }
-      }
-    },
-    "Unable to Change Hardware Keyboard" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to Change Hardware Keyboard"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法更改硬件键盘"
-          }
-        }
-      }
-    },
-    "Unable to Restart Virtual Machine" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to Restart Virtual Machine"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法重新启动虚拟机"
-          }
-        }
-      }
-    },
-    "Unable to Change Unlock at Startup" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to Change Unlock at Startup"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "起動時のロック解除を変更できません"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "시작 시 잠금 해제를 변경할 수 없음"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Không thể thay đổi Mở khóa khi khởi động"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法更改启动时解锁"
-          }
-        }
-      }
-    },
-    "Unlock at Startup" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unlock at Startup"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "起動時にロックを解除"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "시작 시 잠금 해제"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mở khóa khi khởi động"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "启动时解锁"
-          }
-        }
-      }
-    },
-    "Wake the guest and dismiss its Lock Screen each time it starts." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wake the guest and dismiss its Lock Screen each time it starts."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゲストが起動するたびに画面をスリープ解除し、ロック画面を閉じます。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "게스트가 시작될 때마다 화면을 깨우고 잠금 화면을 닫습니다."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Đánh thức máy khách và đóng Màn hình khóa mỗi khi khởi động."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "客户机每次启动时唤醒屏幕并关闭锁定屏幕。"
-          }
-        }
-      }
-    },
-    "Unable to Change Sync Host Location" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to Change Sync Host Location"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "「ホストの位置情報を同期」を変更できません"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "호스트 위치 동기화를 변경할 수 없음"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Không thể thay đổi Đồng bộ vị trí máy chủ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法更改同步主机位置"
-          }
-        }
-      }
-    },
-    "Location Services Are Off in the Guest" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Location Services Are Off in the Guest"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゲストの位置情報サービスがオフです"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "게스트의 위치 서비스가 꺼져 있음"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Dịch vụ định vị trên máy khách đang tắt"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "客户机的定位服务已关闭"
-          }
-        }
-      }
-    },
-    "Turn on Location Services in the guest's Settings > Privacy & Security > Location Services. Until then, apps in the guest get no location; the Mac's location is sent again once they are on." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Turn on Location Services in the guest's Settings > Privacy & Security > Location Services. Until then, apps in the guest get no location; the Mac's location is sent again once they are on."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゲストの「設定」>「プライバシーとセキュリティ」>「位置情報サービス」で位置情報サービスをオンにしてください。オンにするまで、ゲストのアプリは位置情報を取得できません。オンにすると、Mac の位置情報がもう一度送信されます。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "게스트의 설정 > 개인정보 보호 및 보안 > 위치 서비스에서 위치 서비스를 켜십시오. 켜기 전까지 게스트의 앱은 위치를 받을 수 없으며, 켜면 Mac의 위치가 다시 전송됩니다."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hãy bật Dịch vụ định vị trong Cài đặt > Quyền riêng tư & Bảo mật > Dịch vụ định vị của máy khách. Trước khi bật, các ứng dụng trên máy khách không nhận được vị trí; vị trí của máy Mac sẽ được gửi lại khi dịch vụ được bật."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请在客户机的“设置”>“隐私与安全性”>“定位服务”中打开定位服务。打开之前，客户机里的 App 拿不到位置；打开后会重新发送这台 Mac 的位置。"
-          }
-        }
-      }
-    },
-    "Stop the Virtual Machine?" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stop the Virtual Machine?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "仮想マシンを停止しますか？"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "가상 머신을 중지하시겠습니까?"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Dừng máy ảo?"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要停止虚拟机吗？"
-          }
-        }
-      }
-    },
-    "Quitting turns the guest off at once, as pulling the power would. Anything not saved in the guest is lost." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Quitting turns the guest off at once, as pulling the power would. Anything not saved in the guest is lost."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "終了すると、電源を抜いたときのようにゲストがすぐにオフになります。ゲストで保存していない内容は失われます。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "종료하면 전원을 뽑은 것처럼 게스트가 즉시 꺼집니다. 게스트에서 저장하지 않은 내용은 모두 사라집니다."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Thoát sẽ tắt máy khách ngay lập tức, giống như rút nguồn. Mọi thứ chưa lưu trong máy khách sẽ bị mất."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "退出会立即关闭客户机，如同拔掉电源。客户机中未存储的内容将会丢失。"
-          }
-        }
-      }
-    },
-    "The guest shuts down, then the virtual machine stops. A guest still running after 15 seconds is turned off, as pulling the power would." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The guest shuts down, then the virtual machine stops. A guest still running after 15 seconds is turned off, as pulling the power would."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゲストをシステム終了してから仮想マシンを停止します。15 秒たってもゲストが動作している場合は、電源を抜いたときのようにオフになります。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "게스트를 종료한 다음 가상 머신을 중지합니다. 15초가 지나도 게스트가 실행 중이면 전원을 뽑은 것처럼 꺼집니다."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Máy khách sẽ tắt máy, sau đó máy ảo dừng. Nếu sau 15 giây máy khách vẫn chạy, nó sẽ bị tắt như khi rút nguồn."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "客户机先关机，然后虚拟机停止。如果 15 秒后客户机仍在运行，将如同拔掉电源一样关闭它。"
-          }
-        }
-      }
-    },
-    "The virtual machine stopped and the keyboard setting was saved. Launch this machine again. Unable to restart: %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The virtual machine stopped and the keyboard setting was saved. Launch this machine again. Unable to restart: %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "虚拟机已停止，键盘设置已保存。请再次启动这台虚拟机。无法重新启动：%@"
-          }
-        }
-      }
-    },
-    "Recording in Progress" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Recording in Progress"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在录制"
-          }
-        }
-      }
-    },
-    "Stop the screen recording before changing the hardware keyboard." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stop the screen recording before changing the hardware keyboard."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请先停止屏幕录制，再更改硬件键盘。"
-          }
-        }
-      }
-    },
     "%@ / %@" : {
       "localizations" : {
         "en" : {
@@ -1288,6 +133,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 个应用"
+          }
+        }
+      }
+    },
+    "%@ axis" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ axis"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 轴"
           }
         }
       }
@@ -1972,6 +834,40 @@
         }
       }
     },
+    "%ld fps" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%ld fps"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%ld fps"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%ld fps"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%ld fps"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%ld fps"
+          }
+        }
+      }
+    },
     "%lld Reports Selected" : {
       "localizations" : {
         "en" : {
@@ -2240,6 +1136,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$lld / %2$lld 个应用"
+          }
+        }
+      }
+    },
+    "%lld of %lld defaults · %lld unsaved changes" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld defaults · %3$lld unsaved changes"
           }
         }
       }
@@ -2648,6 +1554,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 个键"
+          }
+        }
+      }
+    },
+    "3D Gyroscope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "3D Gyroscope"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "3D 陀螺仪"
           }
         }
       }
@@ -3104,6 +2027,22 @@
         }
       }
     },
+    "Allow Network" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow Network"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许网络访问"
+          }
+        }
+      }
+    },
     "Allow VPhone to use your location in System Settings > Privacy & Security > Location Services to sync the Mac's location." : {
       "localizations" : {
         "en" : {
@@ -3134,22 +2073,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要同步 Mac 的位置，请在“系统设置”>“隐私与安全性”>“定位服务”中允许 VPhone。"
-          }
-        }
-      }
-    },
-    "Allow Network" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Allow Network"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允许网络访问"
           }
         }
       }
@@ -3367,6 +2290,43 @@
           }
         }
       }
+    },
+    "Angles describe a stationary pose. Zero is face up. Enable simulation before launching the guest app." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Angles describe a stationary pose. Zero is face up. Enable simulation before launching the guest app."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "角度表示静止姿态。归零时屏幕朝上。请在启动来宾 App 前启用模拟。"
+          }
+        }
+      }
+    },
+    "Angular Velocity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Angular Velocity"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "角速度"
+          }
+        }
+      }
+    },
+    "Animation" : {
+
     },
     "App" : {
       "localizations" : {
@@ -3655,6 +2615,9 @@
           }
         }
       }
+    },
+    "Apple TV Remote" : {
+
     },
     "Apps" : {
       "localizations" : {
@@ -5224,6 +4187,60 @@
         }
       }
     },
+    "Change the search or filter to browse other defaults." : {
+
+    },
+    "Changes sync to the guest immediately. Disabling keeps your axis values." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Changes sync to the guest immediately. Disabling keeps your axis values."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改会实时同步给来宾。禁用时保留三轴设定。"
+          }
+        }
+      }
+    },
+    "Changing the hardware keyboard requires restarting the virtual machine." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Changing the hardware keyboard requires restarting the virtual machine."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改硬件键盘需要重新启动虚拟机。"
+          }
+        }
+      }
+    },
+    "Changing the hardware keyboard requires restarting the virtual machine. Save your work in the guest first. The setting is saved for this machine. With the hardware keyboard disabled, tap a text field to use the guest's software keyboard." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Changing the hardware keyboard requires restarting the virtual machine. Save your work in the guest first. The setting is saved for this machine. With the hardware keyboard disabled, tap a text field to use the guest's software keyboard."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改硬件键盘需要重新启动虚拟机。请先保存客体系统中的工作。设置会保存在这台虚拟机中。停用硬件键盘后，点击文本框即可使用客体系统的软件键盘。"
+          }
+        }
+      }
+    },
     "Characters: %@" : {
       "localizations" : {
         "en" : {
@@ -5652,6 +4669,9 @@
         }
       }
     },
+    "Choose a Pose" : {
+
+    },
     "Choose a folder for the selected reports." : {
       "localizations" : {
         "ja" : {
@@ -5996,6 +5016,9 @@
         }
       }
     },
+    "Click or hold. Arrow keys navigate.\nReturn selects. Esc goes back." : {
+
+    },
     "Clipboard" : {
       "localizations" : {
         "en" : {
@@ -6166,6 +5189,12 @@
         }
       }
     },
+    "Closed (0°)" : {
+
+    },
+    "Commands without a reply report submission. SoundBoard applies them asynchronously." : {
+
+    },
     "Common domains" : {
       "localizations" : {
         "en" : {
@@ -6320,6 +5349,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "继续"
+          }
+        }
+      }
+    },
+    "Control Center" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Control Center"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コントロールセンター"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제어 센터"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trung tâm điều khiển"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "控制中心"
           }
         }
       }
@@ -7232,6 +6295,9 @@
         }
       }
     },
+    "Copy Reply" : {
+
+    },
     "Copy Result" : {
       "localizations" : {
         "en" : {
@@ -8084,6 +7150,41 @@
         }
       }
     },
+    "Cryptographic Key" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cryptographic Key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キー"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Khóa"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密钥"
+          }
+        }
+      }
+    },
     "Current Value" : {
       "localizations" : {
         "en" : {
@@ -8338,6 +7439,40 @@
         }
       }
     },
+    "Debug Session" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Debug Session"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "デバッグセッション"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "디버그 세션"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phiên gỡ lỗi"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "调试会话"
+          }
+        }
+      }
+    },
     "Default" : {
       "localizations" : {
         "ja" : {
@@ -8365,6 +7500,9 @@
           }
         }
       }
+    },
+    "Default Value" : {
+
     },
     "Delete" : {
       "localizations" : {
@@ -8464,6 +7602,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "删除失败：%@"
+          }
+        }
+      }
+    },
+    "Delete the selected keychain items?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete the selected keychain items?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選択したキーチェーン項目を削除しますか？"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택한 키체인 항목을 삭제할까요?"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xóa các mục Keychain đã chọn?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要删除选中的钥匙串项目吗？"
           }
         }
       }
@@ -8684,6 +7856,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "设备"
+          }
+        }
+      }
+    },
+    "Device Attitude" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device Attitude"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备姿态"
           }
         }
       }
@@ -8970,6 +8159,23 @@
         }
       }
     },
+    "Disable Hardware Keyboard?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disable Hardware Keyboard?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停用硬件键盘？"
+          }
+        }
+      }
+    },
     "Disabled" : {
       "localizations" : {
         "ja" : {
@@ -9093,6 +8299,15 @@
           }
         }
       }
+    },
+    "Discard Changes" : {
+
+    },
+    "Discard Edit" : {
+
+    },
+    "Discard unsaved changes?" : {
+
     },
     "Disconnected" : {
       "localizations" : {
@@ -9245,6 +8460,12 @@
           }
         }
       }
+    },
+    "Done" : {
+
+    },
+    "Down" : {
+
     },
     "Down Arrow" : {
       "localizations" : {
@@ -9444,6 +8665,23 @@
         }
       }
     },
+    "Drag or scroll a dial to adjust its angle. Hover to show its rotation axis." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag or scroll a dial to adjust its angle. Hover to show its rotation axis."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住拖动或滚动刻度盘可调整角度，悬停时显示对应旋转轴。"
+          }
+        }
+      }
+    },
     "Drop to Upload to %@" : {
       "localizations" : {
         "en" : {
@@ -9546,6 +8784,40 @@
         }
       }
     },
+    "Edit Value" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Edit Value"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "値を編集"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "값 편집"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sửa giá trị"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编辑值"
+          }
+        }
+      }
+    },
     "Edit Value…" : {
       "localizations" : {
         "en" : {
@@ -9579,6 +8851,9 @@
           }
         }
       }
+    },
+    "Edited" : {
+
     },
     "Effective UID" : {
       "localizations" : {
@@ -9670,6 +8945,57 @@
         }
       }
     },
+    "Enable Hardware Keyboard?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable Hardware Keyboard?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用硬件键盘？"
+          }
+        }
+      }
+    },
+    "Enable Simulation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable Simulation"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用模拟"
+          }
+        }
+      }
+    },
+    "Enable the device attitude patch and relaunch the guest app." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable the device attitude patch and relaunch the guest app."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请启用设备姿态补丁并重新启动来宾 App。"
+          }
+        }
+      }
+    },
     "Enable, disable, signal, or remove the selected service" : {
       "localizations" : {
         "ja" : {
@@ -9697,6 +9023,9 @@
           }
         }
       }
+    },
+    "Enabled" : {
+
     },
     "Enabled %@." : {
       "localizations" : {
@@ -10028,6 +9357,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请输入有限数值。"
+          }
+        }
+      }
+    },
+    "Enter a number from -1000 to 1000 for each axis." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter a number from -1000 to 1000 for each axis."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每个轴请输入 -1000 到 1000 之间的数字。"
           }
         }
       }
@@ -10772,6 +10118,41 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "文件浏览器"
+          }
+        }
+      }
+    },
+    "File Size" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "File Size"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サイズ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "크기"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kích thước"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "大小"
           }
         }
       }
@@ -11528,6 +10909,40 @@
         }
       }
     },
+    "Guest did not apply the attitude configuration" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guest did not apply the attitude configuration"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来宾未应用设备姿态设定"
+          }
+        }
+      }
+    },
+    "Guest did not apply the gyroscope configuration" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guest did not apply the gyroscope configuration"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来宾未应用陀螺仪设定"
+          }
+        }
+      }
+    },
     "Guest disconnected" : {
       "localizations" : {
         "en" : {
@@ -11769,6 +11184,43 @@
           }
         }
       }
+    },
+    "Hidden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hidden"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "非表示"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "숨김"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đã ẩn"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已隐藏"
+          }
+        }
+      }
+    },
+    "Hinge" : {
+
     },
     "Hold Command while sending a special key" : {
       "localizations" : {
@@ -12095,6 +11547,15 @@
           }
         }
       }
+    },
+    "HomePod" : {
+
+    },
+    "HomePod User Defaults" : {
+
+    },
+    "HomePod user defaults" : {
+
     },
     "Host Location Unavailable" : {
       "localizations" : {
@@ -13332,41 +12793,6 @@
         }
       }
     },
-    "Cryptographic Key" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cryptographic Key"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "キー"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "키"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Khóa"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "密钥"
-          }
-        }
-      }
-    },
     "Key (Optional)" : {
       "localizations" : {
         "en" : {
@@ -13987,6 +13413,9 @@
         }
       }
     },
+    "Left" : {
+
+    },
     "Left Arrow" : {
       "localizations" : {
         "ja" : {
@@ -14307,6 +13736,41 @@
         }
       }
     },
+    "Location Services Are Off in the Guest" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Location Services Are Off in the Guest"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストの位置情報サービスがオフです"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트의 위치 서비스가 꺼져 있음"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dịch vụ định vị trên máy khách đang tắt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客户机的定位服务已关闭"
+          }
+        }
+      }
+    },
     "Lock" : {
       "localizations" : {
         "ja" : {
@@ -14531,6 +13995,9 @@
         }
       }
     },
+    "Maximum" : {
+
+    },
     "Media" : {
       "localizations" : {
         "ja" : {
@@ -14643,6 +14110,9 @@
         }
       }
     },
+    "Metadata" : {
+
+    },
     "Minimize" : {
       "localizations" : {
         "en" : {
@@ -14676,6 +14146,9 @@
           }
         }
       }
+    },
+    "Minimum" : {
+
     },
     "Minimum OS" : {
       "localizations" : {
@@ -14853,6 +14326,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更多操作"
+          }
+        }
+      }
+    },
+    "Motion Sensors" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Motion Sensors"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运动传感器"
           }
         }
       }
@@ -15376,6 +14866,9 @@
           }
         }
       }
+    },
+    "No Matching Defaults" : {
+
     },
     "No Matching Entries" : {
       "localizations" : {
@@ -16549,6 +16042,9 @@
         }
       }
     },
+    "Open Flat (180°)" : {
+
+    },
     "Open Guest Spotlight" : {
       "localizations" : {
         "en" : {
@@ -16905,6 +16401,12 @@
         }
       }
     },
+    "Override" : {
+
+    },
+    "Overrides Only" : {
+
+    },
     "PID" : {
       "localizations" : {
         "ja" : {
@@ -16988,6 +16490,9 @@
           }
         }
       }
+    },
+    "Partially Open (90°)" : {
+
     },
     "Passcode" : {
       "localizations" : {
@@ -17463,6 +16968,9 @@
         }
       }
     },
+    "Phase" : {
+
+    },
     "Physical Memory" : {
       "localizations" : {
         "ja" : {
@@ -17525,6 +17033,23 @@
         }
       }
     },
+    "Pitch" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pitch"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "俯仰"
+          }
+        }
+      }
+    },
     "Pixels" : {
       "localizations" : {
         "ja" : {
@@ -17580,6 +17105,9 @@
           }
         }
       }
+    },
+    "Play / Pause" : {
+
     },
     "Portrait" : {
       "localizations" : {
@@ -18375,652 +17903,6 @@
         }
       }
     },
-    "Hidden" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hidden"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "非表示"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "숨김"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Đã ẩn"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已隐藏"
-          }
-        }
-      }
-    },
-    "Reveal Value" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reveal Value"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "値を表示"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "값 표시"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hiện giá trị"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "显示值"
-          }
-        }
-      }
-    },
-    "Edit Value" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Edit Value"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "値を編集"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "값 편집"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sửa giá trị"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "编辑值"
-          }
-        }
-      }
-    },
-    "Save" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Save"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保存"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "저장"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lưu"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "存储"
-          }
-        }
-      }
-    },
-    "Delete the selected keychain items?" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Delete the selected keychain items?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "選択したキーチェーン項目を削除しますか？"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "선택한 키체인 항목을 삭제할까요?"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Xóa các mục Keychain đã chọn?"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要删除选中的钥匙串项目吗？"
-          }
-        }
-      }
-    },
-    "Shut Down Guest" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Shut Down Guest"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゲストをシステム終了"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "게스트 종료"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tắt máy khách"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "客户机关机"
-          }
-        }
-      }
-    },
-    "Shut Down Guest…" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Shut Down Guest…"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゲストをシステム終了…"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "게스트 종료…"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tắt máy khách…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "客户机关机…"
-          }
-        }
-      }
-    },
-    "Shut down the guest?" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Shut down the guest?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゲストをシステム終了しますか?"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "게스트를 종료하시겠습니까?"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tắt máy khách?"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要将客户机关机吗？"
-          }
-        }
-      }
-    },
-    "Switch Guest Input Source" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Switch Guest Input Source"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゲストの入力ソースを切り替える"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "게스트 입력 소스 전환"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Chuyển nguồn nhập trên máy khách"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "切换客体输入法"
-          }
-        }
-      }
-    },
-    "The guest refused the shutdown request." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The guest refused the shutdown request."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゲストがシステム終了の要求を拒否しました。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "게스트가 종료 요청을 거부했습니다."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Máy khách đã từ chối yêu cầu tắt máy."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "客户机拒绝了关机请求。"
-          }
-        }
-      }
-    },
-    "The guest removes them from its keychain. This cannot be undone." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The guest removes them from its keychain. This cannot be undone."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゲストのキーチェーンから削除されます。この操作は取り消せません。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "게스트의 키체인에서 제거됩니다. 이 작업은 취소할 수 없습니다."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Khách sẽ xóa chúng khỏi Keychain. Không thể hoàn tác."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "客户机会将它们从钥匙串中移除，此操作无法撤销。"
-          }
-        }
-      }
-    },
-    "The value is stored as its UTF-8 bytes." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The value is stored as its UTF-8 bytes."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "値は UTF-8 のバイト列として保存されます。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "값은 UTF-8 바이트로 저장됩니다."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Giá trị được lưu dưới dạng byte UTF-8."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "值将以 UTF-8 字节存储。"
-          }
-        }
-      }
-    },
-    "Unable to read the keychain item. Try again." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to read the keychain item. Try again."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "キーチェーン項目を読み取れませんでした。もう一度お試しください。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "키체인 항목을 읽을 수 없습니다. 다시 시도하십시오."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Không thể đọc mục Keychain. Hãy thử lại."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法读取该钥匙串项目，请重试。"
-          }
-        }
-      }
-    },
-    "Unable to Shut Down Guest" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to Shut Down Guest"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ゲストをシステム終了できません"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "게스트를 종료할 수 없음"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Không thể tắt máy khách"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法将客户机关机"
-          }
-        }
-      }
-    },
-    "Unable to update the keychain item. Try again." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to update the keychain item. Try again."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "キーチェーン項目を更新できませんでした。もう一度お試しください。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "키체인 항목을 업데이트할 수 없습니다. 다시 시도하십시오."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Không thể cập nhật mục Keychain. Hãy thử lại."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法更新该钥匙串项目，请重试。"
-          }
-        }
-      }
-    },
-    "Unable to delete the keychain item. Try again." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to delete the keychain item. Try again."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "キーチェーン項目を削除できませんでした。もう一度お試しください。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "키체인 항목을 삭제할 수 없습니다. 다시 시도하십시오."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Không thể xóa mục Keychain. Hãy thử lại."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法删除该钥匙串项目，请重试。"
-          }
-        }
-      }
-    },
-    "Show Frame Rate" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Show Frame Rate"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "フレームレートを表示"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "프레임 속도 표시"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hiển thị tốc độ khung hình"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "显示帧率"
-          }
-        }
-      }
-    },
-    "%ld fps" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%ld fps"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%ld fps"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%ld fps"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%ld fps"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%ld fps"
-          }
-        }
-      }
-    },
-    "Trackpad Scroll & Pinch to Touch" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Trackpad Scroll & Pinch to Touch"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "トラックパッド操作のマッピング"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "트랙패드 입력 매핑"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ánh xạ bàn di chuột"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "触控板映射"
-          }
-        }
-      }
-    },
     "Protected" : {
       "localizations" : {
         "en" : {
@@ -19153,6 +18035,41 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "退出 VPhone"
+          }
+        }
+      }
+    },
+    "Quitting turns the guest off at once, as pulling the power would. Anything not saved in the guest is lost." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quitting turns the guest off at once, as pulling the power would. Anything not saved in the guest is lost."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "終了すると、電源を抜いたときのようにゲストがすぐにオフになります。ゲストで保存していない内容は失われます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "종료하면 전원을 뽑은 것처럼 게스트가 즉시 꺼집니다. 게스트에서 저장하지 않은 내용은 모두 사라집니다."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thoát sẽ tắt máy khách ngay lập tức, giống như rút nguồn. Mọi thứ chưa lưu trong máy khách sẽ bị mất."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退出会立即关闭客户机，如同拔掉电源。客户机中未存储的内容将会丢失。"
           }
         }
       }
@@ -19354,6 +18271,9 @@
           }
         }
       }
+    },
+    "Read current values and metadata. Unsaved edits are preserved." : {
+
     },
     "Read one preference key, or leave the key empty to read all keys in the domain." : {
       "localizations" : {
@@ -19569,6 +18489,9 @@
         }
       }
     },
+    "Reading defaults from SoundBoard…" : {
+
+    },
     "Reading device information…" : {
       "localizations" : {
         "ja" : {
@@ -19693,6 +18616,40 @@
         }
       }
     },
+    "Rebuild App Registrations" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rebuild App Registrations"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アプリ登録を再構築"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "앱 등록 재구성"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tạo lại đăng ký ứng dụng"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重建应用注册"
+          }
+        }
+      }
+    },
     "Recording" : {
       "localizations" : {
         "en" : {
@@ -19757,6 +18714,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在登记固件版本…"
+          }
+        }
+      }
+    },
+    "Recording in Progress" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recording in Progress"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在录制"
           }
         }
       }
@@ -19885,6 +18859,40 @@
         }
       }
     },
+    "Registered %1$@, removed %2$@, %3$@ unchanged." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registered %1$@, removed %2$@, %3$@ unchanged."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登録 %1$@ 件、削除 %2$@ 件、変更なし %3$@ 件。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "등록 %1$@개, 제거 %2$@개, 변경 없음 %3$@개."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đã đăng ký %1$@, đã xóa %2$@, %3$@ không đổi."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已注册 %1$@ 个，已移除 %2$@ 个，%3$@ 个未变化。"
+          }
+        }
+      }
+    },
     "Registering Irisin…" : {
       "localizations" : {
         "en" : {
@@ -19918,6 +18926,9 @@
           }
         }
       }
+    },
+    "Reload Controls" : {
+
     },
     "Reload the app list (⌘R)" : {
       "localizations" : {
@@ -20126,6 +19137,9 @@
           }
         }
       }
+    },
+    "Remove this setting's override in SoundBoard." : {
+
     },
     "Removed %@." : {
       "localizations" : {
@@ -20499,6 +19513,29 @@
         }
       }
     },
+    "Requested hinge pose: %@." : {
+
+    },
+    "Requires reinitialization; restart SoundBoard after applying this change." : {
+
+    },
+    "Reset" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复位"
+          }
+        }
+      }
+    },
     "Reset UDID" : {
       "localizations" : {
         "en" : {
@@ -20532,6 +19569,9 @@
           }
         }
       }
+    },
+    "Reset to Default" : {
+
     },
     "Resident" : {
       "localizations" : {
@@ -20721,6 +19761,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重启客户机…"
+          }
+        }
+      }
+    },
+    "Restart SoundBoard" : {
+
+    },
+    "Restart and Apply" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restart and Apply"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新启动并应用"
           }
         }
       }
@@ -20957,6 +20017,23 @@
         }
       }
     },
+    "Retry" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重试"
+          }
+        }
+      }
+    },
     "Return" : {
       "localizations" : {
         "ja" : {
@@ -20981,6 +20058,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Return"
+          }
+        }
+      }
+    },
+    "Reveal Value" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reveal Value"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "値を表示"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "값 표시"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hiện giá trị"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示值"
           }
         }
       }
@@ -21018,6 +20129,9 @@
           }
         }
       }
+    },
+    "Right" : {
+
     },
     "Right Arrow" : {
       "localizations" : {
@@ -21071,6 +20185,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "铃声"
+          }
+        }
+      }
+    },
+    "Roll" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Roll"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "横滚"
+          }
+        }
+      }
+    },
+    "Roll and yaw: -180 to 180°. Pitch: -90 to 90°." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Roll and yaw: -180 to 180°. Pitch: -90 to 90°."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "横滚和偏航：-180 到 180°。俯仰：-90 到 90°。"
           }
         }
       }
@@ -21615,6 +20763,40 @@
         }
       }
     },
+    "Save" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lưu"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "存储"
+          }
+        }
+      }
+    },
     "Save Here" : {
       "localizations" : {
         "en" : {
@@ -22117,6 +21299,9 @@
         }
       }
     },
+    "Search names and descriptions" : {
+
+    },
     "Security" : {
       "localizations" : {
         "ja" : {
@@ -22144,6 +21329,9 @@
           }
         }
       }
+    },
+    "Select" : {
+
     },
     "Select All" : {
       "localizations" : {
@@ -22522,6 +21710,9 @@
           }
         }
       }
+    },
+    "Send Command" : {
+
     },
     "Send SIGTERM to the selected processes (⌘⌫)" : {
       "localizations" : {
@@ -23003,6 +22194,74 @@
         }
       }
     },
+    "Session ended on signal %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Session ended on signal %lld"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "セッションはシグナル %lld で終了しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션이 시그널 %lld(으)로 종료되었습니다"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phiên đã kết thúc do tín hiệu %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会话因信号 %lld 结束"
+          }
+        }
+      }
+    },
+    "Session exited with status %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Session exited with status %lld"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "セッションはステータス %lld で終了しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션이 상태 %lld(으)로 종료되었습니다"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phiên đã kết thúc với trạng thái %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会话已退出，状态码 %lld"
+          }
+        }
+      }
+    },
     "Set" : {
       "localizations" : {
         "ja" : {
@@ -23167,6 +22426,26 @@
         }
       }
     },
+    "Set all three axes to zero" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set all three axes to zero"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将三个轴归零"
+          }
+        }
+      }
+    },
+    "Set the fold pose. Both display windows remain available; the guest decides which panels are lit. The selection shows the last requested pose." : {
+
+    },
     "Set the guest clipboard to this text (⌘↩)" : {
       "localizations" : {
         "en" : {
@@ -23303,6 +22582,23 @@
         }
       }
     },
+    "Show Attitude Dials" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Attitude Dials"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示姿态刻度盘"
+          }
+        }
+      }
+    },
     "Show Data Container" : {
       "localizations" : {
         "ja" : {
@@ -23361,6 +22657,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "显示诊断信息"
+          }
+        }
+      }
+    },
+    "Show Frame Rate" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Frame Rate"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フレームレートを表示"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프레임 속도 표시"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hiển thị tốc độ khung hình"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示帧率"
           }
         }
       }
@@ -23539,6 +22869,142 @@
         }
       }
     },
+    "Shut Down Guest" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shut Down Guest"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストをシステム終了"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트 종료"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tắt máy khách"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客户机关机"
+          }
+        }
+      }
+    },
+    "Shut Down Guest…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shut Down Guest…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストをシステム終了…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트 종료…"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tắt máy khách…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客户机关机…"
+          }
+        }
+      }
+    },
+    "Shut down the guest?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shut down the guest?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストをシステム終了しますか?"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트를 종료하시겠습니까?"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tắt máy khách?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要将客户机关机吗？"
+          }
+        }
+      }
+    },
+    "Side Button" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Side Button"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サイドボタン"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "측면 버튼"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nút sườn"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "侧边按钮"
+          }
+        }
+      }
+    },
     "Signal" : {
       "localizations" : {
         "ja" : {
@@ -23595,6 +23061,9 @@
         }
       }
     },
+    "Siri" : {
+
+    },
     "Size" : {
       "localizations" : {
         "en" : {
@@ -23625,41 +23094,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "尺寸"
-          }
-        }
-      }
-    },
-    "File Size" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "File Size"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "サイズ"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "크기"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Kích thước"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "大小"
           }
         }
       }
@@ -23765,6 +23199,12 @@
           }
         }
       }
+    },
+    "SoundBoard Debug Control" : {
+
+    },
+    "SoundBoard Reply" : {
+
     },
     "Source: Off" : {
       "localizations" : {
@@ -24602,6 +24042,58 @@
         }
       }
     },
+    "Stop the Virtual Machine?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop the Virtual Machine?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仮想マシンを停止しますか？"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "가상 머신을 중지하시겠습니까?"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dừng máy ảo?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要停止虚拟机吗？"
+          }
+        }
+      }
+    },
+    "Stop the screen recording before changing the hardware keyboard." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop the screen recording before changing the hardware keyboard."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先停止屏幕录制，再更改硬件键盘。"
+          }
+        }
+      }
+    },
     "Stop the selected service" : {
       "localizations" : {
         "ja" : {
@@ -24810,6 +24302,9 @@
         }
       }
     },
+    "Stored Override" : {
+
+    },
     "Streaming Paused" : {
       "localizations" : {
         "ja" : {
@@ -24928,6 +24423,40 @@
         }
       }
     },
+    "Switch Guest Input Source" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch Guest Input Source"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストの入力ソースを切り替える"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트 입력 소스 전환"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chuyển nguồn nhập trên máy khách"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换客体输入法"
+          }
+        }
+      }
+    },
     "Switch between reading from and writing to the guest (⌘1, ⌘2)" : {
       "localizations" : {
         "en" : {
@@ -25030,6 +24559,40 @@
         }
       }
     },
+    "Synced" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synced"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已同步"
+          }
+        }
+      }
+    },
+    "Syncing…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Syncing…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在同步…"
+          }
+        }
+      }
+    },
     "System" : {
       "localizations" : {
         "en" : {
@@ -25092,6 +24655,9 @@
         }
       }
     },
+    "TV / Control Center" : {
+
+    },
     "Tab" : {
       "localizations" : {
         "ja" : {
@@ -25116,6 +24682,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tab"
+          }
+        }
+      }
+    },
+    "Terminal" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminal"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナル"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "터미널"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminal"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "终端"
           }
         }
       }
@@ -25944,6 +25544,74 @@
         }
       }
     },
+    "The guest refused the shutdown request." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The guest refused the shutdown request."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストがシステム終了の要求を拒否しました。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트가 종료 요청을 거부했습니다."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Máy khách đã từ chối yêu cầu tắt máy."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客户机拒绝了关机请求。"
+          }
+        }
+      }
+    },
+    "The guest removes them from its keychain. This cannot be undone." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The guest removes them from its keychain. This cannot be undone."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストのキーチェーンから削除されます。この操作は取り消せません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트의 키체인에서 제거됩니다. 이 작업은 취소할 수 없습니다."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Khách sẽ xóa chúng khỏi Keychain. Không thể hoàn tác."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客户机会将它们从钥匙串中移除，此操作无法撤销。"
+          }
+        }
+      }
+    },
     "The guest reported no IPv4 or IPv6 addresses." : {
       "localizations" : {
         "ja" : {
@@ -26064,6 +25732,41 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "客户机只发送了此报告的一部分。"
+          }
+        }
+      }
+    },
+    "The guest shuts down, then the virtual machine stops. A guest still running after 15 seconds is turned off, as pulling the power would." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The guest shuts down, then the virtual machine stops. A guest still running after 15 seconds is turned off, as pulling the power would."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストをシステム終了してから仮想マシンを停止します。15 秒たってもゲストが動作している場合は、電源を抜いたときのようにオフになります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트를 종료한 다음 가상 머신을 중지합니다. 15초가 지나도 게스트가 실행 중이면 전원을 뽑은 것처럼 꺼집니다."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Máy khách sẽ tắt máy, sau đó máy ảo dừng. Nếu sau 15 giây máy khách vẫn chạy, nó sẽ bị tắt như khi rút nguồn."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客户机先关机，然后虚拟机停止。如果 15 秒后客户机仍在运行，将如同拔掉电源一样关闭它。"
           }
         }
       }
@@ -26288,6 +25991,57 @@
         }
       }
     },
+    "The value is stored as its UTF-8 bytes." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The value is stored as its UTF-8 bytes."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "値は UTF-8 のバイト列として保存されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "값은 UTF-8 바이트로 저장됩니다."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Giá trị được lưu dưới dạng byte UTF-8."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "值将以 UTF-8 字节存储。"
+          }
+        }
+      }
+    },
+    "The virtual machine stopped and the keyboard setting was saved. Launch this machine again. Unable to restart: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The virtual machine stopped and the keyboard setting was saved. Launch this machine again. Unable to restart: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "虚拟机已停止，键盘设置已保存。请再次启动这台虚拟机。无法重新启动：%@"
+          }
+        }
+      }
+    },
     "This app declares no URL schemes." : {
       "localizations" : {
         "ja" : {
@@ -26343,6 +26097,12 @@
           }
         }
       }
+    },
+    "This operation's native signature is unavailable on the guest firmware." : {
+
+    },
+    "This value type is available for browsing only." : {
+
     },
     "Time" : {
       "localizations" : {
@@ -26496,6 +26256,40 @@
         }
       }
     },
+    "Trackpad Scroll & Pinch to Touch" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trackpad Scroll & Pinch to Touch"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "トラックパッド操作のマッピング"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "트랙패드 입력 매핑"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ánh xạ bàn di chuột"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "触控板映射"
+          }
+        }
+      }
+    },
     "Transferring…" : {
       "localizations" : {
         "en" : {
@@ -26644,6 +26438,41 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "通过 powerd 打开或关闭低电量模式"
+          }
+        }
+      }
+    },
+    "Turn on Location Services in the guest's Settings > Privacy & Security > Location Services. Until then, apps in the guest get no location; the Mac's location is sent again once they are on." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn on Location Services in the guest's Settings > Privacy & Security > Location Services. Until then, apps in the guest get no location; the Mac's location is sent again once they are on."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストの「設定」>「プライバシーとセキュリティ」>「位置情報サービス」で位置情報サービスをオンにしてください。オンにするまで、ゲストのアプリは位置情報を取得できません。オンにすると、Mac の位置情報がもう一度送信されます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트의 설정 > 개인정보 보호 및 보안 > 위치 서비스에서 위치 서비스를 켜십시오. 켜기 전까지 게스트의 앱은 위치를 받을 수 없으며, 켜면 Mac의 위치가 다시 전송됩니다."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hãy bật Dịch vụ định vị trong Cài đặt > Quyền riêng tư & Bảo mật > Dịch vụ định vị của máy khách. Trước khi bật, các ứng dụng trên máy khách không nhận được vị trí; vị trí của máy Mac sẽ được gửi lại khi dịch vụ được bật."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在客户机的“设置”>“隐私与安全性”>“定位服务”中打开定位服务。打开之前，客户机里的 App 拿不到位置；打开后会重新发送这台 Mac 的位置。"
           }
         }
       }
@@ -26970,6 +26799,93 @@
         }
       }
     },
+    "Unable to Change Hardware Keyboard" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to Change Hardware Keyboard"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法更改硬件键盘"
+          }
+        }
+      }
+    },
+    "Unable to Change Sync Host Location" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to Change Sync Host Location"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「ホストの位置情報を同期」を変更できません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "호스트 위치 동기화를 변경할 수 없음"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể thay đổi Đồng bộ vị trí máy chủ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法更改同步主机位置"
+          }
+        }
+      }
+    },
+    "Unable to Change Unlock at Startup" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to Change Unlock at Startup"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "起動時のロック解除を変更できません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시작 시 잠금 해제를 변경할 수 없음"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể thay đổi Mở khóa khi khởi động"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法更改启动时解锁"
+          }
+        }
+      }
+    },
     "Unable to Load Apps" : {
       "localizations" : {
         "ja" : {
@@ -27022,6 +26938,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法载入报告"
+          }
+        }
+      }
+    },
+    "Unable to Rebuild App Registrations" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to Rebuild App Registrations"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アプリ登録を再構築できません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "앱 등록을 재구성할 수 없음"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể tạo lại đăng ký ứng dụng"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法重建应用注册"
           }
         }
       }
@@ -27128,6 +27078,23 @@
         }
       }
     },
+    "Unable to Restart Virtual Machine" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to Restart Virtual Machine"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法重新启动虚拟机"
+          }
+        }
+      }
+    },
     "Unable to Rotate" : {
       "localizations" : {
         "ja" : {
@@ -27186,6 +27153,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法设置 UDID"
+          }
+        }
+      }
+    },
+    "Unable to Shut Down Guest" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to Shut Down Guest"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストをシステム終了できません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트를 종료할 수 없음"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể tắt máy khách"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法将客户机关机"
           }
         }
       }
@@ -27440,6 +27441,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法创建文件夹“%@”。请检查连接，然后重试。"
+          }
+        }
+      }
+    },
+    "Unable to delete the keychain item. Try again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to delete the keychain item. Try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キーチェーン項目を削除できませんでした。もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키체인 항목을 삭제할 수 없습니다. 다시 시도하십시오."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể xóa mục Keychain. Hãy thử lại."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法删除该钥匙串项目，请重试。"
           }
         }
       }
@@ -28892,6 +28927,40 @@
         }
       }
     },
+    "Unable to read the keychain item. Try again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to read the keychain item. Try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キーチェーン項目を読み取れませんでした。もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키체인 항목을 읽을 수 없습니다. 다시 시도하십시오."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể đọc mục Keychain. Hãy thử lại."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取该钥匙串项目，请重试。"
+          }
+        }
+      }
+    },
     "Unable to read “%@”. Check that the file still exists, then try again." : {
       "localizations" : {
         "en" : {
@@ -28922,6 +28991,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法读取“%@”。请确认该文件仍然存在，然后重试。"
+          }
+        }
+      }
+    },
+    "Unable to rebuild app registrations.\n\n%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to rebuild app registrations.\n\n%@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アプリ登録を再構築できません。\n\n%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "앱 등록을 재구성할 수 없습니다.\n\n%@"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể tạo lại đăng ký ứng dụng.\n\n%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法重建应用注册。\n\n%@"
+          }
+        }
+      }
+    },
+    "Unable to rebuild app registrations. Check that the guest agent is connected, then try again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to rebuild app registrations. Check that the guest agent is connected, then try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アプリ登録を再構築できません。ゲストエージェントの接続を確認して再試行してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "앱 등록을 재구성할 수 없습니다. 게스트 에이전트 연결을 확인한 후 다시 시도하세요."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể tạo lại đăng ký ứng dụng. Hãy kiểm tra kết nối tác nhân máy khách rồi thử lại."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法重建应用注册。请检查客户机代理连接后重试。"
           }
         }
       }
@@ -29838,6 +29975,40 @@
         }
       }
     },
+    "Unable to update the keychain item. Try again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to update the keychain item. Try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キーチェーン項目を更新できませんでした。もう一度お試しください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키체인 항목을 업데이트할 수 없습니다. 다시 시도하십시오."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể cập nhật mục Keychain. Hãy thử lại."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法更新该钥匙串项目，请重试。"
+          }
+        }
+      }
+    },
     "Unable to upload “%@”. Check the connection, then try again." : {
       "localizations" : {
         "en" : {
@@ -30132,176 +30303,6 @@
         }
       }
     },
-    "Rebuild App Registrations" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rebuild App Registrations"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アプリ登録を再構築"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "앱 등록 재구성"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tạo lại đăng ký ứng dụng"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重建应用注册"
-          }
-        }
-      }
-    },
-    "Unable to Rebuild App Registrations" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to Rebuild App Registrations"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アプリ登録を再構築できません"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "앱 등록을 재구성할 수 없음"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Không thể tạo lại đăng ký ứng dụng"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法重建应用注册"
-          }
-        }
-      }
-    },
-    "Registered %1$@, removed %2$@, %3$@ unchanged." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Registered %1$@, removed %2$@, %3$@ unchanged."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "登録 %1$@ 件、削除 %2$@ 件、変更なし %3$@ 件。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "등록 %1$@개, 제거 %2$@개, 변경 없음 %3$@개."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Đã đăng ký %1$@, đã xóa %2$@, %3$@ không đổi."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已注册 %1$@ 个，已移除 %2$@ 个，%3$@ 个未变化。"
-          }
-        }
-      }
-    },
-    "Unable to rebuild app registrations.\n\n%@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to rebuild app registrations.\n\n%@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アプリ登録を再構築できません。\n\n%@"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "앱 등록을 재구성할 수 없습니다.\n\n%@"
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Không thể tạo lại đăng ký ứng dụng.\n\n%@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法重建应用注册。\n\n%@"
-          }
-        }
-      }
-    },
-    "Unable to rebuild app registrations. Check that the guest agent is connected, then try again." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to rebuild app registrations. Check that the guest agent is connected, then try again."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アプリ登録を再構築できません。ゲストエージェントの接続を確認して再試行してください。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "앱 등록을 재구성할 수 없습니다. 게스트 에이전트 연결을 확인한 후 다시 시도하세요."
-          }
-        },
-        "vi" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Không thể tạo lại đăng ký ứng dụng. Hãy kiểm tra kết nối tác nhân máy khách rồi thử lại."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法重建应用注册。请检查客户机代理连接后重试。"
-          }
-        }
-      }
-    },
     "Uninstall Bootstrap… (No Restart)" : {
       "localizations" : {
         "en" : {
@@ -30494,6 +30495,41 @@
         }
       }
     },
+    "Unlock at Startup" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlock at Startup"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "起動時にロックを解除"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시작 시 잠금 해제"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mở khóa khi khởi động"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启动时解锁"
+          }
+        }
+      }
+    },
     "Unlocked" : {
       "localizations" : {
         "ja" : {
@@ -30549,6 +30585,9 @@
           }
         }
       }
+    },
+    "Up" : {
+
     },
     "Up Arrow" : {
       "localizations" : {
@@ -30798,6 +30837,23 @@
         }
       }
     },
+    "Use Hardware Keyboard" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use Hardware Keyboard"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用硬件键盘"
+          }
+        }
+      }
+    },
     "Use as Camera Source" : {
       "localizations" : {
         "en" : {
@@ -30865,6 +30921,12 @@
           }
         }
       }
+    },
+    "User Defaults" : {
+
+    },
+    "User Defaults…" : {
+
     },
     "User Fault" : {
       "localizations" : {
@@ -31176,6 +31238,23 @@
         }
       }
     },
+    "Waiting for sensor service…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for sensor service…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待运动传感器服务…"
+          }
+        }
+      }
+    },
     "Wake" : {
       "localizations" : {
         "ja" : {
@@ -31200,6 +31279,41 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "唤醒"
+          }
+        }
+      }
+    },
+    "Wake the guest and dismiss its Lock Screen each time it starts." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wake the guest and dismiss its Lock Screen each time it starts."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストが起動するたびに画面をスリープ解除し、ロック画面を閉じます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트가 시작될 때마다 화면을 깨우고 잠금 화면을 닫습니다."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đánh thức máy khách và đóng Màn hình khóa mỗi khi khởi động."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客户机每次启动时唤醒屏幕并关闭锁定屏幕。"
           }
         }
       }
@@ -31938,6 +32052,23 @@
         }
       }
     },
+    "Yaw" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yaw"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "偏航"
+          }
+        }
+      }
+    },
     "Yes" : {
       "localizations" : {
         "ja" : {
@@ -32123,6 +32254,9 @@
     },
     "false" : {
       "shouldTranslate" : false
+    },
+    "hinge" : {
+
     },
     "iOS Version" : {
       "localizations" : {
@@ -32682,6 +32816,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "rootless（已弃用）"
+          }
+        }
+      }
+    },
+    "rootless (unavailable)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rootless (unavailable)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rootless(利用不可)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rootless (사용할 수 없음)"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rootless (không khả dụng)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rootless（不可用）"
           }
         }
       }

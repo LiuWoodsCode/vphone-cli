@@ -674,6 +674,13 @@ public enum FirmwareGuestSystemPatchSet {
                 target: .prebootDeviceTree,
             ),
             VPhonePatchDeclaration(
+                identifier: prebootFoldableDisplays,
+                title: "Foldable display identities",
+                summary: "Copies the Duo donor's product-id and two display metadata nodes into the installed tree. Matches the two virtual framebuffers to the outer and inner built-in panels, including native rotation and fold regions. Requires the original donor device tree; other guests are unchanged.",
+                target: .prebootDeviceTree,
+                applicability: VPhonePatchApplicability(iOSBase: .major(27)),
+            ),
+            VPhonePatchDeclaration(
                 identifier: prebootHaptics,
                 title: "Haptics node",
                 summary: """
@@ -777,6 +784,7 @@ public enum FirmwareGuestSystemPatchSet {
     /// Apple's VM sub-type for a foldable board in the restored Preboot
     /// device tree.
     public static let prebootFoldableVMSubtype = "preboot-cfw-devicetree_foldable_vm_subtype"
+    public static let prebootFoldableDisplays = "preboot-cfw-devicetree_foldable_displays"
 
     /// The haptics node removal in the restored Preboot device tree, for any
     /// VM patched before `fw patch` removed it from every guest's tree.

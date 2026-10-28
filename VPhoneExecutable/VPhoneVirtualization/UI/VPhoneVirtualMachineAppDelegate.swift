@@ -8,6 +8,7 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
     private var vm: VPhoneVirtualMachine?
     private var control: VPhoneGuestControl?
     private var windowController: VPhoneVirtualMachineWindowController?
+    private var innerWindowController: VPhoneVirtualMachineWindowController?
     private var homePodDisplayTask: Task<Void, Never>?
     private var menuController: VPhoneMenuController?
     private var shellWindowController: VPhoneShellWindowController?
@@ -114,6 +115,7 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
 
         let control = VPhoneGuestControl()
         control.isHomePodGuest = options.isHomePodGuest
+        control.isFoldableGuest = options.innerScreen != nil
         self.control = control
         if !command.dfu {
             control.unlocksAtStartup = vm.unlocksAtStartup
@@ -184,6 +186,24 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
             wc.captureView?.isTVGuest = options.isTVGuest
             wc.homeButtonHoldsInGuest = options.isTVGuest
             windowController = wc
+            if let inner = options.innerScreen {
+                let innerWC = VPhoneVirtualMachineWindowController()
+                innerWC.showWindow(
+                    for: vm.virtualMachine,
+                    screenWidth: inner.width,
+                    screenHeight: inner.height,
+                    screenScale: inner.scale,
+                    hardwareKeyboardEnabled: vm.usesHardwareKeyboard,
+                    keySender: VPhoneVirtualMachineKeySender(vm: vm, control: control),
+                    control: control,
+                    name: VPhoneDockName.name(forConfig: options.configURL) + " — Inner Display",
+                    sceneIdentifier: options.configURL.deletingLastPathComponent()
+                        .standardizedFileURL.resolvingSymlinksInPath().path,
+                    displayIndex: 1,
+                    nativeOrientation: .landscapeRight,
+                )
+                innerWindowController = innerWC
+            }
             if options.isHomePodGuest {
                 homePodDisplayTask = Task { [weak wc, weak control] in
                     // One snapshot in flight, with no queue of stale animation
@@ -242,6 +262,9 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
             }
             mc.onFrameRateDisplayChange = { [weak wc] enabled in
                 wc?.setFrameRateDisplay(enabled)
+            }
+            mc.onShowInnerDisplay = innerWindowController.map { inner in
+                { inner.bringToFront() }
             }
             mc.onUnlockAtStartupChange = { [config = command.config] enabled in
                 let manifest = try VPhoneVirtualMachineManifest.load(from: config)
@@ -532,6 +555,8 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
         menuController?.guestPanelsWindowController.closeAttitudeDials()
         menuController?.tvRemoteWindowController.close()
         windowController?.closeForRestart()
+        innerWindowController?.closeForRestart()
+        innerWindowController = nil
         // Tool windows belong to the old guest connection too.
         for window in NSApp.windows {
             window.close()

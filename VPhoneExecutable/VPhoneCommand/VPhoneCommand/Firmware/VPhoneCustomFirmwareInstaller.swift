@@ -592,6 +592,7 @@ struct VPhoneCustomFirmwareInstaller {
         }
         if !Self.isFoldable(device) {
             notApplicableGuest.insert(FirmwareGuestSystemPatchSet.prebootFoldableVMSubtype)
+            notApplicableGuest.insert(FirmwareGuestSystemPatchSet.prebootFoldableDisplays)
         }
         if !device.usesTVOS {
             notApplicableGuest.insert(FirmwareGuestSystemPatchSet.tvTPRO)
@@ -3239,6 +3240,11 @@ struct VPhoneCustomFirmwareInstaller {
         }
         if Self.isFoldable(guestDevice) {
             repairGroup.append((FirmwareGuestSystemPatchSet.prebootFoldableVMSubtype, "patch-dt-foldable-vm-subtype", []))
+            if enabled(FirmwareGuestSystemPatchSet.prebootFoldableDisplays), boardDeviceTree == nil {
+                throw ValidationError("Foldable display identities need the original donor device tree in FirmwareOriginals.")
+            }
+            repairGroup.append((FirmwareGuestSystemPatchSet.prebootFoldableDisplays, "patch-dt-foldable-displays",
+                                boardDeviceTree.map { [$0.path] } ?? []))
         }
         repairGroup.append((FirmwareGuestSystemPatchSet.prebootHaptics, "patch-dt-haptics", []))
         repairGroup.append((FirmwareGuestSystemPatchSet.prebootMicrophoneArray, "patch-dt-microphone-array", []))

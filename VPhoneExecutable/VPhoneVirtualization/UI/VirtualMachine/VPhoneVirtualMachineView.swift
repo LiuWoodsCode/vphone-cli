@@ -15,6 +15,7 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     /// Guest pixels per interface point, to turn trackpad travel into the
     /// guest's points for a native scroll.
     var screenScale: CGFloat = 3
+    var displayIndex = 0
 
     /// Whether trackpad scroll/pinch gestures are replayed as guest touches.
     var trackpadGesturesEnabled = VPhoneTrackpadGestures.isEnabled {
@@ -128,20 +129,23 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
 
     /// https://github.com/wh1te4ever/super-tart-vphone-writeup/blob/main/contents/ScreenSharingVNC.swift
     private var multiTouchDevice: AnyObject? {
+        if let device = Dynamic(self)._multiTouchDevice.asObject { return device }
         guard let vm = virtualMachine else { return nil }
         guard let devices = Dynamic(vm)._multiTouchDevices.asObject as? NSArray,
-              devices.count > 0
+              devices.count > displayIndex
         else {
             return nil
         }
-        return devices.object(at: 0) as AnyObject
+        return devices.object(at: displayIndex) as AnyObject
     }
 
     var recordingGraphicsDisplay: VZGraphicsDisplay? {
         if let display = Dynamic(self)._graphicsDisplay.asObject as? VZGraphicsDisplay {
             return display
         }
-        return virtualMachine?.graphicsDevices.first?.displays.first
+        guard let displays = virtualMachine?.graphicsDevices.first?.displays,
+              displays.indices.contains(displayIndex) else { return nil }
+        return displays[displayIndex]
     }
 
     // MARK: - Event Handling
@@ -1092,7 +1096,7 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
         // gesture) never begin. The choice is made on the down and kept until
         // the lift.
         if phase == 0 {
-            edgeTouchViaGuest = localPoints.count == 1 && swipeAim != 0
+            edgeTouchViaGuest = displayIndex == 0 && localPoints.count == 1 && swipeAim != 0
                 && control?.supportsEdgeTouch == true
         }
         defer {

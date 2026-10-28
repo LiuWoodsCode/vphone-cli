@@ -234,7 +234,7 @@ public final class DeviceTreePatcher: BufferedPatcher {
         return root
     }
 
-    private func serializeNode(_ node: DTNode) -> Data {
+    func serializeNode(_ node: DTNode) -> Data {
         var out = Data()
         out.append(contentsOf: withUnsafeBytes(of: UInt32(node.properties.count).littleEndian) { Data($0) })
         out.append(contentsOf: withUnsafeBytes(of: UInt32(node.children.count).littleEndian) { Data($0) })

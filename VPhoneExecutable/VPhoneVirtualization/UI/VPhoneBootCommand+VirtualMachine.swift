@@ -30,6 +30,8 @@ extension VPhoneBootCommand {
             screenHeight: manifest.screenConfig.height,
             screenPPI: manifest.screenConfig.pixelsPerInch,
             screenScale: manifest.screenConfig.scale,
+            innerScreen: manifest.guestDevice.innerScreen,
+            framebufferIdentifiers: manifest.guestDevice.framebufferIdentifiers,
             kernelDebugPort: kernelDebugPort,
             isPadGuest: manifest.guestDevice.isPad,
             isTVGuest: manifest.guestDevice.family == .appleTV,
