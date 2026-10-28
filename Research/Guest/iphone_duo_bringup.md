@@ -186,6 +186,53 @@ the poster extension's restarts keep the queue full.
 
 ### Lowering the rest of the cache ahead of time
 
+#### Interrupted install on a host without CSSC (2026-10-27)
+
+The first boot of a 24A94425 install using bundle 2.13.8 failed with
+`initproc failed to start -- exit reason namespace 3 subcode 0x2`.
+Namespace 3 is `OS_REASON_CODESIGNING`, not `OS_REASON_DYLD` (6).
+Consequently the matching numeric value of `DYLD_EXIT_REASON_DYLIB_WRONG_ARCH`
+does not identify an architecture mismatch in this panic.
+
+The install log reported `dyld-cfw-arm64e_x1_cache` failed with child status
+9, then completed and recorded JB installed. Inspection of the disk attached
+read-only found 14,258 SHA-256 page-slot mismatches among 362,710 signed cache
+pages: 4,276 in chunk `.69`, 6,327 in `.71`, and 3,655 in `.73`. Standalone
+dyld, launchd and `launchdhook-vphone.dylib` passed strict code-signature
+verification. The cache header had `maxSlide = 0`, and the existing
+`patch-dsc-maxslide --dry-run` confirmed its span fits the stock region.
+
+This is evidence of incomplete page re-attestation. The whole-cache patch
+writes code first, re-attests later, then persists undo records. A child
+killed during that work cannot execute its catch/rollback. The installer
+must abort and discard its private disk clone after *any* shared-cache verb
+failure, including an optional patch or revert; describing those bytes as
+unchanged and continuing is unsafe. It now does so, and requires private
+APFS cloning when cache patches are selected or previously recorded. The
+preflight now discovers the cache architecture, including `arm64e_x1`.
+
+Reveal/validation procedure: verify standalone boot signatures; read the
+cache header's signature-superblob location, find each SHA-256 CodeDirectory,
+and compare each signed page with its stored slot (respecting the final
+partial page). Repair derived slot hashes only on a separate disk clone,
+scan again, detach, then boot that clone and compare its exit namespace.
+Keep the original image and report: re-attestation cannot reconstruct undo
+records lost when the child was killed. Do not infer the cause of status 9
+without host termination evidence. This host also reports
+`hw.optional.arm.FEAT_CSSC = 0`. Despite that host flag, the diagnostic
+clone with only these signature slots repaired booted past launchd into
+userspace (credential-manager user client, Data/User volume activity and
+display-power requests), without reproducing the original panic. No CSSC
+failure was observed in that run; the flag alone does not establish a
+remaining boot blocker. The guest control RPC was not verified in that run.
+
+The clone's repeat scan found zero mismatches across all 362,710 signed
+pages. After the user requested applying the repair without a backup, the
+original VM was stopped and the same derived-hash repair applied in place.
+No executable instructions, patch selection or VM identity were changed by
+the repair. The VPhone Debug bundle build passed with the installer failure
+protection and X1 preflight fix.
+
 `dyld-cfw-arm64e_x1_cache` (guest system set, iOS 27, on in `standard`,
 blocked in both tvOS presets; verb `vphone-cli cfw patch-arm64e-x1-cache`)
 runs the bootstrap patch's planner over every X1 image outside the

@@ -128,7 +128,6 @@ guest_compatibility_library="$(/usr/bin/xcrun swift-stdlib-tool --print \
 /bin/cp "$guest_products/hapticsfix/libhapticsfix.dylib" "$guest/libhapticsfix.dylib"
 /bin/cp "$guest_products/batteryhealthfix/libbatteryhealthfix.dylib" "$guest/libbatteryhealthfix.dylib"
 /bin/cp "$guest_products/devicehubfix/libdevicehubfix.dylib" "$guest/libdevicehubfix.dylib"
-/bin/cp "$guest_products/devicename/libdevicename.dylib" "$guest/libdevicename.dylib"
 /bin/cp "$guest_products/prefsfix/libprefsfix.dylib" "$guest/libprefsfix.dylib"
 /bin/cp "$guest_products/signinfix/libsigninfix.dylib" "$guest/libsigninfix.dylib"
 /bin/cp "$guest_products/gyroscope/libvphonegyro.dylib" "$guest/libvphonegyro.dylib"

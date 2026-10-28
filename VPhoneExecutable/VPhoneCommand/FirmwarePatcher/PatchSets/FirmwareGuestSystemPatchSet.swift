@@ -459,10 +459,7 @@ public enum FirmwareGuestSystemPatchSet {
                 developer disk image, into the image's dtremotedisplayd and dtdeviceinfod, \
                 which then report the media stream features and the screen mask Xcode's \
                 DeviceHub needs to show the screen, and into avconferenced, where a stream \
-                split into bands would otherwise deadlock the host GPU. \
-                libdevicename.dylib, inserted into configd and lockdownd, does nothing until \
-                vphoned stores a device name (the host sends the VM's name); then configd \
-                publishes that name and lockdownd refuses to rename the device.
+                split into bands would otherwise deadlock the host GPU.
                 """,
                 target: .guestFile(path: "/Library/LaunchDaemons"),
                 bootEssential: true,

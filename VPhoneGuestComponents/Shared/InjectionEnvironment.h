@@ -109,26 +109,6 @@ static const char *vpDeviceHubFixFor(const char *path) {
     return vpIsDeviceHubFixTarget(path) && access(VP_DEVICEHUB_FIX, R_OK) == 0 ? VP_DEVICEHUB_FIX : NULL;
 }
 
-// The device name hook, which pins the name the host chose; see
-// DeviceName/libdevicename.c. Inserted because it interposes the
-// SystemConfiguration imports of the two processes below, which have to be
-// rebound before either runs.
-#ifndef VP_DEVICE_NAME
-#define VP_DEVICE_NAME "/usr/lib/libdevicename.dylib"
-#endif
-
-// configd publishes the name into the dynamic store, and lockdownd is where a
-// host or Settings renames the device. lockdownd also takes libmisfix, so it
-// is the one process that gets two libraries.
-static int vpIsDeviceNameTarget(const char *path) {
-    return path && (vpPathHasSuffix(path, "/usr/libexec/configd") ||
-                    vpPathHasSuffix(path, "/usr/libexec/lockdownd"));
-}
-
-static const char *vpDeviceNameFor(const char *path) {
-    return vpIsDeviceNameTarget(path) && access(VP_DEVICE_NAME, R_OK) == 0 ? VP_DEVICE_NAME : NULL;
-}
-
 // The most libraries one process takes beside SystemHook.
 #define VP_INSERTED_LIBRARIES_MAX 4
 
@@ -138,16 +118,13 @@ typedef struct {
 } VPInsertedLibraries;
 
 // The libraries the spawn hooks insert beside SystemHook for `path`, in
-// insertion order. Each is listed only when it is installed. The MIS, battery
-// health and DeviceHub targets do not overlap; the device name targets overlap
-// the MIS ones at lockdownd, which gets libmisfix and then libdevicename.
+// insertion order. Each is listed only when it is installed.
 static VPInsertedLibraries vpInsertedLibrariesFor(const char *path) {
     VPInsertedLibraries result = {{0}, 0};
     const char *const candidates[] = {
         vpMISFixFor(path),
         vpBatteryHealthFixFor(path),
         vpDeviceHubFixFor(path),
-        vpDeviceNameFor(path),
     };
     for (size_t index = 0; index < sizeof(candidates) / sizeof(candidates[0]); index++) {
         if (candidates[index] && result.count < VP_INSERTED_LIBRARIES_MAX)
@@ -162,7 +139,7 @@ static const char *vpInsertedLibraryFor(const char *path) {
     return libraries.count ? libraries.paths[0] : NULL;
 }
 
-// "+misfix+devicename" for the libraries' file names, for the spawn logs:
+// Describe the inserted libraries by file name for the spawn logs:
 // "/usr/lib/libmisfix.dylib" is logged as "+misfix", as it always was.
 static void vpDescribeInsertedLibraries(const VPInsertedLibraries *libraries, char *buffer, size_t size) {
     if (!size)

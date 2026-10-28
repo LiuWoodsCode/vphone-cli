@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Builds the guest-independent vphoned sources with LogicTests.swift for the
 # Mac and runs them: service profile lists and bookkeeping, the first-boot
-# settle verdict, the device name rule, the pointer scroll parameters, the
+# settle verdict, the pointer scroll parameters, the
 # Irisin package a guest takes. No guest is needed.
 
 daemon="${0:a:h:h}"
@@ -14,7 +14,6 @@ trap '/bin/rm -rf "$temporary"' EXIT
     -module-cache-path "$temporary/module-cache" \
     "$daemon/Daemon/GuestServiceProfile.swift" \
     "$daemon/Daemon/GuestFirstBootSettle.swift" \
-    "$daemon/Daemon/GuestDeviceNameRule.swift" \
     "$daemon/Daemon/GuestPointerScroll.swift" \
     "$daemon/Daemon/Bootstrap/GuestBootstrapPlatform.swift" \
     "$daemon/Daemon/GuestSetupAssistantState.swift" \

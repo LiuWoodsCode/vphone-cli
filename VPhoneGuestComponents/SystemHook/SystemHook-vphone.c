@@ -107,8 +107,7 @@ static void vpPrepareLoaderLink(const char *path) {
 static VPInjectionEnvironment vpPrepareChild(const char *path, char *const envp[], const char *kind) {
     const VPInsertedLibraries libraries = vpInsertedLibrariesFor(path);
     VPInjectionEnvironment injected = vpInsertHooksFor(envp, getenv("VPHONE_JB_ROOT"), &libraries);
-    if (vpIsInjectionTarget(path) || vpIsMISFixTarget(path) || vpIsDeviceHubFixTarget(path) ||
-        vpIsDeviceNameTarget(path)) {
+    if (vpIsInjectionTarget(path) || vpIsMISFixTarget(path) || vpIsDeviceHubFixTarget(path)) {
         vpPrepareLoaderLink(path);
         char names[96];
         vpDescribeInsertedLibraries(&libraries, names, sizeof(names));

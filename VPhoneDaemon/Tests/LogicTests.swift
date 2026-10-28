@@ -5,7 +5,7 @@ import MachO
 
 /// Checks the guest-independent parts of vphoned on the Mac: the service
 /// profile lists and bookkeeping, the first-boot settle verdict (data
-/// migration included), the device name rule, the pointer scroll
+/// migration included), the pointer scroll
 /// parameters and the Irisin package a guest takes. `run-logic-tests.sh`
 /// builds this file with those sources.
 nonisolated(unsafe) var failures = 0
@@ -35,7 +35,6 @@ enum LogicTests {
         recordRoundTrip()
         settleVerdicts()
         dataMigrationRecord()
-        deviceNameRule()
         pointerScroll()
         bootstrapPlatform()
         setupAssistantState()
@@ -359,23 +358,6 @@ enum LogicTests {
         expectEqual(done("", nil, nil), nil)
         let migrator = "/System/Library/PrivateFrameworks/DataMigration.framework/XPCServices/com.apple.datamigrator.xpc/com.apple.datamigrator"
         expect(migrator.hasSuffix(GuestFirstBootSettle.dataMigratorSuffix), "the path seen on 27.0")
-    }
-
-    // MARK: - Device Name
-
-    static func deviceNameRule() {
-        expect(GuestDeviceNameRule.problem("p0-a") == nil, "plain name")
-        expect(GuestDeviceNameRule.problem("dhtest 27 测试") == nil, "spaces and CJK")
-        expect(GuestDeviceNameRule.problem("Jacky’s iPhone") == nil, "typographic apostrophe")
-        expectEqual(GuestDeviceNameRule.problem(""), "name must not be blank")
-        expectEqual(GuestDeviceNameRule.problem(" \n\t"), "name must not be blank")
-        expectEqual(GuestDeviceNameRule.problem("a\u{7}b"), "name must not contain a control character")
-        expectEqual(GuestDeviceNameRule.problem("line\nbreak"), "name must not contain a control character")
-        expect(GuestDeviceNameRule.problem(String(repeating: "a", count: 255)) == nil, "255 bytes")
-        expectEqual(GuestDeviceNameRule.problem(String(repeating: "a", count: 256)), "name must be at most 255 bytes in UTF-8")
-        // 85 three-byte characters are 255 bytes; one more is 258.
-        expect(GuestDeviceNameRule.problem(String(repeating: "测", count: 85)) == nil, "255 bytes of CJK")
-        expect(GuestDeviceNameRule.problem(String(repeating: "测", count: 86)) != nil, "258 bytes of CJK")
     }
 
     // MARK: - Pointer Scroll

@@ -19,7 +19,6 @@ extension GuestAPI {
         "libhapticsfix.dylib",
         "libbatteryhealthfix.dylib",
         "libdevicehubfix.dylib",
-        "libdevicename.dylib",
         "libprefsfix.dylib",
         "libsigninfix.dylib",
         "libvphonegyro.dylib",

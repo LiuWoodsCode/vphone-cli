@@ -1,5 +1,25 @@
 # Patch Comparison: Regular / Development / Jailbreak / Experimental
 
+> **Interrupted X1 cache installation (2026-10-27).** A first-boot
+> `initproc failed to start -- exit reason namespace 3 subcode 0x2`
+> followed a `patch-arm64e-x1-cache` child killed with status 9. Namespace
+> 3 is code signing (dyld is namespace 6); do not interpret its subcode as
+> `DYLD_EXIT_REASON_DYLIB_WRONG_ARCH`. A read-only SHA-256 scan of all
+> 362,710 signed cache pages found 14,258 mismatches in chunks `.69`,
+> `.71`, and `.73`; standalone dyld, launchd and the launch hook verified.
+> The X1 pass writes code before re-attesting pages and persisting its undo
+> log, so SIGKILL can leave changes which its Swift catch/rollback never
+> sees. The installer previously logged this as "left in its prior state"
+> and committed the private disk clone. Cache patch and revert errors now
+> abort that transaction, including optional cache patches; installs with
+> selected or previously applied cache patches require an APFS clone.
+> The shared-region preflight also discovers the X1 cache instead of
+> explicitly requesting the absent ordinary arm64e file. The affected
+> cache already had `maxSlide = 0` and fit the stock 6 GiB region.
+> No instruction replacement or patch selection changed. See
+> [Duo bring-up](Guest/iphone_duo_bringup.md) for recovery validation and
+> the separate CSSC limitation.
+
 > **iPhone Duo X1 branch port (2026-10-27).** Ports
 > `0xJacky/vphone-cli` branch `iphone-duo-x1` at
 > `b03f0b823e7a48bafde6c0eabcafd8acedebcfc0`: selectable, undo-capturing

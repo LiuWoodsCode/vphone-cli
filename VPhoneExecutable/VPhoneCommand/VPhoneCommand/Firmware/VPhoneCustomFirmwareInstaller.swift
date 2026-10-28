@@ -343,6 +343,16 @@ struct VPhoneCustomFirmwareInstaller {
         // and a failed install leaves the original untouched.
         let image: URL
         let cloned = try work.directory.clone(disk, to: "Disk.img")
+        // A cache verb can be killed after writing code but before signing its
+        // pages. Its in-process rollback cannot run on SIGKILL. Never expose
+        // those writes on the caller's disk, even for an optional patch.
+        if effectiveEnabled.contains(where: { $0.hasPrefix("dyld-") })
+            || receiptGuest?.contains(where: { $0.hasPrefix("dyld-") }) == true
+        {
+            guard cloned else {
+                throw ValidationError("Shared-cache updates require a private APFS disk clone; the original disk was left untouched.")
+            }
+        }
         if isOTAUpdate, !cloned {
             throw ValidationError("The OTA update needs a private APFS disk clone; the original disk was left untouched.")
         }
@@ -1260,8 +1270,8 @@ struct VPhoneCustomFirmwareInstaller {
     /// (a library absent from the VM stays absent, no `/vh` alias is created) and
     /// no restore-tree step runs.
     ///
-    /// Paired TV dyld updates abort on failure and discard the private disk
-    /// clone, preserving the original disk and receipt. Selected X1 bootstrap
+    /// Shared-cache and paired TV dyld updates abort on failure and discard
+    /// the private disk clone, preserving the original disk and receipt. Selected X1 bootstrap
     /// patches also abort on failure: continuing would boot an incompatible
     /// cache or executable. Other patches run in isolation: one patch failing — a verb rejecting an
     /// unexpected prologue on an older VM, say — is reported and the patch is
@@ -1443,7 +1453,7 @@ struct VPhoneCustomFirmwareInstaller {
         let cacheRelative = guestDevice.usesTVOS
             ? "System/Library/Caches/com.apple.dyld"
             : "System/Cryptexes/OS/System/Library/Caches/com.apple.dyld"
-        let cacheArchitecture = guestDevice.hasPlainArm64Userland ? "arm64" : "arm64e"
+        let cacheArchitecture: String? = guestDevice.hasPlainArm64Userland ? "arm64" : nil
         let dsc = try verifiedDyldCacheDirectory(system: system, relative: cacheRelative)
         let widenedRegion = kernelPatches.map { $0.contains("kernel-boot-shared_region_size") }
             ?? version.hasPrefix("27.")
@@ -1650,7 +1660,7 @@ struct VPhoneCustomFirmwareInstaller {
         ]
         try applyDyldPatches(
             dyld, dsc: dsc, cacheRelative: cacheRelative, system: system, plan: plan, priorGuest: priorGuest,
-            live: &live, failures: &failures,
+            live: &live,
         )
         try requireX1Bootstrap()
 
@@ -2177,8 +2187,9 @@ struct VPhoneCustomFirmwareInstaller {
     /// multi-gigabyte scan when nothing changed. A disabled patch with no undo
     /// record was either never applied (nothing to do) or applied before the
     /// undo log existed; the latter is told apart by the prior-live set and
-    /// reported as not revertible, staying live. The selected X1 bootstrap
-    /// patch must succeed; optional cache patches still run in isolation.
+    /// reported as not revertible, staying live. Any cache edit or revert
+    /// failure aborts the private disk transaction: a killed verb may have
+    /// written content without reaching its signature update or rollback.
     private func applyDyldPatches(
         _ dyld: [(id: String, verb: String, args: [String])],
         dsc: String,
@@ -2187,15 +2198,12 @@ struct VPhoneCustomFirmwareInstaller {
         plan: VPhoneVirtualMachinePatchPlan?,
         priorGuest: Set<String>,
         live: inout Set<String>,
-        failures: inout [String],
     ) throws {
         func enabled(_ id: String) -> Bool {
             plan?.isEnabled(id) ?? !FirmwareGuestSystemPatchSet.settingsRowPatches.contains(id)
         }
-        func requireBootstrap(_ id: String, error: any Error) throws {
-            if id == FirmwareGuestSystemPatchSet.arm64eX1CacheBootstrap {
-                throw ValidationError("Required X1 boot patch \(id) failed; installation stopped before setup boot: \(error)")
-            }
+        func cacheFailure(_ id: String, error: any Error) -> ValidationError {
+            ValidationError("Shared-cache patch \(id) failed; installation stopped without committing the private disk clone: \(error)")
         }
         let undoAbsolute = (dsc as NSString).appendingPathComponent(Self.dscUndoLogLeaf)
         let undoRelative = "\(cacheRelative)/\(Self.dscUndoLogLeaf)"
@@ -2215,28 +2223,19 @@ struct VPhoneCustomFirmwareInstaller {
                     do {
                         try patch(entry.verb, entry.args + ["--undo-log", undoAbsolute, "--undo-id", entry.id])
                     } catch {
-                        failures.append(entry.id)
-                        print("  [!] \(entry.id): re-running the applied patch failed, left as it was: \(error)")
-                        try requireBootstrap(entry.id, error: error)
+                        throw cacheFailure(entry.id, error: error)
                     }
                 } else if let undoLog, undoLog.hasOutdatedImplementation(of: entry.id) {
                     print("  [*] \(entry.id): an earlier implementation is applied; reverting it and applying the current one")
                     do {
                         try patch("patch-dsc-revert", [dsc, "--undo-log", undoAbsolute, "--patch", entry.id])
                     } catch {
-                        failures.append(entry.id)
-                        live.insert(entry.id)
-                        print("  [!] \(entry.id): reverting the earlier implementation failed, left as it was: \(error)")
-                        try requireBootstrap(entry.id, error: error)
-                        continue
+                        throw cacheFailure(entry.id, error: error)
                     }
                     do {
                         try patch(entry.verb, entry.args + ["--undo-log", undoAbsolute, "--undo-id", entry.id])
                     } catch {
-                        failures.append(entry.id)
-                        print("  [!] \(entry.id): the earlier implementation was reverted but the current one failed; the cache is unpatched for it: \(error)")
-                        try requireBootstrap(entry.id, error: error)
-                        continue
+                        throw cacheFailure(entry.id, error: error)
                     }
                 }
                 live.insert(entry.id)
@@ -2245,9 +2244,7 @@ struct VPhoneCustomFirmwareInstaller {
                     try patch(entry.verb, entry.args + ["--undo-log", undoAbsolute, "--undo-id", entry.id])
                     live.insert(entry.id)
                 } catch {
-                    failures.append(entry.id)
-                    print("  [!] \(entry.id): dyld patch failed, left in its prior state: \(error)")
-                    try requireBootstrap(entry.id, error: error)
+                    throw cacheFailure(entry.id, error: error)
                 }
             case (false, true):
                 if recorded.contains(entry.id) {
@@ -2264,11 +2261,7 @@ struct VPhoneCustomFirmwareInstaller {
             do {
                 try patch("patch-dsc-revert", [dsc, "--undo-log", undoAbsolute] + revertable.flatMap { ["--patch", $0] })
             } catch {
-                failures.append(contentsOf: revertable)
-                print("  [!] dyld revert failed, left in prior state: \(error)")
-                for id in revertable {
-                    live.insert(id)
-                }
+                throw cacheFailure(revertable.joined(separator: ", "), error: error)
             }
         }
     }
