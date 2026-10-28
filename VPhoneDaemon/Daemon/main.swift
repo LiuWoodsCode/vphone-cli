@@ -32,6 +32,7 @@ GuestHomePodDisplay.startOnStartup()
 _ = vp_hid_load()
 GuestIrisinInstaller.refreshBootstrapOnStartup()
 GuestAPI.restoreUSBSerialOnStartup()
+GuestAPI.clearLegacyDeviceNamePinOnStartup()
 GuestStaticNames.shared.restoreOnStartup()
 // locationd can deadlock as it starts; this restarts it.
 GuestLocationdWatchdog.shared.startOnStartup()

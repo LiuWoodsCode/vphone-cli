@@ -2966,6 +2966,9 @@ struct VPhoneCustomFirmwareInstaller {
     ) throws {
         let tvOS = guestDevice.family == .appleTV
         let narrow = environmentOnly && !tvOS
+        // Retire the rename-blocking hook installed by older bundles. The new
+        // daemon also clears its pin on the data volume, including live updates.
+        try system.removeItem("usr/lib/libdevicename.dylib")
         for name in tvOS ? VPhoneGuestEnvironment.tvLibraries : VPhoneGuestEnvironment.libraries {
             if VPhoneGuestEnvironment.selectedLibraries.contains(name) {
                 continue

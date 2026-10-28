@@ -53,7 +53,7 @@ extension GuestAPI {
         case "device.name.get":
             return deviceNameState()
         case "device.name.set":
-            // An absent or null name gives the guest its own back.
+            // Compatibility cleanup for pins left by older bundles.
             let name = params["name"].flatMap { $0 is NSNull ? nil : $0 }
             guard name == nil || name is String else {
                 throw GuestAPIError.invalidRequest("name must be a string or null")
@@ -256,65 +256,56 @@ extension GuestAPI {
     }
 }
 
-// MARK: - Device name
+// MARK: - Legacy device-name pin cleanup
 
-/// The device name the host pins: what Xcode, devicectl and Finder show.
-/// `libdevicename.dylib` in configd and lockdownd reads it from
-/// `deviceNameConfigPath` (see `Research/Guest/device_name_pinning.md`):
-/// configd publishes it as `Setup:/System`'s ComputerName and lockdownd refuses
-/// every rename. The guest's own name stays in preferences.plist.
-///
-/// The file outlives a reboot, so configd's first publication at boot already
-/// carries the name. A change applies at once: both daemons check the file on
-/// every decision, and applying the preferences unchanged makes configd's
-/// preferences monitor publish again.
 extension GuestAPI {
-    /// Must match `VP_DEVICE_NAME_CONFIG_PATH` and `VP_DEVICE_NAME_CONFIG_KEY`
-    /// in `VPhoneGuestComponents/DeviceName/DeviceNamePolicy.h`.
-    static let deviceNameConfigPath = "/var/db/vphone/devicename.plist"
-    static let deviceNameConfigKey = "DeviceName"
-    /// What lockdownd posts after a rename; lockdown clients read the name again.
-    static let deviceNameChangedNotification = "com.apple.mobile.lockdown.device_name_changed"
-
-    /// `{name}`: the pinned name, or null when the guest shows its own.
-    static func deviceNameState() -> [String: Any] {
-        ["name": storedDeviceName() ?? NSNull()]
+    /// Older bundles pinned the guest's name through configd and lockdownd.
+    /// Removing the file makes even an already-loaded old hook pass renames
+    /// through. Applying preferences republishes the guest's own name.
+    @discardableResult
+    static func clearLegacyDeviceNamePin() throws -> Bool {
+        let path = "/var/db/vphone/devicename.plist"
+        if unlink(path) != 0 {
+            guard errno == ENOENT else {
+                throw GuestAPIError.operationFailed("Could not remove \(path): \(String(cString: strerror(errno)))")
+            }
+            return false
+        }
+        var error: NSString?
+        guard vp_preferences_apply(&error) else {
+            throw GuestAPIError.operationFailed(
+                "The device-name pin was removed but configd could not republish the name: \(error.map(String.init) ?? "apply failed")",
+            )
+        }
+        _ = try? postDarwinNotification("com.apple.mobile.lockdown.device_name_changed", state: nil)
+        return true
     }
 
-    /// Pin `name`, or with nil give the guest its own back. Returns the state
-    /// plus `changed` and `reboot_required`: lockdown readers (Finder,
-    /// `ideviceinfo`, `idevicename`) follow a change at once, but CoreDevice (Xcode,
-    /// `devicectl`) reads the name once per handshake and the DHCP lease keeps
-    /// the host name it was requested with, so both show the new name only
-    /// after the guest restarts. A clone of a template boots with the
-    /// template's pin until `vphone-vm` connects and sets its own.
+    static func clearLegacyDeviceNamePinOnStartup() {
+        do {
+            if try clearLegacyDeviceNamePin() {
+                print("[device] removed legacy device-name pin; Settings and Finder can rename the device")
+            }
+        } catch {
+            print("[device] could not clear the legacy device-name pin: \(error)")
+        }
+    }
+
+    /// Retained for older template-preparation clients. Pinning is no longer
+    /// supported; an absent or null name only clears a legacy pin.
     static func setDeviceName(_ name: String?) throws -> [String: Any] {
-        if let name {
-            try validateDeviceName(name)
+        guard name == nil else {
+            throw GuestAPIError.invalidRequest("Device-name pinning has been removed. Rename the device through Settings or Finder.")
         }
-        let changed = storedDeviceName() != name
-        if changed {
-            try writeDeviceName(name)
-            guard storedDeviceName() == name else {
-                throw GuestAPIError.operationFailed("\(deviceNameConfigPath) did not read back as written")
-            }
-            var error: NSString?
-            guard vp_preferences_apply(&error) else {
-                throw GuestAPIError.operationFailed(
-                    "The name is stored but configd was not asked to publish it: \(error.map(String.init) ?? "apply failed")",
-                )
-            }
-            _ = try? postDarwinNotification(deviceNameChangedNotification, state: nil)
-        }
-        var state = deviceNameState()
-        state["changed"] = changed
-        state["reboot_required"] = changed
-        return state
+        let changed = try clearLegacyDeviceNamePin()
+        return ["name": NSNull(), "changed": changed, "reboot_required": false]
     }
 
-    /// For `device.info`: the pinned name, and the guest's own ComputerName in
-    /// configd's preferences, which a clone inherits from its template. Two
-    /// small file reads.
+    static func deviceNameState() -> [String: Any] {
+        ["name": NSNull()]
+    }
+
+    /// Preserve the device.info shape for clients of older bundles.
     static func deviceNameInfo() -> [String: Any] {
         let path = "/private/var/preferences/SystemConfiguration/preferences.plist"
         let preferences = FileManager.default.contents(atPath: path).flatMap {
@@ -322,52 +313,9 @@ extension GuestAPI {
         }
         let system = (preferences?["System"] as? [String: Any])?["System"] as? [String: Any]
         return [
-            "name": storedDeviceName() ?? NSNull(),
+            "name": NSNull(),
             "own_name": system?["ComputerName"] as? String ?? NSNull(),
         ]
-    }
-
-    /// `GuestDeviceNameRule`: not blank, at most 255 UTF-8 bytes, no control
-    /// character.
-    private static func validateDeviceName(_ name: String) throws {
-        if let problem = GuestDeviceNameRule.problem(name) {
-            throw GuestAPIError.invalidRequest(problem)
-        }
-    }
-
-    private static func storedDeviceName() -> String? {
-        guard let data = FileManager.default.contents(atPath: deviceNameConfigPath),
-              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-              let name = plist[deviceNameConfigKey] as? String, !name.isEmpty
-        else { return nil }
-        return name
-    }
-
-    /// Replaces the file in one rename, which is what the hook's stamp check
-    /// expects, or removes it.
-    private static func writeDeviceName(_ name: String?) throws {
-        guard let name else {
-            if unlink(deviceNameConfigPath) != 0, errno != ENOENT {
-                throw GuestAPIError.operationFailed("Could not remove \(deviceNameConfigPath): \(String(cString: strerror(errno)))")
-            }
-            return
-        }
-        let directory = (deviceNameConfigPath as NSString).deletingLastPathComponent
-        do {
-            try FileManager.default.createDirectory(
-                atPath: directory,
-                withIntermediateDirectories: true,
-                attributes: [.posixPermissions: 0o755],
-            )
-            let data = try PropertyListSerialization.data(
-                fromPropertyList: [deviceNameConfigKey: name], format: .binary, options: 0,
-            )
-            try data.write(to: URL(fileURLWithPath: deviceNameConfigPath), options: .atomic)
-        } catch {
-            throw GuestAPIError.operationFailed("Could not write \(deviceNameConfigPath): \(error.localizedDescription)")
-        }
-        // World-readable: the hooks only ever read it.
-        chmod(deviceNameConfigPath, 0o644)
     }
 }
 
