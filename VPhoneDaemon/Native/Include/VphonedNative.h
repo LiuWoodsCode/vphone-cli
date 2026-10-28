@@ -184,12 +184,30 @@ char * _Null_unspecified vp_ls_system_app_state(const char * _Null_unspecified b
 char * _Null_unspecified vp_ls_unregister_system_app(const char * _Null_unspecified bundle_id, const char * _Null_unspecified app_path);
 
 #ifdef __OBJC__
+/// Read-only HID service geometry and report descriptors; no event is sent.
+NSDictionary<NSString *, id> * _Nonnull vp_hid_input_devices(void);
 /// The configured radians/second and the injected HID provider's heartbeat.
 NSDictionary * _Null_unspecified vp_gyro_get(void);
 BOOL vp_gyro_set(double x, double y, double z, bool enabled);
 /// The backboardd HID gravity provider used by display.rotation.
 NSDictionary * _Nonnull vp_accelerometer_get(void);
 BOOL vp_accelerometer_set_orientation(NSString * _Nonnull spec);
+/// The virtual hinge HID provider behind display.posture: the fold angle
+/// (degrees, closed 0) and whether the provider in backboardd is enumerated
+/// and current.
+NSDictionary * _Nonnull vp_hinge_get(void);
+/// Every display-ish IOService object the guest published, with its small
+/// properties: what the display stack bound, for the foldable display work.
+NSArray * _Nonnull vp_display_probe(void);
+/// Read-only CoreAnimation display modes and capability surface.
+NSDictionary<NSString *, id> * _Nonnull vp_display_modes(void);
+NSDictionary<NSString *, id> * _Nonnull vp_device_pose_get(void);
+BOOL vp_hinge_set(double angleDegrees);
+/// Sweep the hinge to `targetDegrees` the way Apple's Duo tooling does: over
+/// a profiled transition (0 continuous fold, 1 fade-in-out), `durationMs` < 0
+/// the per-direction default (opening faster than closing), 0 an instant
+/// swap. Returns false on an out-of-range request.
+BOOL vp_hinge_sweep(double targetDegrees, double durationMs, int profile);
 NSDictionary * _Null_unspecified vp_attitude_get(void);
 BOOL vp_attitude_set(double roll, double pitch, double yaw, bool enabled);
 

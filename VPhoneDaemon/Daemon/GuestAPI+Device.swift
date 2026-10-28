@@ -61,6 +61,12 @@ extension GuestAPI {
             return try setDeviceName(name as? String)
         case "device.ioreg":
             return try ioregistry(plane: optionalString(params, "plane") ?? "IOService")
+        case "device.input_devices":
+            return vp_hid_input_devices()
+        case "device.displays":
+            return ["displays": vp_display_probe()]
+        case "display.modes":
+            return vp_display_modes()
         case "device.environment":
             return try environmentReport()
         case "device.basebin":
@@ -73,6 +79,9 @@ extension GuestAPI {
         case "display.rotation":
             rotationLock.lock()
             defer { rotationLock.unlock() }
+            if let orientation = optionalString(params, "orientation"), vp_hinge_get()["enabled"] as? Bool == true {
+                return try setFoldableRotation(orientation)
+            }
             if let orientation = optionalString(params, "orientation") {
                 // Preserve the physical pose across SpringBoard relaunches.
                 // CoreMotion's app pose provider cannot feed this HID sink.
@@ -110,6 +119,8 @@ extension GuestAPI {
             return interfaceOrientation()
         case "display.posture":
             return try setDevicePose(params)
+        case "display.pose":
+            return vp_device_pose_get()
         case "display.rotation_lock":
             guard let locked = params["locked"] as? Bool else {
                 throw GuestAPIError.invalidRequest("locked must be true or false")
@@ -175,9 +186,23 @@ extension GuestAPI {
         "landscape-right": 4, "face-up": 5, "face-down": 6,
     ]
 
-    /// Set a foldable guest's pose through SpringBoard's test-automation
-    /// override: `hinge` (a name or 0–4), `orientation` (a name or 0–6,
-    /// default portrait) and `tabletop` (0–10, default 0, ambiguous).
+    /// SpringBoard's own hinge-angle table, one angle per hinge state, so the
+    /// virtual hinge reports what the pose override implies.
+    static let poseHingeAngles: [Double] = [0, 0, 90, 180, 180]
+
+    /// Apple's screen-state positions, from suiatool's help text shipped in
+    /// SpringBoardFoundation: closed, book (~100°) and open (a fraction of
+    /// the 180° range, or a name).
+    static let posePositions: [String: Double] = ["closed": 0, "book": 100, "open": 180]
+
+    /// Set a foldable guest's pose the way Apple's Duo tooling does, driving
+    /// SpringBoard's test-automation override and the virtual hinge HID
+    /// service from one request. The official model is three screen states —
+    /// `position` `closed`, `book` (~100°) or `open`, or a fraction 0–1 of
+    /// the hinge's 180° — changed by a sweep from the current angle
+    /// (`duration` seconds; default the per-direction hand-fold time, opening
+    /// faster than closing; 0 an instant swap; `profile` `continuous` or
+    /// `fade`). The older `hinge` names still work and set the pose at once.
     private static func setDevicePose(_ params: [String: Any]) throws -> [String: Any] {
         func value(_ key: String, names: [String: Int], range: ClosedRange<Int>, default fallback: Int?) throws -> Int {
             if let name = params[key] as? String {
@@ -195,13 +220,130 @@ extension GuestAPI {
             guard params[key] == nil, let fallback else { throw GuestAPIError.invalidRequest("\(key) is required") }
             return fallback
         }
-        let hinge = try value("hinge", names: poseHingeStates, range: 0 ... 4, default: nil)
+
+        var angle: Double?
+        var sweep = false
+        var durationMs = -1.0
+        var profile = 0
+        if let position = params["position"] {
+            let target: Double
+            switch position {
+            case let name as String:
+                guard let named = Self.posePositions[name.lowercased()] else {
+                    throw GuestAPIError.invalidRequest("position must be closed, book, open, or a fraction in 0...1")
+                }
+                target = named
+            case let number as NSNumber where CFGetTypeID(number) != CFBooleanGetTypeID():
+                let fraction = number.doubleValue
+                guard fraction.isFinite, 0 ... 1 ~= fraction else {
+                    throw GuestAPIError.invalidRequest("position must be closed, book, open, or a fraction in 0...1")
+                }
+                target = fraction * 180
+            default:
+                throw GuestAPIError.invalidRequest("position must be closed, book, open, or a fraction in 0...1")
+            }
+            angle = target
+            sweep = true
+            if let requested = params["duration"] as? NSNumber, CFGetTypeID(requested) != CFBooleanGetTypeID() {
+                let seconds = requested.doubleValue
+                guard seconds.isFinite, 0 ... 10 ~= seconds else {
+                    throw GuestAPIError.invalidRequest("duration must be a number of seconds in 0...10")
+                }
+                durationMs = seconds * 1000
+            }
+            if let name = params["profile"] as? String {
+                switch name.lowercased() {
+                case "continuous": profile = 0
+                case "fade": profile = 1
+                default:
+                    throw GuestAPIError.invalidRequest("profile must be continuous or fade")
+                }
+            }
+        }
+
+        let hinge = try value("hinge", names: poseHingeStates, range: 0 ... 4, default: angle.map(hingeState(for:)))
         let orientation = try value("orientation", names: poseOrientations, range: 0 ... 6, default: 1)
         let tabletop = try value("tabletop", names: [:], range: 0 ... 10, default: 0)
+        if angle == nil {
+            angle = Self.poseHingeAngles[hinge]
+            if let requested = params["angle"] as? NSNumber, CFGetTypeID(requested) != CFBooleanGetTypeID() {
+                guard requested.doubleValue.isFinite, 0 ... 180 ~= requested.doubleValue else {
+                    throw GuestAPIError.invalidRequest("angle must be a number in 0...180")
+                }
+                angle = requested.doubleValue
+            }
+        }
+        GuestFoldPose.cancelStartupRestore()
+        defer { GuestFoldPose.finishExplicitRequest() }
         guard vp_device_pose_set(Int32(orientation), Int32(hinge), Int32(tabletop)) else {
             throw GuestAPIError.operationFailed("SpringBoardServices has no device pose override on this guest")
         }
-        return ["hinge": hinge, "orientation": orientation, "tabletop": tabletop]
+        // The pose override has landed; the hinge half is published beside it,
+        // and its absence (no virtual hinge service on this guest) does not
+        // undo the pose.
+        let published = sweep
+            ? vp_hinge_sweep(angle!, durationMs, Int32(profile))
+            : vp_hinge_set(angle!)
+        var hingeHID = vp_hinge_get()
+        hingeHID["applied"] = published
+        var reply: [String: Any] = [
+            "hinge": hinge, "orientation": orientation, "tabletop": tabletop,
+            "angle": angle!, "hinge_hid": hingeHID,
+        ]
+        if sweep {
+            reply["sweep"] = [
+                "duration_ms": durationMs,
+                "profile": profile == 1 ? "fade" : "continuous",
+            ]
+        }
+        return reply
+    }
+
+    /// A foldable guest turns with SpringBoard's device pose: each panel's
+    /// traits pipeline reads its own device orientation from the pose, so
+    /// neither the accelerometer nor the AssistiveTouch rotation icli drives
+    /// turns it. The rotation sets the pose orientation that gives the lit
+    /// panel the requested interface orientation — the inner panel is mounted
+    /// a quarter turn from the cover — and reads the interface back.
+    private static func setFoldableRotation(_ spec: String) throws -> [String: Any] {
+        let degreesByName = [
+            "0": 0, "portrait": 0, "90": 90, "landscape-left": 90, "left": 90, "180": 180, "upside-down": 180,
+            "portrait-upside-down": 180, "270": 270, "landscape-right": 270, "right": 270,
+        ]
+        guard let degrees = degreesByName[spec.lowercased()] else {
+            throw GuestAPIError.invalidRequest("unknown rotation: \(spec)")
+        }
+        let pose = vp_device_pose_get()
+        guard pose["available"] as? Bool == true, let hinge = (pose["hinge"] as? NSNumber)?.int32Value,
+              let tabletop = (pose["tabletop"] as? NSNumber)?.int32Value
+        else { throw GuestAPIError.operationFailed("SpringBoard's device pose is unavailable") }
+        // Pose orientations (poseOrientations) by interface degrees, measured
+        // on the cover (hinge closed) and on the inner panel (open).
+        let cover: [Int: Int32] = [0: 1, 90: 4, 180: 2, 270: 3]
+        let inner: [Int: Int32] = [0: 3, 90: 1, 180: 4, 270: 2]
+        GuestFoldPose.cancelStartupRestore()
+        defer { GuestFoldPose.finishExplicitRequest() }
+        guard vp_device_pose_set((hinge == 1 ? cover : inner)[degrees]!, hinge, tabletop) else {
+            throw GuestAPIError.operationFailed("SpringBoard refused the device pose")
+        }
+        for _ in 0 ..< 20 where interfaceRotationDegrees() != degrees {
+            usleep(100_000)
+        }
+        guard interfaceRotationDegrees() == degrees else {
+            throw GuestAPIError.operationFailed("The device did not apply the requested rotation.")
+        }
+        var info = rotationInfo()
+        info["requested"] = degrees
+        return info
+    }
+
+    /// The hinge state a settled angle reports: closed under 5°, open flat
+    /// from 170°, partially open between — the bands Apple's recorded Duo
+    /// samples hold.
+    static func hingeState(for angle: Double) -> Int {
+        if angle < 5 { return 1 }
+        if angle >= 170 { return 3 }
+        return 2
     }
 
     private static func brightnessState() -> [String: Any] {

@@ -2291,6 +2291,8 @@
         }
       }
     },
+    "Angle" : {
+    },
     "Angles describe a stationary pose. Zero is face up. Enable simulation before launching the guest app." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2325,8 +2327,9 @@
         }
       }
     },
+    "Animate the fold (sweep)" : {
+    },
     "Animation" : {
-
     },
     "App" : {
       "localizations" : {
@@ -2617,7 +2620,6 @@
       }
     },
     "Apple TV Remote" : {
-
     },
     "Apps" : {
       "localizations" : {
@@ -3052,6 +3054,8 @@
           }
         }
       }
+    },
+    "Book" : {
     },
     "Boolean" : {
       "localizations" : {
@@ -4188,7 +4192,6 @@
       }
     },
     "Change the search or filter to browse other defaults." : {
-
     },
     "Changes sync to the guest immediately. Disabling keeps your axis values." : {
       "extractionState" : "manual",
@@ -4670,7 +4673,6 @@
       }
     },
     "Choose a Pose" : {
-
     },
     "Choose a folder for the selected reports." : {
       "localizations" : {
@@ -5017,7 +5019,6 @@
       }
     },
     "Click or hold. Arrow keys navigate.\nReturn selects. Esc goes back." : {
-
     },
     "Clipboard" : {
       "localizations" : {
@@ -5189,11 +5190,13 @@
         }
       }
     },
+    "Closed" : {
+    },
     "Closed (0°)" : {
-
+    },
+    "Closed uses the cover screen. Book and Open use the inner screen. Screen changes apply while the device is running." : {
     },
     "Commands without a reply report submission. SoundBoard applies them asynchronously." : {
-
     },
     "Common domains" : {
       "localizations" : {
@@ -6296,7 +6299,6 @@
       }
     },
     "Copy Reply" : {
-
     },
     "Copy Result" : {
       "localizations" : {
@@ -7502,7 +7504,6 @@
       }
     },
     "Default Value" : {
-
     },
     "Delete" : {
       "localizations" : {
@@ -8301,13 +8302,10 @@
       }
     },
     "Discard Changes" : {
-
     },
     "Discard Edit" : {
-
     },
     "Discard unsaved changes?" : {
-
     },
     "Disconnected" : {
       "localizations" : {
@@ -8462,10 +8460,8 @@
       }
     },
     "Done" : {
-
     },
     "Down" : {
-
     },
     "Down Arrow" : {
       "localizations" : {
@@ -8750,6 +8746,8 @@
         }
       }
     },
+    "Duration" : {
+    },
     "Edit" : {
       "localizations" : {
         "en" : {
@@ -8853,7 +8851,6 @@
       }
     },
     "Edited" : {
-
     },
     "Effective UID" : {
       "localizations" : {
@@ -9025,7 +9022,6 @@
       }
     },
     "Enabled" : {
-
     },
     "Enabled %@." : {
       "localizations" : {
@@ -10445,6 +10441,18 @@
         }
       }
     },
+    "Fold Posture" : {
+    },
+    "Folded to %@ — %lld°." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Folded to %1$@ — %2$lld°."
+          }
+        }
+      }
+    },
     "Folder name" : {
       "localizations" : {
         "en" : {
@@ -10478,6 +10486,8 @@
           }
         }
       }
+    },
+    "Folding…" : {
     },
     "Forward" : {
       "localizations" : {
@@ -11220,7 +11230,12 @@
       }
     },
     "Hinge" : {
-
+    },
+    "Hinge Sensor" : {
+    },
+    "Hinge Service" : {
+    },
+    "Hinge State" : {
     },
     "Hold Command while sending a special key" : {
       "localizations" : {
@@ -11549,13 +11564,10 @@
       }
     },
     "HomePod" : {
-
     },
     "HomePod User Defaults" : {
-
     },
     "HomePod user defaults" : {
-
     },
     "Host Location Unavailable" : {
       "localizations" : {
@@ -13414,7 +13426,6 @@
       }
     },
     "Left" : {
-
     },
     "Left Arrow" : {
       "localizations" : {
@@ -13996,7 +14007,6 @@
       }
     },
     "Maximum" : {
-
     },
     "Media" : {
       "localizations" : {
@@ -14111,7 +14121,6 @@
       }
     },
     "Metadata" : {
-
     },
     "Minimize" : {
       "localizations" : {
@@ -14148,7 +14157,6 @@
       }
     },
     "Minimum" : {
-
     },
     "Minimum OS" : {
       "localizations" : {
@@ -14868,7 +14876,6 @@
       }
     },
     "No Matching Defaults" : {
-
     },
     "No Matching Entries" : {
       "localizations" : {
@@ -16043,7 +16050,6 @@
       }
     },
     "Open Flat (180°)" : {
-
     },
     "Open Guest Spotlight" : {
       "localizations" : {
@@ -16402,10 +16408,8 @@
       }
     },
     "Override" : {
-
     },
     "Overrides Only" : {
-
     },
     "PID" : {
       "localizations" : {
@@ -16492,7 +16496,6 @@
       }
     },
     "Partially Open (90°)" : {
-
     },
     "Passcode" : {
       "localizations" : {
@@ -16969,7 +16972,6 @@
       }
     },
     "Phase" : {
-
     },
     "Physical Memory" : {
       "localizations" : {
@@ -17107,7 +17109,6 @@
       }
     },
     "Play / Pause" : {
-
     },
     "Portrait" : {
       "localizations" : {
@@ -18273,7 +18274,6 @@
       }
     },
     "Read current values and metadata. Unsaved edits are preserved." : {
-
     },
     "Read one preference key, or leave the key empty to read all keys in the domain." : {
       "localizations" : {
@@ -18490,7 +18490,6 @@
       }
     },
     "Reading defaults from SoundBoard…" : {
-
     },
     "Reading device information…" : {
       "localizations" : {
@@ -18928,7 +18927,6 @@
       }
     },
     "Reload Controls" : {
-
     },
     "Reload the app list (⌘R)" : {
       "localizations" : {
@@ -19139,7 +19137,6 @@
       }
     },
     "Remove this setting's override in SoundBoard." : {
-
     },
     "Removed %@." : {
       "localizations" : {
@@ -19514,10 +19511,8 @@
       }
     },
     "Requested hinge pose: %@." : {
-
     },
     "Requires reinitialization; restart SoundBoard after applying this change." : {
-
     },
     "Reset" : {
       "extractionState" : "manual",
@@ -19571,7 +19566,6 @@
       }
     },
     "Reset to Default" : {
-
     },
     "Resident" : {
       "localizations" : {
@@ -19766,7 +19760,6 @@
       }
     },
     "Restart SoundBoard" : {
-
     },
     "Restart and Apply" : {
       "extractionState" : "manual",
@@ -20131,7 +20124,6 @@
       }
     },
     "Right" : {
-
     },
     "Right Arrow" : {
       "localizations" : {
@@ -21107,6 +21099,8 @@
         }
       }
     },
+    "Screen State" : {
+    },
     "Screenshot" : {
       "localizations" : {
         "en" : {
@@ -21300,7 +21294,6 @@
       }
     },
     "Search names and descriptions" : {
-
     },
     "Security" : {
       "localizations" : {
@@ -21331,7 +21324,6 @@
       }
     },
     "Select" : {
-
     },
     "Select All" : {
       "localizations" : {
@@ -21712,7 +21704,6 @@
       }
     },
     "Send Command" : {
-
     },
     "Send SIGTERM to the selected processes (⌘⌫)" : {
       "localizations" : {
@@ -22290,6 +22281,8 @@
         }
       }
     },
+    "Set Again" : {
+    },
     "Set Clipboard Text" : {
       "localizations" : {
         "en" : {
@@ -22444,7 +22437,6 @@
       }
     },
     "Set the fold pose. Both display windows remain available; the guest decides which panels are lit. The selection shows the last requested pose." : {
-
     },
     "Set the guest clipboard to this text (⌘↩)" : {
       "localizations" : {
@@ -23062,7 +23054,6 @@
       }
     },
     "Siri" : {
-
     },
     "Size" : {
       "localizations" : {
@@ -23201,10 +23192,8 @@
       }
     },
     "SoundBoard Debug Control" : {
-
     },
     "SoundBoard Reply" : {
-
     },
     "Source: Off" : {
       "localizations" : {
@@ -24303,7 +24292,6 @@
       }
     },
     "Stored Override" : {
-
     },
     "Streaming Paused" : {
       "localizations" : {
@@ -24422,6 +24410,10 @@
           }
         }
       }
+    },
+    "Sweep" : {
+    },
+    "Sweep Again" : {
     },
     "Switch Guest Input Source" : {
       "localizations" : {
@@ -24656,7 +24648,6 @@
       }
     },
     "TV / Control Center" : {
-
     },
     "Tab" : {
       "localizations" : {
@@ -25771,6 +25762,8 @@
         }
       }
     },
+    "The hinge service is off; only the pose changed." : {
+    },
     "The last capture reached %lld entries; the guest dropped the rest." : {
       "localizations" : {
         "en" : {
@@ -25866,6 +25859,10 @@
           }
         }
       }
+    },
+    "The pose reaches SpringBoard and the virtual hinge sensor (CoreMotion, CoreDevice). The screen's own layout follows the displays the guest registers, so a single-display guest keeps one full-screen layout." : {
+    },
+    "The pose reaches SpringBoard and the virtual hinge sensor (CoreMotion, CoreDevice). The window folds with it, and the guest's real panel follows the posture at the next start — the host does not resize a running display. A single-display guest keeps one full-screen layout." : {
     },
     "The process defines what %@ does." : {
       "localizations" : {
@@ -26099,10 +26096,8 @@
       }
     },
     "This operation's native signature is unavailable on the guest firmware." : {
-
     },
     "This value type is available for browsing only." : {
-
     },
     "Time" : {
       "localizations" : {
@@ -27818,6 +27813,8 @@
           }
         }
       }
+    },
+    "Unable to fold. %@" : {
     },
     "Unable to install %@." : {
       "localizations" : {
@@ -30587,7 +30584,6 @@
       }
     },
     "Up" : {
-
     },
     "Up Arrow" : {
       "localizations" : {
@@ -30923,10 +30919,8 @@
       }
     },
     "User Defaults" : {
-
     },
     "User Defaults…" : {
-
     },
     "User Fault" : {
       "localizations" : {
@@ -32256,7 +32250,6 @@
       "shouldTranslate" : false
     },
     "hinge" : {
-
     },
     "iOS Version" : {
       "localizations" : {

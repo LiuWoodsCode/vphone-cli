@@ -15,6 +15,7 @@ trap '/bin/rm -rf "$temporary"' EXIT
     "$daemon/Daemon/GuestServiceProfile.swift" \
     "$daemon/Daemon/GuestFirstBootSettle.swift" \
     "$daemon/Daemon/GuestPointerScroll.swift" \
+    "$daemon/Daemon/GuestProcessSpawnPolicy.swift" \
     "$daemon/Daemon/Bootstrap/GuestBootstrapPlatform.swift" \
     "$daemon/Daemon/GuestSetupAssistantState.swift" \
     "$daemon/Tests/LogicTests.swift" \

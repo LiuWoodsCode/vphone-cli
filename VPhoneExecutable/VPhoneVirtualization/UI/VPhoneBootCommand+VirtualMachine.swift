@@ -16,10 +16,14 @@ extension VPhoneBootCommand {
         print("[vphone] Loaded VM manifest from \(config.path)")
 
         let vmDir = config.deletingLastPathComponent()
-        let isFoldable = manifest.guestDevice.innerScreen != nil
-        let hasInnerDisplay = isFoldable && VPhoneGraphicsDisplaySupport.maximumDisplayPortCount >= 2
-        if isFoldable && !hasInnerDisplay {
-            print("[display] This host's Virtualization service permits one display. Starting the outer display; the inner display is unavailable. Hinge controls remain available.")
+
+        // One immutable physical Main backs both logical Duo panels. Keep
+        // enough native pixels for inner mode even when booting closed.
+        var screenWidth = manifest.screenConfig.width
+        var screenHeight = manifest.screenConfig.height
+        if manifest.guestDevice == .iPhone19_4 {
+            screenWidth = VPhoneGuestDevice.iPhone19_4InnerScreen.width
+            screenHeight = VPhoneGuestDevice.iPhone19_4InnerScreen.height
         }
 
         return try VPhoneVirtualMachine.Options(
@@ -31,18 +35,16 @@ extension VPhoneBootCommand {
             memorySize: manifest.memorySize,
             sepStorageURL: manifest.resolve(path: manifest.sepStorage, in: vmDir),
             sepRomURL: manifest.romImages.map { try manifest.resolve(path: $0.avpSEPBooter, in: vmDir) },
-            screenWidth: manifest.screenConfig.width,
-            screenHeight: manifest.screenConfig.height,
+            screenWidth: screenWidth,
+            screenHeight: screenHeight,
             screenPPI: manifest.screenConfig.pixelsPerInch,
             screenScale: manifest.screenConfig.scale,
-            innerScreen: hasInnerDisplay ? manifest.guestDevice.innerScreen : nil,
-            framebufferIdentifiers: manifest.guestDevice.framebufferIdentifiers,
             kernelDebugPort: kernelDebugPort,
             isPadGuest: manifest.guestDevice.isPad,
             isTVGuest: manifest.guestDevice.family == .appleTV,
             isHomePodGuest: manifest.guestDevice.family == .homePod,
             isWatchGuest: manifest.guestDevice.family == .watch,
-            isFoldableGuest: isFoldable,
+            isFoldableGuest: manifest.guestDevice == .iPhone19_4
         )
     }
 }

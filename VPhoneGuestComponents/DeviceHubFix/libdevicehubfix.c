@@ -98,6 +98,19 @@
 // can meet it. That costs one scaler round trip per frame, 0.5–1 ms past the
 // write the band reads used to wait for on the host anyway.
 //
+// ## dtdeviceinfod: the hinge-angle capability
+//
+// CoreDevice (DeviceHub) asks the DDI whether the device has a hinge; the
+// DDI's dtdeviceinfod answers through CoreMotion's CMAngleManager, whose
+// availability CoreMotion keys on the device-tree product-id a single-display
+// guest cannot carry. Opening only the availability gate (v4) crash-looped
+// dtdeviceinfod: the bridge then started the REAL manager, whose MotionThread
+// asserts when its capability bits contradict the answer. The manager's whole
+// ObjC surface is replaced instead — VPCMAngleManager.m in this folder — so
+// CoreMotion's machinery never runs and the samples come from libvphonehinge's
+// published latest sample. Only when that provider is live does the
+// capability answer open; otherwise everything falls back to the original.
+//
 // ## Reach
 //
 // The interposes reach their callers because cryptexd, dtremotedisplayd,
@@ -115,6 +128,7 @@
 #include <fcntl.h>
 #include <objc/runtime.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -341,7 +355,11 @@ __attribute__((constructor)) static void vpInstallScalerBarrier(void) {
     vpLog("VCPSideCarMetal band reads %s, %s", "found", "they wait for the scaler");
 }
 
-int vphone_devicehubfix_version(void) { return 3; }
+int vphone_devicehubfix_version(void) { return 6; }
+
+// The CMAngleManager stand-in for dtdeviceinfod lives in VPCMAngleManager.m
+// (same dylib): it swaps the manager's whole ObjC surface and feeds the
+// bridge from the hinge provider's published samples.
 
 __attribute__((used, section("__DATA,__interpose"))) static const struct {
     const void *replacement;

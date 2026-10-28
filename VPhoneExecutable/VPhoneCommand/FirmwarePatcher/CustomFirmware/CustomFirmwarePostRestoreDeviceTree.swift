@@ -531,25 +531,10 @@ public enum CustomFirmwarePostRestoreDeviceTree {
     /// ("Restore pose on VM") instead of waiting for hinge hardware.
     public static let foldableVMSubtypes = ["V68AP": "V68VM2025"]
 
-    public static func withFoldableDisplays(_ blob: Data, board: Data) throws -> (Data, [Change], Int) {
-        let root = try parseTree(blob, label: "DT")
-        let source = try parseTree(board, label: "board DT")
-        let changes = try DeviceTreePatcher.presentFoldableDisplays(in: root, from: source)
-        guard !changes.isEmpty else { return (blob, [], 0) }
-        let result = serializeNode(root)
-        let records = changes.map {
-            Change(property: $0.path, before: $0.before?.hex ?? "absent", after: $0.after.hex)
-        }
-        return (result, records, result.count - blob.count)
-    }
-
-    @discardableResult
-    public static func presentFoldableDisplays(at url: URL, board boardURL: URL, dryRun: Bool = false, verbose: Bool = true) throws -> Outcome {
-        let board = try openDeviceTree(Data(contentsOf: boardURL), path: boardURL.path).blob
-        return try rewrite(at: url, dryRun: dryRun, verbose: verbose) { blob in
-            let (result, changes, _) = try withFoldableDisplays(blob, board: board)
-            return (result, changes, result.count)
-        }
+    /// Every sub-type that marks a tree a foldable board's: the board's own
+    /// values and their VM replacements.
+    public static var foldableSubtypes: Set<String> {
+        Set(foldableVMSubtypes.keys).union(foldableVMSubtypes.values)
     }
 
     /// `blob` with its root `target-sub-type` replaced by the board's VM
@@ -579,6 +564,44 @@ public enum CustomFirmwarePostRestoreDeviceTree {
     ) throws -> Outcome {
         try rewrite(at: url, dryRun: dryRun, verbose: verbose) { blob in
             let (newBlob, changes, delta) = try withFoldableVMSubtype(blob)
+            return (newBlob, changes, blob.count + delta)
+        }
+    }
+
+    /// `blob` with `/product/product-id` taken from the foldable board's own
+    /// flat tree `board`, through `DeviceTreePatcher.presentFoldableProductID`.
+    /// Returns the size change with the changes, as `withHomePodAudioProduct`
+    /// does. A tree that is not a foldable guest, or already carries the
+    /// board's token, comes back unchanged.
+    public static func withFoldableProductId(_ blob: Data, board: Data) throws -> (Data, [Change], Int) {
+        let root = try parseTree(blob, label: "DT")
+        let source = try parseTree(board, label: "foldable board DT")
+        guard let change = try DeviceTreePatcher.presentFoldableProductID(in: root, from: source) else {
+            return (blob, [], 0)
+        }
+        let record = Change(property: "product/product-id", before: change.before?.hex ?? "absent", after: change.after.hex)
+        let delta = align4(change.after.count) - (change.before.map { align4($0.count) } ?? -36)
+        return (serializeNode(root), [record], delta)
+    }
+
+    /// Give a foldable guest's `devicetree.img4` (or bare `.im4p`) the board's
+    /// own product token, in place. See `withFoldableProductId`.
+    @discardableResult
+    public static func presentFoldableProductId(
+        at url: URL,
+        board boardURL: URL,
+        dryRun: Bool = false,
+        verbose: Bool = true,
+    ) throws -> Outcome {
+        let boardData: Data
+        do {
+            boardData = try Data(contentsOf: boardURL)
+        } catch {
+            throw PatcherError.fileNotFound(boardURL.path)
+        }
+        let board = try openDeviceTree(boardData, path: boardURL.path).blob
+        return try rewrite(at: url, dryRun: dryRun, verbose: verbose) { blob in
+            let (newBlob, changes, delta) = try withFoldableProductId(blob, board: board)
             return (newBlob, changes, blob.count + delta)
         }
     }

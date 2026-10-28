@@ -36,10 +36,22 @@ enum LogicTests {
         settleVerdicts()
         dataMigrationRecord()
         pointerScroll()
+        processSpawnPolicy()
         bootstrapPlatform()
         setupAssistantState()
         print("\(checks) checks, \(failures) failures")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func processSpawnPolicy() {
+        let valid = GuestProcessSpawnPolicy.validate(executable: "ps", arguments: ["-axo", "pid=,ppid=,args="], timeout: 3)
+        expect(valid == nil, "standard ps discovery request is accepted")
+        expect(GuestProcessSpawnPolicy.validate(executable: "sh", arguments: [], timeout: 3) != nil, "shell is refused")
+        expect(GuestProcessSpawnPolicy.validate(executable: "ps", arguments: Array(repeating: "x", count: 17), timeout: 3) != nil, "argument count is bounded")
+        expect(GuestProcessSpawnPolicy.validate(executable: "ps", arguments: [String(repeating: "x", count: 257)], timeout: 3) != nil, "argument length is bounded")
+        expect(GuestProcessSpawnPolicy.validate(executable: "ps", arguments: ["x\n"], timeout: 3) != nil, "control characters are refused")
+        expect(GuestProcessSpawnPolicy.validate(executable: "ps", arguments: [], timeout: 0.09) != nil, "short timeout is refused")
+        expect(GuestProcessSpawnPolicy.validate(executable: "ps", arguments: [], timeout: 10.01) != nil, "long timeout is refused")
     }
 
     // MARK: - Setup Assistant

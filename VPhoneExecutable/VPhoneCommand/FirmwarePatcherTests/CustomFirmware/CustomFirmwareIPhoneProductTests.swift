@@ -141,3 +141,72 @@ struct CustomFirmwareFoldableVMSubtypeTests {
         }
     }
 }
+
+@Suite("Foldable product identity")
+struct CustomFirmwareFoldableProductIdTests {
+    private typealias Node = FlatDeviceTreeNode
+
+    private static let boardToken = Data((0 ... 19).map { UInt8(0xa0 + $0) })
+    private static let vmToken = Data(repeating: 0x5a, count: 20)
+
+    private static func tree(subtype: String, productID: Data?) -> Data {
+        var properties: [(String, Data)] = [("product-name", Data("iPhone\0".utf8))]
+        if let productID {
+            properties.append(("product-id", productID))
+        }
+        return Node("device-tree", [
+            ("model", Data("iPhone19,4\0".utf8)),
+            ("target-sub-type", Data("\(subtype)\0".utf8)),
+            ("target-type", Data("v68\0".utf8)),
+        ], children: [Node("product", properties)]).serialized
+    }
+
+    @Test func `a foldable guest takes the board's product token`() throws {
+        // Both sub-types the guest can carry: the board's own, and the VM
+        // value the sub-type repair writes before this one runs.
+        for subtype in ["V68AP", "V68VM2025"] {
+            let original = Self.tree(subtype: subtype, productID: Self.vmToken)
+            let board = Self.tree(subtype: "V68AP", productID: Self.boardToken)
+            let (patched, changes, delta) = try CustomFirmwarePostRestoreDeviceTree.withFoldableProductId(original, board: board)
+            #expect(changes.map(\.property) == ["product/product-id"])
+            #expect(changes.first?.before == Self.vmToken.hex)
+            #expect(changes.first?.after == Self.boardToken.hex)
+            #expect(delta == 0)
+            #expect(patched == Self.tree(subtype: subtype, productID: Self.boardToken))
+        }
+    }
+
+    @Test func `a tree without the property gains it`() throws {
+        let original = Self.tree(subtype: "V68VM2025", productID: nil)
+        let board = Self.tree(subtype: "V68AP", productID: Self.boardToken)
+        let (patched, changes, delta) = try CustomFirmwarePostRestoreDeviceTree.withFoldableProductId(original, board: board)
+        #expect(changes.map(\.property) == ["product/product-id"])
+        #expect(changes.first?.before == "absent")
+        #expect(delta == 36 + 20)
+        #expect(patched == Self.tree(subtype: "V68VM2025", productID: Self.boardToken))
+    }
+
+    @Test func `other guests and a second run are left alone`() throws {
+        let board = Self.tree(subtype: "V68AP", productID: Self.boardToken)
+        for subtype in ["D47AP", "V63AP"] {
+            let original = Self.tree(subtype: subtype, productID: Self.vmToken)
+            let (patched, changes, delta) = try CustomFirmwarePostRestoreDeviceTree.withFoldableProductId(original, board: board)
+            #expect(changes.isEmpty)
+            #expect(delta == 0)
+            #expect(patched == original)
+        }
+        let settled = Self.tree(subtype: "V68VM2025", productID: Self.boardToken)
+        let (patched, changes, delta) = try CustomFirmwarePostRestoreDeviceTree.withFoldableProductId(settled, board: board)
+        #expect(changes.isEmpty)
+        #expect(delta == 0)
+        #expect(patched == settled)
+    }
+
+    @Test func `a non-foldable donor is refused`() throws {
+        let original = Self.tree(subtype: "V68VM2025", productID: Self.vmToken)
+        let donor = Self.tree(subtype: "D47AP", productID: Self.boardToken)
+        #expect(throws: (any Error).self) {
+            _ = try CustomFirmwarePostRestoreDeviceTree.withFoldableProductId(original, board: donor)
+        }
+    }
+}

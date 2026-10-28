@@ -656,22 +656,42 @@ struct VPhoneCustomFirmwarePatchFoldableVMSubtypeCommand: ParsableCommand {
     }
 }
 
-// MARK: - patch-dt-haptics
+// MARK: - patch-dt-foldable-product-id
 
-struct VPhoneCustomFirmwarePatchFoldableDisplaysCommand: ParsableCommand {
+struct VPhoneCustomFirmwarePatchFoldableProductIdCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "patch-dt-foldable-displays",
-        abstract: "Present the Duo's built-in outer and inner display identities",
+        commandName: "patch-dt-foldable-product-id",
+        abstract: "Give a foldable guest's device tree the board's own product identity",
+        discussion: """
+        Replaces /product/product-id of a foldable guest's device tree with the
+        foldable board's own 20-byte token, taken from the board's tree, in
+        place, preserving the container's compression, manifest and restore
+        info. CoreMotion selects its motion capabilities from that token — the
+        hinge-angle manager among them — and the frameworks' isV68 checks key
+        on it, so UIKit and Photos open their Duo branches too. Any other
+        tree, or one that already carries the token, is left as it is.
+
+        Takes a devicetree.img4 (preferred) or bare .im4p, and the foldable
+        board's DeviceTree.<board>.im4p.
+        """,
     )
 
-    @Argument(transform: URL.init(fileURLWithPath:)) var deviceTree: URL
-    @Argument(transform: URL.init(fileURLWithPath:)) var boardDeviceTree: URL
-    @Flag(name: .customLong("dry-run")) var dryRun = false
+    @Argument(help: "Path to devicetree.img4 or devicetree.im4p", transform: URL.init(fileURLWithPath:))
+    var deviceTree: URL
+
+    @Argument(help: "Path to the foldable board's DeviceTree.<board>.im4p", transform: URL.init(fileURLWithPath:))
+    var board: URL
+
+    @Flag(name: .customLong("dry-run"), help: "Report what would change and exit")
+    var dryRun = false
 
     func run() throws {
-        try CustomFirmwarePostRestoreDeviceTree.presentFoldableDisplays(at: deviceTree, board: boardDeviceTree, dryRun: dryRun)
+        try CustomFirmwarePostRestoreDeviceTree.presentFoldableProductId(
+            at: deviceTree, board: board, dryRun: dryRun, verbose: true)
     }
 }
+
+// MARK: - patch-dt-haptics
 
 struct VPhoneCustomFirmwarePatchHapticsCommand: ParsableCommand {
     static let configuration = CommandConfiguration(

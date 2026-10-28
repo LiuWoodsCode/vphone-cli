@@ -53,9 +53,6 @@ final class VPhoneControlsModel {
     private(set) var autoBrightness: Bool?
     private(set) var orientation: VPhoneControlsOrientation?
     private(set) var rotationLocked: Bool?
-    /// Last override accepted in this session. The guest API has no live
-    /// hinge readback; nil must not imply that the device is closed.
-    private(set) var hinge: VPhoneControlsHinge?
 
     // MARK: - Audio State
 
@@ -120,7 +117,6 @@ final class VPhoneControlsModel {
             guard connected != observed else { continue }
             observed = connected
             isConnected = connected
-            hinge = nil
             if connected {
                 await refresh()
             }
@@ -215,24 +211,6 @@ final class VPhoneControlsModel {
     }
 
     // MARK: - Display
-
-    func setHinge(_ target: VPhoneControlsHinge) async {
-        guard canWrite, control.isFoldableGuest, control.guestCapabilities.contains("device_pose") else { return }
-        let previous = hinge
-        // Use the current orientation rather than resetting the pose to portrait.
-        let poseOrientation: Int = switch orientation {
-        case .portrait, nil: 1
-        case .upsideDown: 2
-        case .landscapeLeft: 3
-        case .landscapeRight: 4
-        }
-        await write(.hinge, method: "display.posture", params: ["hinge": target.rawValue, "orientation": poseOrientation]) { result in
-            self.hinge = result.int("hinge").flatMap(VPhoneControlsHinge.init(rawValue:))
-            return String(localized: "Requested hinge pose: \(target.title).", bundle: VPhoneLocalization.bundle)
-        } revert: {
-            self.hinge = previous
-        }
-    }
 
     func commitBrightness() async {
         let value = (brightness * 100).rounded() / 100
@@ -473,8 +451,6 @@ final class VPhoneControlsModel {
                 try await apply(brightnessResult: control.call("display.brightness"))
             case .orientation, .rotationLock:
                 try await apply(rotationResult: control.call("display.rotation"))
-            case .hinge:
-                break // The override API does not expose a live readback.
             case .volume:
                 try await apply(volumeResult: control.call("audio.volume", params: ["category": volumeCategory.rawValue]))
             case .lowPowerMode:

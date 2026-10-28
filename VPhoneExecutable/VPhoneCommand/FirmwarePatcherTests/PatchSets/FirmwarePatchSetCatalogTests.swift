@@ -496,7 +496,15 @@ struct FirmwarePatchSetCatalogTests {
         #expect(shipped.count == FirmwarePatchSetCatalog.builtInPresets.count)
         for builtIn in FirmwarePatchSetCatalog.builtInPresets {
             let match = shipped.first { $0.identifier == builtIn.identifier }
-            #expect(match == builtIn, "\(builtIn.identifier).plist differs from the built-in copy")
+            if match != builtIn, let match,
+               case let .block(shippedBlocked) = match.selection,
+               case let .block(builtInBlocked) = builtIn.selection {
+                let missing = builtInBlocked.subtracting(shippedBlocked).sorted()
+                let extra = shippedBlocked.subtracting(builtInBlocked).sorted()
+                #expect(match == builtIn, "\(builtIn.identifier).plist differs from the built-in copy — plist missing: \(missing), plist extra: \(extra)")
+            } else {
+                #expect(match == builtIn, "\(builtIn.identifier).plist differs from the built-in copy")
+            }
         }
     }
 

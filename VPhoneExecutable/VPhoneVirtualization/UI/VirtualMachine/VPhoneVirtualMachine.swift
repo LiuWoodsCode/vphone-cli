@@ -45,8 +45,6 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         var screenHeight: Int = 2796
         var screenPPI: Int = 460
         var screenScale: Double = 3.0
-        var innerScreen: VPhoneVirtualMachineManifest.ScreenConfig?
-        var framebufferIdentifiers: [String] = []
         var kernelDebugPort: Int?
         /// The guest runs iPadOS: Esc is a key there, not the back gesture.
         var isPadGuest = false
@@ -55,6 +53,8 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         /// The guest runs watchOS: its side button is a key of its own (consumer
         /// Help), apart from the crown (Home) and the power key.
         var isWatchGuest = false
+        /// The guest is a foldable whose panel is sized per posture at boot;
+        /// its window persists the position for the next start.
         var isFoldableGuest = false
     }
 
@@ -186,18 +186,6 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
                 pixelsPerInch: options.screenPPI,
             ),
         ]
-        if let inner = options.innerScreen {
-            gfx.displays.append(VZMacGraphicsDisplayConfiguration(
-                widthInPixels: inner.width,
-                heightInPixels: inner.height,
-                pixelsPerInch: inner.pixelsPerInch,
-            ))
-            // VZ defaults to one port even when two displays are supplied.
-            Dynamic(gfx)._setDisplayPortCount(gfx.displays.count)
-        }
-        for (display, identifier) in zip(gfx.displays, options.framebufferIdentifiers) {
-            Dynamic(display)._setDisplayIdentifier(identifier)
-        }
         config.graphicsDevices = [gfx]
 
         // Audio
@@ -269,18 +257,11 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
             print("[vphone] Accelerator devices configured")
         }
 
-        // Each panel has its own digitizer, associated with VZ's display UUID.
-        // The donor framebuffer identifier describes the guest product; VZ's
-        // association UUID pairs host input devices and views.
-        let touchscreens = gfx.displays.compactMap { display -> NSObject? in
-            guard let touchscreen = Dynamic._VZUSBTouchScreenConfiguration().asObject else { return nil }
-            if options.innerScreen != nil {
-                Dynamic(touchscreen).setAssociationIdentifier(Dynamic(display)._uuid.asObject)
-            }
-            return touchscreen
+        // Multi-touch (USB touch screen)
+        if let obj = Dynamic._VZUSBTouchScreenConfiguration().asObject {
+            Dynamic(config)._setMultiTouchDevices([obj])
+            print("[vphone] USB touch screen configured")
         }
-        Dynamic(config)._setMultiTouchDevices(touchscreens)
-        print("[vphone] \(touchscreens.count) USB touch screen(s) configured")
 
         let obj = VZVirtioEntropyDeviceConfiguration()
         config.entropyDevices = [obj]

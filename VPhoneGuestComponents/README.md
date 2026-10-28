@@ -14,6 +14,7 @@ tweak filter plists, and the GPU provenance note:
 | Device name pin | `devicename/libdevicename.dylib` |
 | Virtual gyroscope | `gyroscope/libvphonegyro.dylib` |
 | Gravity accelerometer | `accelerometer/libvphoneaccelerometer.dylib` |
+| Virtual hinge angle | `hinge/libvphonehinge.dylib` |
 | Device attitude | `attitude/libvphoneattitude.dylib` |
 | HomePod display identity | `homepoddisplay/libvphonehomepoddisplay.dylib` |
 | HomePod setup maintenance | `homepodsetup/vphone-homepod-setup`, `homepodsetup/com.vphone.homepod-setup.plist` |
@@ -83,6 +84,19 @@ form of `display.rotation` includes its configuration and provider status.
 subscription changes and stale service callbacks without registering a host
 sensor. See `Research/Guest/springboard_orientation_stuck.md` for evidence and
 the language-change regression boundary.
+
+`system-backboardd-cfw-hinge` installs `libvphonehinge.dylib`, also selected
+independently and loaded only in backboardd. It publishes the foldable's
+virtual hinge HID service (usage page 0xFF0C, usage 0x21) and reports the
+angle configured by `display.posture`, using HID.framework's C factory
+`IOHIDEventCreateHingeAngleEvent` — the only hinge entry point; HIDEvent
+exposes just `-hingeAngle*` accessors. CoreMotion's angle manager, and through
+it CoreDevice's hingeAngle stream, reads it; CoreMotion only looks when the
+device tree carries the foldable board's own product-id
+(`preboot-cfw-devicetree_foldable_product_id`), so on any other guest the
+service sits unread. Foldable guests only; `make test-hinge` checks the
+configuration transport and, on a Mac with Apple's HID.framework, a real
+factory call whose fields read back from the event's own description.
 
 `system-apps-cfw-attitude` installs `libvphoneattitude.dylib`, loaded by
 SystemHook into apps. It supplies a stationary Core Motion pose through

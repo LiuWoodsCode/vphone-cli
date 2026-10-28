@@ -119,8 +119,8 @@
 			<string>preboot-cfw-devicetree_identity_values</string>
 			<string>preboot-cfw-devicetree_iphone_product</string>
 			<string>preboot-cfw-devicetree_foldable_vm_subtype</string>
-			<string>preboot-cfw-devicetree_foldable_displays</string>
 			<string>preboot-cfw-devicetree_microphone_array</string>
+			<string>preboot-exp-devicetree_foldable_product_id</string>
 			<string>restoreramdisk-boot-apfs_sha3_hash</string>
 			<string>system-apps-cfw-attitude</string>
 			<string>system-apps-exp-signin_sheets</string>
@@ -128,6 +128,9 @@
 			<string>system-backboardd-cfw-gyroscope</string>
 			<string>system-backboardd-cfw-accelerometer</string>
 			<string>system-campo-cfw-entitlements</string>
+			<string>system-backboardd-cfw-hinge</string>
+			<string>system-springboard-cfw-fold_guard</string>
+			<string>system-springboard-cfw-fold_display</string>
 			<string>system-debugserver-cfw-install</string>
 			<string>system-dyld-boot-arm64e_x1_bootstrap</string>
 			<string>system-diskimagesiod-cfw-is_mount_complete</string>

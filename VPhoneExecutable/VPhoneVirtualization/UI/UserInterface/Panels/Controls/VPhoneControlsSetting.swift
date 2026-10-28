@@ -4,7 +4,6 @@ import Foundation
 enum VPhoneControlsSetting: Equatable {
     case brightness
     case orientation
-    case hinge
     case rotationLock
     case volume
     case lowPowerMode
@@ -13,7 +12,6 @@ enum VPhoneControlsSetting: Equatable {
         switch self {
         case .brightness: String(localized: "brightness", bundle: VPhoneLocalization.bundle)
         case .orientation: String(localized: "orientation", bundle: VPhoneLocalization.bundle)
-        case .hinge: String(localized: "hinge", bundle: VPhoneLocalization.bundle)
         case .rotationLock: String(localized: "Rotation Lock", bundle: VPhoneLocalization.bundle)
         case .volume: String(localized: "volume", bundle: VPhoneLocalization.bundle)
         case .lowPowerMode: String(localized: "Low Power Mode", bundle: VPhoneLocalization.bundle)

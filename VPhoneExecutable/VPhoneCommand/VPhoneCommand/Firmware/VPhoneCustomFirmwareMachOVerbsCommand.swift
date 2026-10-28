@@ -558,6 +558,7 @@ struct VPhoneCustomFirmwarePatchVirtualAudioDeviceStateNullGateCommand: Parsable
 }
 
 // MARK: - patch-virtualaudio
+// MARK: - patch-virtualaudio
 
 struct VPhoneCustomFirmwarePatchVirtualAudioCommand: ParsableCommand {
     static let configuration = CommandConfiguration(

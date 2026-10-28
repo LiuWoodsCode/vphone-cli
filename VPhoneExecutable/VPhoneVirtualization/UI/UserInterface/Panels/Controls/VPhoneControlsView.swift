@@ -82,17 +82,6 @@ struct VPhoneControlsView: View {
             })
             .disabled(!model.canWrite || model.rotationLocked == nil)
             .help("Keep the guest interface from rotating with the device")
-
-            if model.control.isFoldableGuest {
-                Picker("Hinge", selection: hingeBinding) {
-                    Text("Choose a Pose").tag(VPhoneControlsHinge?.none)
-                    ForEach(VPhoneControlsHinge.allCases) { hinge in
-                        Text(hinge.title).tag(VPhoneControlsHinge?.some(hinge))
-                    }
-                }
-                .disabled(!model.canWrite || !model.control.guestCapabilities.contains("device_pose"))
-                .help("Set the fold pose. Both display windows remain available; the guest decides which panels are lit. The selection shows the last requested pose.")
-            }
         }
     }
 
@@ -276,13 +265,6 @@ struct VPhoneControlsView: View {
     }
 
     // MARK: - Bindings
-
-    private var hingeBinding: Binding<VPhoneControlsHinge?> {
-        Binding { model.hinge } set: { hinge in
-            guard let hinge else { return }
-            Task { await model.setHinge(hinge) }
-        }
-    }
 
     private var orientationBinding: Binding<VPhoneControlsOrientation?> {
         Binding {

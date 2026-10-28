@@ -15,8 +15,6 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     /// Guest pixels per interface point, to turn trackpad travel into the
     /// guest's points for a native scroll.
     var screenScale: CGFloat = 3
-    var displayIndex = 0
-    var hasMultipleDisplays = false
 
     /// Whether trackpad scroll/pinch gestures are replayed as guest touches.
     var trackpadGesturesEnabled = VPhoneTrackpadGestures.isEnabled {
@@ -130,23 +128,20 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
 
     /// https://github.com/wh1te4ever/super-tart-vphone-writeup/blob/main/contents/ScreenSharingVNC.swift
     private var multiTouchDevice: AnyObject? {
-        if let device = Dynamic(self)._multiTouchDevice.asObject { return device }
         guard let vm = virtualMachine else { return nil }
         guard let devices = Dynamic(vm)._multiTouchDevices.asObject as? NSArray,
-              devices.count > displayIndex
+              devices.count > 0
         else {
             return nil
         }
-        return devices.object(at: displayIndex) as AnyObject
+        return devices.object(at: 0) as AnyObject
     }
 
     var recordingGraphicsDisplay: VZGraphicsDisplay? {
         if let display = Dynamic(self)._graphicsDisplay.asObject as? VZGraphicsDisplay {
             return display
         }
-        guard let displays = virtualMachine?.graphicsDevices.first?.displays,
-              displays.indices.contains(displayIndex) else { return nil }
-        return displays[displayIndex]
+        return virtualMachine?.graphicsDevices.first?.displays.first
     }
 
     // MARK: - Event Handling
@@ -203,7 +198,7 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     }
 
     private var guestPointerFollowsMouse: Bool {
-        !hasMultipleDisplays && trackpadGesturesEnabled && control?.supportsPointerScroll == true
+        trackpadGesturesEnabled && control?.supportsPointerScroll == true
     }
 
     /// Only in the key window: over a window in the background the Mac's
@@ -408,7 +403,7 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     /// Replay a trackpad scroll as a guest finger that presses under the pointer
     /// and follows the physical direction of the gesture.
     override func scrollWheel(with event: NSEvent) {
-        if !hasMultipleDisplays, trackpadGesturesEnabled, let control, control.supportsPointerScroll {
+        if trackpadGesturesEnabled, let control, control.supportsPointerScroll {
             scrollNatively(event, control: control)
             return
         }
@@ -545,7 +540,12 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     /// A view point as `input.pointer` takes it: 0...1 of the interface as the
     /// window shows it, from the top-left corner.
     private func interfacePoint(_ localPoint: NSPoint) -> CGPoint {
-        let panel = normalizeCoordinate(localPoint)
+var panel = normalizeCoordinate(localPoint)
+        if let active = activePanelPixels, let backing = recordingGraphicsDisplay?.sizeInPixels,
+           active.width > 0, active.height > 0 {
+            panel.x *= backing.width / active.width
+            panel.y *= backing.height / active.height
+        }
         let unit = CGSize(width: 1, height: 1)
         let screen = screenOrientation.screenPoint(fromPanel: CGPoint(x: panel.x, y: 1 - panel.y), panel: unit)
         return CGPoint(x: min(max(screen.x, 0), 1), y: min(max(1 - screen.y, 0), 1))
@@ -634,7 +634,7 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     /// How the window shows the panel: this view is turned with the guest's
     /// interface, and keeps its portrait bounds.
     private var screenOrientation: VPhoneDisplayOrientation {
-        VPhoneDisplayOrientation(viewRotation: frameCenterRotation)
+        VPhoneDisplayOrientation(viewRotation: enclosingDisplayRotation ?? frameCenterRotation)
     }
 
     /// Where to press the synthetic finger: the pointer, except for an upward
@@ -943,6 +943,24 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
 
     // MARK: - Programmatic Touch (for automation)
 
+    var enclosingDisplayRotation: CGFloat?
+    var activePanelPixels: CGSize?
+    var displayedOrientation: VPhoneDisplayOrientation { screenOrientation }
+
+    /// Read-only diagnostic: use the same geometry as real mouse/touch input.
+    func inputGeometryReport() -> [String: Any] {
+        let pixels = recordingGraphicsDisplay?.sizeInPixels ?? .zero
+        func rect(_ value: CGRect) -> [Double] {
+            [Double(value.minX), Double(value.minY), Double(value.width), Double(value.height)]
+        }
+        return [
+            "graphics_pixels": [Double(pixels.width), Double(pixels.height)],
+            "view_bounds": rect(bounds), "display_rect": rect(displayGeometry.displayRect),
+            "view_rotation": Double(enclosingDisplayRotation ?? frameCenterRotation), "screen_orientation": screenOrientation.rawValue,
+            "is_flipped": isFlipped, "mouse_uses_pointer": clicksWithGuestPointer,
+        ]
+    }
+
     /// Convert screenshot pixel coordinates to NSView local coordinates.
     private func pixelToLocal(pixelX: Double, pixelY: Double, screenWidth: Int, screenHeight: Int) -> NSPoint {
         displayGeometry.viewPoint(normalized: CGPoint(
@@ -1097,9 +1115,7 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
         // gesture) never begin. The choice is made on the down and kept until
         // the lift.
         if phase == 0 {
-            // Guest-side injection targets the active main display, which may
-            // be the other panel. Keep Duo gestures on the paired digitizer.
-            edgeTouchViaGuest = !hasMultipleDisplays && localPoints.count == 1 && swipeAim != 0
+            edgeTouchViaGuest = localPoints.count == 1 && swipeAim != 0
                 && control?.supportsEdgeTouch == true
         }
         defer {
@@ -1117,20 +1133,10 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
                     x2: Double(normalized[1].x), y2: Double(normalized[1].y),
                 )
             } else {
-                var point = normalized[0]
-                // UIKit only accepts an edge touch that begins within a few
-                // points of the edge; the 32pt mouse zone rarely gets there.
-                // Start it on the edge, like a finger sliding in.
-                if phase == 0, control.supportsEdgeTouch {
-                    let inset: CGFloat = 0.001
-                    switch swipeAim {
-                    case VPhoneDisplayGeometry.Edge.top.rawValue: point.y = inset
-                    case VPhoneDisplayGeometry.Edge.bottom.rawValue: point.y = 1 - inset
-                    case VPhoneDisplayGeometry.Edge.right.rawValue: point.x = 1 - inset
-                    case VPhoneDisplayGeometry.Edge.left.rawValue: point.x = inset
-                    default: break
-                    }
-                }
+                // Edge flags must not move an ordinary tap onto the edge.
+                // Deliberate trackpad home gestures select their edge start
+                // in snappedScrollStart; pointer/tap coordinates stay exact.
+                let point = normalized[0]
                 control.sendTouch(
                     phase: phase, x: Double(point.x), y: Double(point.y), edge: swipeAim,
                 )
@@ -1191,9 +1197,36 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     /// so touches are measured against it rather than `bounds`.
     private var displayGeometry: VPhoneDisplayGeometry {
         VPhoneDisplayGeometry(
-            viewBounds: bounds,
-            displaySize: recordingGraphicsDisplay?.sizeInPixels ?? .zero,
+            viewBounds: touchViewportBounds,
+            displaySize: touchViewportSize,
             isFlipped: isFlipped,
+        )
+    }
+
+    /// The visible activity surface inside the fixed backing framebuffer.
+    /// Duo keeps one physical Main/backing surface and clips it to the current
+    /// outer or inner viewport. Input must be measured against that clipped
+    /// rectangle; using the full backing bounds makes outer-screen touches
+    /// land in the hidden part of the framebuffer.
+    private var touchViewportSize: CGSize {
+        if let active = activePanelPixels, active.width > 0, active.height > 0,
+           screenScale > 0 {
+            return CGSize(width: active.width / screenScale, height: active.height / screenScale)
+        }
+        return bounds.size
+    }
+
+    private var touchViewportBounds: CGRect {
+        let size = touchViewportSize
+        guard size.width > 0, size.height > 0 else { return bounds }
+        // VPhoneDisplayContainerView bottom-aligns the full backing view inside
+        // the clipped viewport, so the active surface occupies the bottom-left
+        // portion of the VM view's local coordinates.
+        return CGRect(
+            x: 0,
+            y: max(0, bounds.height - size.height),
+            width: min(bounds.width, size.width),
+            height: min(bounds.height, size.height),
         )
     }
 

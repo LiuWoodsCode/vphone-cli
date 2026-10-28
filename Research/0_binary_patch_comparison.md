@@ -1,23 +1,23 @@
 # Patch Comparison: Regular / Development / Jailbreak / Experimental
 
-> **Duo display identities (2026-10-27).**
-> `preboot-cfw-devicetree_foldable_displays` (guest system set, iOS 27,
-> enabled in standard, blocked in TV/HomePod presets; verb `cfw
-> patch-dt-foldable-displays`) copies the validated iPhone19,4 donor's
-> product-id, primary framebuffer identifier, and `/product/display0` and
-> `display1` into the installed Preboot tree. Donor phandles are stripped;
-> virtual GPU and hardware properties are preserved. The repair participates
-> in the existing shared device-tree backup and inverse composition. The
-> host adds a 1878 × 2670 inner framebuffer with its own window and associated
-> USB touchscreen; the outer 1398 × 2034 surface remains attached. Controls
-> drives discrete hinge poses through the existing `display.posture` API.
-> This is a device-tree data patch, with no new instruction rewrite. See
-> [Duo bring-up](Guest/iphone_duo_bringup.md#inner-display-and-hinge-controls-2026-10-27)
-> for evidence and live-validation status.
-> The host's retail-only one-display validation ceiling is handled by a
-> process-local Objective-C capacity override, gated to Duo and checked
-> against `PGMaxDisplayPortCount()`, plus `_setDisplayPortCount:2`. This does
-> not alter framework executable bytes or guest instruction patches.
+> **Duo PR #728 integration (2026-10-28).** Updated to
+> `0xJacky/vphone-cli` `iphone-duo-x1` at `bb690532fa7e95ba9b724442a7123a203b192739`.
+> The newer two-display guest path replaces this fork's experimental second
+> VZ framebuffer, separate inner window, paired host digitizer and
+> `preboot-cfw-devicetree_foldable_displays` repair. FoldDisplay publishes the
+> inner render display inside the guest and composites it onto the one VZ
+> scanout; SpringBoard resolves each panel's role and posture. The port includes
+> panel touch routing, commit-time compositor synchronization, matching screen
+> captures, per-panel pose rotation, hinge transport and boot pose replay.
+> The upstream research reports live validation; this integration still needs
+> its own guest boot check. The cover's landscape status bar overlapping Safari
+> remains an upstream limitation. The selectable experimental product-id repair
+> stays blocked in standard and the TV/HomePod presets. Existing fork identity values, cache
+> transaction protection, account-surface defaults and device-name freedom are
+> retained. No kernel instruction patches are changed by this merge.
+>
+> The 2026-10-27 dual-VZ-display experiment is superseded and removed. Its
+> product-id/display-node repair must not be applied by the new implementation.
 
 > **Interrupted X1 cache installation (2026-10-27).** A first-boot
 > `initproc failed to start -- exit reason namespace 3 subcode 0x2`
@@ -561,6 +561,80 @@
 > transitions). vphoned's new `display.posture` drives the pose through the
 > test-automation override (`com.apple.springboard.testautomation` added to
 > `VPhoneDaemon.entitlements`). See [Duo bring-up](Guest/iphone_duo_bringup.md#fold-posture-2026-10-23).
+
+> **Foldable product identity and virtual hinge (2026-10-24):** the pose
+> override above reaches SpringBoard only; CoreMotion's angle manager — and
+> through it CoreDevice's `hingeAngle` capability and stream — reads a virtual
+> hinge HID service instead, which a single-display guest never had.
+> `preboot-exp-devicetree_foldable_product_id` (guest system set, Preboot
+> device-tree repair, off in every preset after live measurement, foldable
+> boards only; verb `cfw patch-dt-foldable-product-id`) replaces the installed
+> tree's `/product/product-id` with the foldable board's own 20-byte token,
+> taken from the donor `DeviceTree.v68ap.im4p` in the VM's FirmwareOriginals
+> (never a synthesized value). Measured on duotest-m5: with the Duo token and
+> one display SpringBoard crashed on its first CA commit — root-caused to a
+> `CASecureIndicatorLayerInvalidName` exception ("Invalid indicator name
+> Camera", the Duo camera-indicator lookup that one panel cannot satisfy) —
+> which `system-springboard-cfw-fold_guard` below now swallows; the token
+> stays off in every preset because the visual fold still needs the second
+> panel (Apple's Duo simulator registers two displays in its device type):
+> with the guard the guest boots under the Duo identity, the hinge chain
+> runs end to end, but a measured book sweep (100°) leaves the screen
+> pixels unchanged — no letterbox, split, or seam — so the patch remains
+> research-only until a dual-display guest exists.
+> `system-backboardd-cfw-hinge` (guest
+> system set, on in `standard`, foldable guests only) installs
+> `libvphonehinge.dylib`, which SystemHook loads into backboardd: it
+> publishes a `HIDVirtualEventService` with usage page `0xFF0C`, usage `0x21`
+> and reports angles built with HID.framework's
+> `IOHIDEventCreateHingeAngleEvent(allocator, timeStamp, angleDegrees,
+> mechanicalAngleDegrees, velocityDegreesPerSecond, options)` — the signature
+> verified against macOS 27.0.1's HID.framework by reading the created
+> event's own field description back, and checked in
+> `make test-hinge`. vphoned's `display.posture` follows Apple's sweep model
+> (suiatool's positions closed / book ~100° / open, per-direction duration,
+> continuous and fade profiles, instant swap), publishing the sweep beside the
+> pose override through the same preference-and-notification transport the
+> accelerometer uses; every dispatch also publishes the newest sample
+> (`VPhoneHingeLatest`) for the CMAngleManager stand-in in
+> `libdevicehubfix` (v6) that answers DeviceHub's hinge stream in
+> dtdeviceinfod — CoreMotion's own machinery is never started there, which
+> the gate-only v4 (MotionThread assert), v5's first build (`dispatch_async`
+> on the bridge's NSOperationQueue, `EXC_ARM_PAC_FAIL`) and v5's liveness
+> test (kill EPERM on root's backboardd read as dead, `hingeAngle: false`)
+> each crashed or closed the chain on. See
+> [Duo bring-up](Guest/iphone_duo_bringup.md#virtual-hinge-2026-10-24).
+
+> **SpringBoard fold-guard (2026-10-25):** `system-springboard-cfw-fold_guard`
+> (guest system set, on in `standard`, blocked in `tvos`, `tvos-4k` and
+> `homepod-mini`, foldable guests only, iOS 27+; installs
+> `/usr/lib/libvphonefoldguard.dylib`) is the companion that makes the Duo
+> product token bootable at all. With the token active and one panel,
+> SpringBoard dies during its first CA transaction commit: the Duo
+> branches build a secure status indicator for the camera, and
+> `-[CASecureIndicatorLayer _copyRenderLayer:layerFlags:commitFlags:]`
+> raises `CASecureIndicatorLayerInvalidName` ("Invalid indicator name
+> Camera") — an NSException on the main thread, SIGABRT, twice per boot
+> (measured on duotest-m5, iOS 27.1 24A94425; crash reports in the guest's
+> osanalytics DiagnosticReports). The guard — SystemHook loads it into
+> SpringBoard only — method-swizzles that one QuartzCore method with an
+> `@try`/`@catch` that logs (first five exceptions to
+> `/var/mobile/Library/Caches/vphone-foldguard.log`) and returns nil, so
+> the commit proceeds without the camera indicator. Measured: with the
+> guard, a boot that crash-looped twice before reaches the home screen and
+> stays up; the guard log shows the install line and exactly the two
+> swallowed exceptions. The camera status dot is the casualty, and the
+> casualty is now fully explained: the guest's QuartzCore statically
+> accepts the name ("Camera" sits beside "Microphone" and
+> "MicrophoneAccessibility" in the static table), but the validator first
+> consults a runtime registry the window server fills per display, the
+> virtual panel registers no indicator slots, and the registry rejects
+> every name — measured by aliasing Camera→Microphone, which still raised.
+> Filling that registry is backboardd's job (the
+> `CAWindowServerDisplay` registration surface), the same missing
+> display-topology family as the fold layout; no client-side repair
+> exists, so the lean catch stands. See
+> [Duo bring-up](Guest/iphone_duo_bringup.md#springboard-fold-guard-2026-10-25).
 
 > **iPhone Duo bring-up (2026-10-23, first boot fails):**
 > `iPhone19,4` / V68AP, iOS 27.1 (24A94425), is registered with one outer
@@ -4666,3 +4740,846 @@ from t+30 s past t+5 min — the very window (10-130 s) the early-publish
 run died in — the audiomxd crash count stays at the 30 the earlier
 variants left, and RTAID telemetry still shows the SystemSounds stream
 routed on `PuffinOutput` with its DSP chain running.
+
+> **Foldable second-display identity (2026-10-25):**
+> `system-springboard-cfw-fold_display` (guest system set, declared but in
+> no preset yet — experimental, foldable guests only, iOS 27+; installs
+> `/usr/lib/libvphonefolddisplay.dylib`) answers the display-topology gate
+> the fold layouts key on. SpringBoard sizes its home grid from
+> `+[FBDisplayManager alwaysConnectedIdentities].count >= 2` (confirmed on
+> the host 2026-10-25: one `FBSDisplayIdentity "Main"`, NSCopying-capable),
+> and the guest's paravirt GPU binds a single connector
+> (`DisplayPortCount = 1` with two host displays configured), so the count
+> gate can never pass on hardware facts alone. The dylib — SystemHook
+> loads it into SpringBoard only — swizzles that metaclass method and pads
+> a single-identity answer with a copy of the real identity; it is
+> inert whenever the answer already has two or none, and logs to
+> `/var/mobile/Library/Caches/vphone-folddisplay.log`. Not yet delivered:
+> `cfw update-environment` cannot turn on a patch the machine's patch plan
+> never had (`effectiveEnabled` intersects with the plan), and /usr/lib is
+> sealed against runtime writes — see the bring-up doc for the delivery
+> blocker and the observation target once it boots.
+
+> **Follow-up (2026-10-25):** The delivery blocker above was the installer's
+> hard-coded guest library table, now extended; installation is verified.
+> The count accessors were never called in SpringBoard, so the claimed
+> causal gate above remains unproven. Its main configuration already reports
+> 678×951 points while the grid stays narrow. The subsequent backboardd
+> runtime-wide probe coincided with persistent RPC unavailability on
+> `2.12.1-local.8a55d450`: USB still sees both vphoned processes, SpringBoard
+> and backboardd, with no vphoned crash report retrieved. A build with only
+> the backboardd probe disabled (`2.12.1-local.ad5f3ecd`) restores RPC in
+> 5 seconds. Replacing it with a delayed, named-class-only inspection
+> (`2.12.1-local.42c33f10`) also boots in 5 seconds and completes its
+> 23-method dump. The owner is `BKDisplayCloneMirroringManager`, whose
+> interface concerns clone mirroring; it is not established as the home
+> grid's topology source. Neither wide layout nor runtime switching has
+> been demonstrated. See the bring-up document's ninth round.
+> Tenth-round static analysis adds a concrete size mismatch: SpringBoardHome's
+> D77 metric table is 669×951 while the guest reports 678×951. Configuration
+> transformation and cached screen-type probes are in progress; the actual
+> selected enum is not yet measured. No geometry override has been applied.
+> The combined runtime probe subsequently measured D74 (23), not D76, for
+> both the global and UIScreen lookup. The transformer preserves 678×951.
+> A follow-up experiment remaps that D74 fallback to D77 at
+> `SBHDefaultIconListLayoutProvider`'s typed initializer/current-device
+> accessor, resolving both enum values through `SBHScreenTypeForShortString`.
+> This changes derived grid generation without changing framebuffer size;
+> visual acceptance and runtime switching remain pending.
+> Both D74-only and D74/D76-to-D77 provider substitutions booted but left a
+> narrow grid. A scoped live experiment now uses the runtime-verified
+> `SBHIconManager setScreenType:listLayoutProviderLayoutOptions:animated:`
+> selector, with diagnostic Darwin notifications for inner/cover/inspect.
+> This is an unaccepted experiment, not a completed display switch.
+> **Rejected:** the D77 provider's own 145.5-point horizontal root insets and
+> inset Dock still give a narrow layout. Provider substitutions and the
+> experimental switch notifications have been removed from source. The
+> acceptance scope now explicitly includes status bar, Dock and rotation;
+> follow the shared display/scene configuration boundary rather than
+> accumulating application-level geometry overrides.
+> The next system-boundary experiment uses CADisplay mode requests through
+> vphoned. Read-only guest evidence confirms one primary 2034×2853@120 mode
+> and virtual-mode setter availability; actual switching is unproven. All
+> identity-padding hooks now pass the original collections through unchanged.
+> The tested arbitrary mode failed: deprecated virtual-mode accessors are
+> no-ops, and the modern display-properties request reached IOMFB but caused
+> backboardd to abort. The write experiment was removed and recovery build
+> `862de5d7` verified. Keep the native framebuffer intact for subsequent
+> logical-display investigation; do not suppress this failure with a patch.
+> A reversible software-render-display experiment now registers an actual
+> CAWindowServer virtual display without replacing the physical mode. It is
+> manually triggered, not created on boot. CADisplay sees id 7/type 3 at
+> 1398×2034, but SpringBoard still has only SB-main; FrontBoard identity
+> propagation and removal-cache verification are pending. Separately, the
+> shared posture restore ladder now cancels on user requests and stops on
+> confirmed restore; an early close remained closed beyond 121 seconds.
+> `6004bbe4` verifies both software-display creation and removal in the render
+> server and cache-refreshed CADisplay inventory, without restarting the
+> display service. FrontBoard still exposes only Main in both connected and
+> always-connected identity sets. The software probe was removed; display
+> identity/scene publication remains the missing system integration.
+> `86558897` establishes native connection publication: the system-defined
+> unknown tag makes the real software display become `Unknown[7-1]` without
+> restarting SpringBoard during that transition. Its connection remains
+> virtual, non-main-like and non-always-connected, so it is not yet a Duo
+> panel. The experiment was removed and stale frontend identity state cleaned;
+> stable built-in role modeling and proper disconnect ordering remain open.
+> A default-off, one-shot experiment now adapts only the owned virtual panel's
+> CADisplay type/pointScale at the central SpringBoard display-source boundary.
+> It preserves native IDs and uses the original FBS identity factory; runtime
+> always-connected/scene acceptance is pending. No widget, status-bar or Dock
+> layout override is added.
+> The one-shot adapter reached count 2 and correct 3x cover bounds, but trapped
+> in a managed-display cloning invariant and automatically reverted. A new,
+> default-off experiment uses the native FBS builder's root-derived identity
+> support and transform-set updates on Main, preserving the original renderer
+> and hardware mode. It validates a preview before publishing; acceptance is
+> pending.
+> `4efbeb4b` validated the preview, but startup publication asserted in the
+> outer SBFBSDisplayTransformer's exactly-one-result invariant. That enable
+> path is now disabled, with baseline recovery verified. `83435b6f` exposes
+> the more specific mismatch: native FoldingDual policy already requests
+> primary content on .inner, while the sole scene proxy is legacyMain with
+> .default surface. Cover transform mode/insets are inactive; UIScreen and
+> regular scene size classes are already correct. Continue at the common
+> display-profile/scene surface boundary; layout, live switching, status bar,
+> Dock and rotation acceptance remain outstanding.
+> The surface source is now traced to BKSDisplayService traits, populated
+> from backboardd's CAWindowServerDisplay extendedProperties DeviceSurfaceType
+> value. A default-off, 30-second primary-only metadata probe tests native
+> inner classification without extra identities or framebuffer mutation;
+> runtime acceptance is pending.
+> `0932888f` confirms that this single shared metadata change reaches the
+> native .inner scene surface, but the resolver waits for a matching .cover.
+> Static native readiness logic corroborates the required pair. Baseline
+> readiness and SB-main were restored; backboardd never restarted. A bounded
+> software-cover/native-inner metadata test is next, without type/count hacks.
+> `47b16e3f` keeps SpringBoard alive but the software Unknown display still
+> gets no cover window scene. Recovery to Main/default and the visible home
+> screen is verified. The built-in-adapter follow-up was rejected by automatic
+> approval review and awaits explicit user permission; it has not executed.
+> Read-only analysis identifies the earlier managed-display failure as
+> "Cloning source already exists", rather than a missing optional.
+> Static managed-profile admission is now resolved as `.main` kind OR
+> `.integrated` connection; surface metadata alone does not meet it for the
+> Unknown software source. A read-only per-UUID BKS trait query is added so
+> intended cover metadata can be checked independently of scene admission.
+> The first readback exposed stale CADisplay client inventory, with guest
+> SpringBoard continuity verified. A local inventory refresh and observational
+> public-monitor initialization trace are prepared; the native invalidation
+> path's per-source updatable gate is now explicitly distinguished from
+> successful transform delivery.
+> `baa0b497` independently reads native primary=inner and owned software
+> UUID=cover metadata, preserving SpringBoard PID/start time and default scene.
+> Main invalidation is source-derived to depend on the isExternal trigger
+> mask. A separate reversible, default-off refresh pulse is prepared with
+> unchanged original configuration output; runtime delivery is pending.
+> `087cc63d` verifies Main updatable=0 and native transform calls 1 -> 2
+> under a reversible refresh pulse, with flags restored and both system
+> process PID/start times unchanged. A default-off single-Main effective-
+> bounds experiment now tests live cover/native-inner selection through that
+> path, preserving the singleton invariant and physical mode; UI acceptance
+> remains pending.
+> `db4f509e` reaches live UIScreen bounds 466x678 and restores 678x951 with
+> unchanged SpringBoard/backboardd processes, but the visible home is clipped
+> because the effective mode remains native-sized. Bounds-only publication
+> is not acceptance. The next revision uses native FBS effective-mode copies
+> to update the full frontend geometry descriptor, leaving CADisplay's
+> hardware mode alone, and adds scene/window frame readback.
+> `c915dfd5` updates effective mode to 1398x2034 and UIScreen bounds to
+> 466x678 while physical CADisplay stays 2034x2853. The root scene and every
+> visible system window remain 678x951; screenshots are still clipped.
+> Explicit return to inner and process continuity pass. A guarded, default-off
+> native SB-main scene-settings geometry update is prepared to connect this
+> missing common coordinator, without per-window edits.
+> `fe02bc25` only inspected the root baseline; generic displayConfiguration
+> KVC is unavailable on UIApplicationSceneSettings. The next build uses
+> SpringBoard's native hosted-display FBS settings extension and adds pure
+> UIS device/display context copies for artwork-family classification.
+> `6eca5020` updates SB-main server frame and scene coordinate bounds through
+> the native hosted configuration extension, but all visible windows retain
+> 678x951. No per-window fix is used. Artwork-only classification copies all
+> remain D74. The next guarded common-context probe replaces Main's cached
+> default-context selection with a configuration-based copy and coordinates
+> every root profile scene by display identity; visible reflow is pending.
+> `bf39730c` rejects the stale-context hypothesis: cached/current contexts
+> already agree at 466x678 while windows retain 678x951. That adapter is
+> removed. Native pure geometry classification confirms 678x951 -> D74,
+> 669x951 -> D77 and 466x678 -> D76; the requested size stays 678x951.
+> Static SBWindow policy disables ordinary scene resize for Main. A guarded
+> native pipeline refresh plus read-only window-policy/reference-bounds
+> inspection is prepared; no per-window frame edit is used.
+> `2061f359` confirms the native pipeline refresh fires but does not resize.
+> Status/home windows are scene-sized/non-hosted and have correct scene-derived
+> target bounds; Home's Main-display predicate disables resize. A scoped
+> SBWindow base capability extension plus the common native scene-bounds
+> notification is prepared. It handles only preexisting scene-sized windows,
+> supplies no window rectangle and uses no per-component class list.
+> `ab83c88e` and sizing-only `3e74efa3` both propagate native scene resize to
+> 16 windows (13 changed frames), with coherent 466x678 window/root geometry
+> and unchanged SB/backboardd process starts. Both still render a clipped
+> home and vertical/overlapping Dock. The sizing-only version confirms
+> portrait orientation and identity affine transforms, excluding the full
+> callback's transform-layer update as the cause. Explicit inner restoration
+> visibly recovers 678x951. This remains default-off diagnostic behavior;
+> usable switching and the requested inner home layout are not accepted.
+> `ce4ec5ed` native TRA readback receives landscape device inputs but keeps
+> portrait interface output/home mask 2. Native home rotation capability is
+> initialized from idiom or scene.surfaceType==inner, not just pixel size.
+> A consumed-once single-real-Main/one-inner-proxy readiness experiment is
+> prepared for native content resolution at 678x951; it does not create a
+> virtual display, change CADisplay type/count or expand transform results.
+> Runtime validation remains pending; the built-in panel retest stays off.
+> `75951707` confirms single-real-Main inner readiness yields native primary
+> content and home rotation mask 30 rather than baseline 2. The 678x951
+> manager remains D74 and interface rotation still refuses 90 degrees, so
+> neither inner layout nor rotation is accepted. Both bounded tests restored
+> native role 0 and a fresh unarmed SB; no SB crash report was returned.
+> Additional changes only inspect native pipeline/arbiter policy state.
+> Full second-test evidence corrects the RPC-only interpretation: Home and
+> its content do rotate natively to 951x678/orientation 4, and the screenshot
+> is 2853x2034, while StatusBarWindow stays portrait and layout is clipped.
+> The RPC still refuses, so its global orientation readback also disagrees.
+> This is partial native rotation, with usable whole-system rotation pending.
+> `0bdf35ef` adds read-only actual-scene/native orientation-state inspection.
+> A pose-only sample also shows interface output lagging/disagreeing with
+> device inputs across two 3-second observations, without AX rotate/rollback.
+> Default role/portrait UI is restored through a fresh unarmed SB. Causality
+> and settled, coherent rotation remain unproven; no per-app fix is added.
+> The next read-only preview builds coherent inner/cover mode copies with
+> native derived identities, retaining the same CADisplay. It inspects
+> identity capabilities and native arbiter/stage descriptions. Neither is
+> published; the obsolete two-result expansion code is removed entirely.
+> `42ab7eb3` verifies coherent mode/identity previews, but both children lose
+> isMainRootDisplay. Native mainConfiguration searches for that exact flag,
+> so singleton replacement is excluded without a runtime publication.
+> Native StatusBar arbitration supports all orientations. A default-off,
+> ten-second root-scene orientation pulse and pure-copy ABI preview are
+> prepared to test scene settings versus the native arbitration result.
+> `b3747114` verifies an independent mutable settings copy changes direction
+> 1->4 without changing the original or frame. Before runtime publication,
+> detailed main-queue inspection was observed taking four seconds. Automatic
+> heavy diagnostics are removed and ordinary inspection becomes a bounded,
+> timed JSON snapshot. Short-wait negative UI conclusions require quiet
+> revalidation; the root-orientation pulse remains default-off.
+> `a30e60db` quiet snapshots measure 0.59-2.30ms. The awake six-second
+> cover/inner test preserves SB/backboardd starts and coherent geometry in
+> both directions, but confirms the same unusable clipped/overlapping cover
+> layout. D77's independent native profile is itself centered 4x6. Automatic
+> approval rejects the next single-Main role/force-SB-recreation trial before
+> execution; the once marker is verified absent. Explicit approval is pending,
+> with no root-orientation publication or role probe left active.
+> Source-only recovery review adds exact weak scene scope, atomic generation
+> cancellation, current-value checks and verified/retryable restoration to
+> the default-off orientation pulse. It is built but not deployed/tested;
+> the rejected role/restart operation still awaits explicit authorization.
+> The user subsequently authorizes the single-Main retest. `4bdf2d54` is
+> deployed with verified dylib hash. Actual root settings direction 1->4->1
+> and readback-verified recovery leave StatusBarWindow/scene at direction 1
+> while Home stays 4; the setting is not the shared rotation driver. System
+> process starts remain unchanged within each trial, and default portrait
+> recovery is verified afterward. The next default-off probe uses UIKit's
+> scene geometry request plus native settled-pose/input refresh controls;
+> no type promotion, extra display or app-mask override is included.
+> `a9fd2032` native geometry requests return UISceneErrorDomain 101 for this
+> system windowing mode. Validated pose/input refresh calls also do not fix
+> the result. Provider directions [3,4,3] are correct and measured deferral,
+> coversheet/fold holds are inactive; system process starts remain stable.
+> Default surface-0 portrait recovery is verified. The next analysis targets
+> the native system arbitration policy extension point; no policy is applied.
+> Standard lock/app events and paired SBS/gravity publication do not establish
+> correct rotation. The bridge's delivery record is not native effective-state
+> readback. Explicit BBD native getter snapshots, a scoped/restoring orientation
+> event-enable probe and native forceOrientationResolution update-context
+> control are prepared, without installing policies or altering app masks.
+> `ffe8184d` proves native raw/effective direction is 0 after virtual nonzero
+> publication while event delivery is enabled, unlocked and rotation-capable.
+> The high-level virtual accelerometer sink's extra hardware refresh is traced
+> to CMDeviceOrientationManager.deviceOrientationBlocking and re-publication.
+> Remove that poll: the native update already recomputes effective state.
+> Existing accelerometer regression suites and full bundle admission pass;
+> guest endpoint/UI acceptance is still pending. No enum/mask change is made.
+> `63af20bd` runtime validates that removal: native BBD raw/effective values
+> persist at 4 for landscape and return to 1 for portrait. SB/BBD process
+> lifetimes stay unchanged during the trial. The inner surface still maps
+> pose device 3 to interface 1 and device 1 to interface 4; Home follows that
+> result while status stays portrait. Usable rotation/layout still fails;
+> the unarmed default portrait baseline is restored after the experiment.
+> Native resolver tracing locates the inner-panel conversion table
+> [4,3,1,2] in SBWindowScene (inverse [3,4,2,1]), exactly matching that
+> measured offset. Prepare a default-off, ten-second, exact-Main-scene
+> native toll-free conversion probe with paired automatic restoration;
+> no per-window angles, masks, new display or policy are supplied.
+> `ac5e5f4d` validates paired-map correction: native device/interface/root
+> scene/Home agree at 1 -> 3 -> 1 without process restart. Status remains
+> portrait and widgets/Dock still fail visual acceptance. Native status
+> rotation also requires scene.sbhScreenType == D77 (32), while 678x951
+> classifies as D74. Prepare a separate consumed-once shared-scene-family
+> probe using a native-classified reference copy; no reference geometry is
+> published, no status-specific method or mask is changed. Validation pending.
+> `dfbcdc9c` safely declines family selection because the scene has no
+> displayConfiguration; type remains 23. The correction resolves configuration
+> through FBDisplayManager Main with the same identity guard. Post-deadline
+> runtime snapshot confirms automatic restoration of the direction map.
+> `04596e28` guest hash matches build; scene type and actual icon provider
+> both become D77 at unchanged 678x951. Status/page/Dock acceptance still
+> fails. Native inverse-mapped physical pose also produces UI 1 -> 3 -> 1
+> without any conversion override, showing the original table is the native
+> inner mounting convention. Root server settings remain 1 while client UI
+> follows 3; prepare combined existing root-pulse verification.
+> Combined D77-scene/native-pose/root-server pulse still fails status/page/
+> Dock acceptance. UIScreen bypasses the exported context classifier wrapper;
+> both paths share exported _SBHScreenTypeLookupCommon. Prepare a separate
+> consumed-once constructor probe at that common helper, using existing
+> process-private MISFixDetour mechanics, native reference classification
+> and all-argument passthrough. No on-disk cache is changed. Snapshot all
+> three family paths and native status rotation permission. Runtime pending.
+> `652fa4fc` validates all three families 32 and native status permission
+> YES/mask 30. Landscape pages and Dock visibly separate correctly compared
+> with the scene-only probe, but status native orientation remains 1 while
+> scene/effectiveGeometry/Home are 3. This is partial shared-policy progress.
+> Unarmed SB restores families 23 and native status NO/2. Prepare the shared
+> native application actuation callback refresh and global-direction/setup
+> readback; no individual window setter or mask is used.
+> `3efe7381` proves pipeline setup is finished and global active direction is
+> already 3; replaying native actuation leaves the embedded-display/status
+> slot at 1. Prepare a separate ten-second native embedded-slot sync with
+> exact scope/original-value guards and verified restoration. No individual
+> window setter or mask is used; runtime acceptance remains pending.
+> `dee331c8` native embedded setter does not apply 3 (readback stays 1).
+> Static manager tracing identifies Main's legacy application route; the
+> native per-scene route already exists. Prepare a consumed-once exact-Main-
+> inner construction/manager policy adapter to select that native path,
+> with thread-local construction scope and fresh-SB restoration. No identity,
+> display type/count, window angle or mask is replaced. Runtime pending.
+> `6581d4c8` installs hooks but does not enter the guarded native construction
+> branch. Correct the manager's actual _windowScene ivar/native scene identity,
+> and bound construction to SB-main/Main-root/678x951 with explicit startup
+> surface 0-or-2 admission; runtime remains inner-only. Log scope inputs and
+> retain fresh-unarmed-SB restoration. No route effect is yet accepted.
+> `896e6d1e` confirms native per-scene construction: status and Home now
+> follow 1 -> 3 -> 1 with matching frames and stable processes. Battery is
+> visible, but time is missing and the overlay overlaps unmodified Safari's
+> toolbar; full status/safe-area acceptance still fails. Prepare a separate
+> root UI-role probe, preserving original isMainRootDisplay discovery while
+> letting native Main roots select nonlegacy per-scene UI consistently.
+> No type/root/identity fields or display counts change. The per-manager
+> adapter is not armed in this new test. Runtime validation pending.
+> `8ae865f9` root-role startup traps in FBSDisplayMonitor mainConfiguration
+> initialization; unmarked automatic relaunch is not experiment acceptance.
+> Baseline is restored. The revision preserves original Main semantics for
+> both native monitor initializer scopes (finally-restored thread-local),
+> retaining native validation rather than disabling it. Add startup guards
+> for Main NO/MainRoot YES and all three families 32. Runtime pending.
+> `0613339d` native monitor initialization succeeds, then physical default
+> orientation lookup returns nil and traps in FBInterfaceOrientationService.
+> Startup guards reject the unmarked recovery and cleanup restores baseline.
+> Extend the original-Main hardware scope around default orientation lookup/
+> submission and identity-based submission, passing all arguments through
+> and preserving native assertions. No on-disk cache/identity fields change.
+> Runtime outcome pending.
+> `49fcc209` passes monitor/physical-orientation scopes but aborts at native
+> XBApplicationController bootstrap. Reject global Main-predicate conversion;
+> remove its implementation and discard stale markers. Prepare a read-only
+> native UI configuration object (valid type 7, UIKitMainLike, same Main root/
+> backing) and copied settings only. Check physical/connected counts and
+> non-nil render equality. No live scene or display inventory is modified.
+> `116c3c42` read-only native UI candidate builds with exact Main parent and
+> identical non-nil backing. Connected identities remain 1 -> 1 and CA objects
+> 6 -> 6. Only a distinct settings copy changes. The user explicitly permits
+> UI-derived identities with one physical Main. Prepare a ten-second exact-
+> scene hosted lease, optional native client update and verified rollback;
+> runtime publication remains pending. Hardware Main predicates stay native.
+> `fc9aa0d0` pulse does not publish: it used a read-only FBS client rather
+> than the writable FBScene server. Activation safely refuses; counts/PIDs
+> remain unchanged. Resolve the real SB-main server and keep a separate exact
+> client binding. UIScene's native update registers a UIScreen configuration
+> then reads scene displayIdentity; distinguish hosted/server/client fields
+> and inspect mutable setters read-only. Corrected runtime remains pending.
+> `249a5f50` verifies hosted publication and rollback but not identity adoption:
+> server/client type stays 0. Native setDisplayConfiguration: is available with
+> a typed object ABI, and displayIdentity derives from that actual setting.
+> Prepare a guarded two-field transaction and original-value rollback, keeping
+> hardware Main unchanged. Native actual-identity adoption remains pending.
+> `ed2bf017` validates real UI identity 0 -> 7 -> 0, legacy/embedded flags
+> YES -> NO -> YES, stable SB/BBD and unchanged connected/CA counts 1/6.
+> Hardware Main stays native. The preexisting legacy status component remains
+> cached; prepare native component unregister/recreate/register lifecycle
+> under the derived identity with original component/identity restoration.
+> Chrome/data acceptance remains pending; no window angle/frame is supplied.
+> User's native reference establishes Duo's top-right time/ring status module.
+> Generic per-scene bar visibility from 3128f885 is not the target; rotation
+> still disagrees at scene/server actuation. Stop generic bar tuning and trace
+> native SBDuoDisplaySystemUISceneController / SBSUIDuoDisplaySceneSpecification.
+
+Duo native-status follow-up (2026-10-26): native dynamic Duo session admission
+is enabled although no Duo controller is in the 18 startup controllers.
+SystemStatusUI's AxisAlignableSplit2007 factory matches native display width
+and scaled camera exclusion geometry; do not infer that 2034->2007 width alone
+fixes it. Added manifest-gated, default-off read-only status_provider.inspect
+(native factory previews only; no screen/provider publication). Corrected
+Duo inventory Class comparison and controller setup lookup. Runtime results
+pending; generic status component visibility remains outside native acceptance.
+
+Native status readback (3c7497fe): actual exclusion is a 125.333x36.667-point
+pill; native factory selects DynamicSplitSmallIsland at both 2034 and 2007
+reference widths. Width-only explanation rejected. Added isolated native
+notch-size factory preview (no publication). Extended ten-second root-scene
+orientation pulse to the exact approved UI alias only, requiring original
+Main root and unchanged CADisplay backing. Native server actuation/rollback
+under that alias remains pending runtime validation.
+
+ca903010 runtime: isolated 2007-width + native notch-size (37x37) factory
+argument selects AxisAlignableSplit2007, without publication. On the approved
+UI alias the root server orientation updates 1->3 to match native arbitration;
+landscape Home/Dock is visible. Explicit direction and identity restoration
+verified, SB/BBD process start times stable, counts 1/6 unchanged. Persistent
+rotation, correct native status rendering, and runtime inner/outer switching
+remain unimplemented. JSON evidence recorded in Research/Guest/Evidence.
+
+Status renderer verification: +[SpringBoard _statusBarClass] conditionally
+selects STUIStatusBar_Wrapper using Speakeasy feature flags. Added only class
+readback to the existing status inventory; no flag override, class selection
+hook or live renderer replacement. Runtime class inventory pending.
+
+ed4011db readback confirms live STUIStatusBar_Wrapper -> STUIStatusBar ->
+DynamicSplitSmallIsland; feature-flag forcing is unnecessary. Added default-off
+eight-second inner reference-metric lookup scoped to the exact owned UI alias
+and screen. Original native factory must accept its 2007 profile. Real-screen
+construction, hardware and window geometry are retained; original factory
+restores before identity/component rollback. Visible native status result
+pending; this remains a bounded experiment.
+
+1ca946c8 live lookup did not reach accepted-reference selection; provider and
+screenshot stay generic. Direction round trip and complete rollback verify
+without process restart. Extend bounded classmethod inventory to the four
+native factory levels and exact owned component construction/mounted reset,
+with thread-local recursion/scope guards and conditional IMP restoration.
+No C detour or physical/global Main override is added. Outcome pending.
+
+Native status cache trace: UIKitMainLike, nonexternal screens use an embedded
+_referenceBounds-keyed provider cache before factory entry. Add a native
+non-MainLike UI-derived identity preview, using only an exact unpublished
+configuration's thread-local identity substitution during native building.
+Physical Main remains untouched; verify Main parent/CADisplay/geometry before
+any separate explicit ten-second publication. Add actual target-screen cache
+predicate readback. CoverSheet button geometry is included in common display
+acceptance; no button-specific patch. Runtime preview pending.
+
+User now explicitly authorizes true-device dimensions: acceptance becomes
+2007x2853@3 (669x951pt), superseding custom678. Correct the shared Duo inner
+boot profile from2034 to2007 pixels. Native-size tests must use native Home
+classification, without the custom678 classifier adapter. The independent
+non-MainLike native UI identity preview passes with original Main parent and
+same CADisplay; physical Main remains unchanged. Control Center and CoverSheet
+join unified layout acceptance; no independent UI scaling is added.
+
+71240384 native-size boot verifies2007x2853@3, FBS/UIScreen669x951 and native
+D77 classification without custom678 mapping. Nonembedded UI migration reaches
+native factory but selects Fallback, not Duo; rollback/process stability pass.
+Wallpaper remains portrait-only; status/glyph/Control Center acceptance open.
+Touch now takes priority: right/center/bottom input attempts did not launch
+visible targets, including a clean rot0 boot. Added read-only HID geometry
+inventory and default-off15-second UIKit touch observation (unchanged event
+forwarding, bounded logs, restored original IMP). Both panels' actual hit ranges
+remain unverified. No controller/button scaling patch is introduced.
+
+Native input trace e237688b proves expected pixel/3 coordinates across inner
+right/bottom regions; all are intercepted by STUIStatusBarForegroundView.
+HID touchscreen is present/integrated with four contacts and0..32767 X/Y.
+Correct read-only registryID ABI to SDK CFTypeRef/CFNumber (initial IDs invalid;
+input untouched). Add owned-alias native phone-idiom inheritance/trait
+propagation with verified restoration, plus foreground/status frame readback.
+Actual Duo rendering, normal Home hit delivery and both-panel acceptance
+remain pending; no coordinate/button/window scaling workaround is added.
+
+2dc1eacf shows idiom field0 but trait collection remains-1 and Fallback persists.
+Use native _updateTraits before trait propagation. Complete reversible native
+component-window handoff: deactivate distinct old-profile window after new
+component connects; hide own replacement before disconnect and restore/verify
+old visibility. Native default bar frame is54x951 atx615; actual foreground
+still covers entire669x951 and intercepts touches. Added window-role tracing;
+no frame/hitTest/input remap. Runtime result pending.
+
+bf9002f1 verifies published phone traits0, real native AxisAlignableSplit2007,
+compact right-top foreground bounds and restored SBIconView hit delivery.
+Visibility/component/idiom rollback pass, but logical-screen status data is
+empty. Add constructor-armed, default-pass COW lookup adapter on exported
+STUIStatusBarGetVisualProviderClassForScreen; an explicit8s reference-metadata
+pulse retains original Main/UI identity/wrapper/data channel and native
+selection, bypassing embedded cache only on an isolated lookup argument.
+No fabricated values/classes or geometry changes. Runtime result pending.
+
+f3d69e48 native lookup succeeds but renderer remains cachedDynamic; resetVisualProvider
+only clears region/item/alpha dictionaries. Correctly clear class cache toNil
+and call native reinitializeStatusBar; preserve original actual provider for
+verified rollback. No explicit chosen-class assignment. Add read-only host
+socket display.geometry and richer touch orientation/type/coordinate traces
+for user's post-rotation offset report. Portrait mapping alone is not full
+panel/rotation acceptance; no unmeasured input remap is introduced.
+
+64a73aa0 ordinary rotation90 is refused while SBS pose3 remains pinned; no
+actual landscape was reached. Host/VZ/capture remain2007x2853; both touch paths
+agree in portrait. Add fresh native SB inverse-map bridge and iPhone19,4-only
+synchronized SBS pose/gravity rotation, preserving hinge/tabletop and existing
+logical AX request; owned-state rollback and old-model behavior retained.
+Cover/inner regression matrix added. No generic gravity mapping or host input
+transform changed. Rotated acceptance remains pending.
+
+FoldGuard crash correction: real21:06:04 startup IPS PID294 is PAC_EXCEPTION261
+in objc_msgSend(retain) from vpGuardedCopyRender+84 during native render commit.
+The id-return guard ARC-retained an unmanaged C++ render-layer pointer. Change
+return/original-call types tovoid*, validate native pointer/GPR ABI, retainNULL
+exception behavior, add non-ObjC pointer regression fixture and bounded actual
+nonnull forwarding log. Native deployment/startup acceptance pending; new
+geometry experiments paused. Sanitized crash evidence saved.
+
+76b6ff90 FoldGuard validation:7 host fixture checks and full build/admission
+pass. Real guest ABI ^v36@0:8^v16I24^I28 accepted. Boot plus two controlled
+SpringBoard first-commit reconstructions show no new IPS; existing invalid-name
+exception fallback remains operational. Non-null path regression is proven
+in host fixture, not yet observed in these guest launches.
+
+Crash-fixed native pose isolation reaches90 degrees (scene4, host-90) before
+AX is called; subsequent same rotation succeeds. Avoid racing fold transition:
+Duo waits for native UI receipt after pose/gravity and uses native rollback;
+ordinary-device AX behavior retained. Logical reply fields stay consistent
+with the verified receipt. Multi-angle/runtime hit verification pending.
+
+86eea0ac achieves true90-degree UI and host-90 with mapped pose1/gravity0;
+raw host/guest injection points agree. Fix confirmed socket contract mismatch:
+full screenshots are upright JPEGs but tap/swipe used fixed portrait pixels.
+Shared inverse transform now covers windowed/headless input and both Duo sizes,
+with current guest orientation/live VZ dimensions. Native-settle-first AX
+reassertion refreshes screenshot/pointer caches. Focused four-direction tests
+added; full live screenshot-coordinate acceptance pending.
+
+Remove unconditional near-edge coordinate snapping from host touch dispatch:
+ordinary clicks must preserve their requested point. Native edge flags and
+explicit snappedScrollStart home gestures remain. Full-screenshot inverse
+mapping plus near-edge runtime matrix will verify the combined correction.
+
+Same default-off original-Main lookup now accepts only the two canonical Duo
+panel bounds and verifies native AxisAlignableSplitV68Cover selection on outer
+466x678, alongside proven inner2007 profile. Outer live acceptance pending.
+
+Duo db26a8cc inner input runtime checkpoint: four orientations now deliver
+upright screenshot pixel(60,1050) to Home point(20,350) through both host and
+native fixed-panel input paths, with unchanged SpringBoard process. Evidence:
+Guest/Evidence/iphone_duo_inner_four_direction_touch_20261026.json. Initial
+rotation settle timeout still requires investigation; outer panel/full-area
+coverage and persistent native status remain unaccepted. No new binary patch
+was introduced for this checkpoint.
+
+Duo cleanup: removed the rejected virtual-panel-to-builtin CADisplay type and
+scale override; constructor now only discards its stale marker. Outer baseline
+has correct1398x2034 pixels but surfaceType0 and failed visual status/Dock
+acceptance. Native cover role1 remains the next verification target.
+
+Bounded cover-role verification: extend the existing backboardd primary-only
+DeviceSurfaceType probe to native cover1 via surface.cover. Retain30-second
+rollback, original identity/mode/count, and guard older rollback timers by
+lease generation. Orientation-events probe remains inner2-only. No secondary
+CADisplay or runtime mode mutation. Runtime acceptance pending.
+
+c6f0cdbe runtime: primary cover1 reaches SB-main at native466x678, but native
+outer UI remains incorrect (side Dock, invisible status, auxiliary window
+receiving lower-right touch). Role-only hypothesis is insufficient. Keep the
+cover probe default-off; no new always-on behavior is accepted from this test.
+
+Cover acceptance correction: explicit closed pose after SB reconstruction
+makes native FullyClosed policy ready and primaryContent without a readiness
+patch. Main cover status is visibly rendered after1-second settling (earlier
+instant screenshot was premature). Keep native cover layout distinct from
+inner; side Dock lacks a true-cover comparison. Status remains pulse-only.
+
+Duo lifecycle: vphoned captures actual completed pose readback and replays it
+on SpringBoard finishedstartup with generation cancellation. This addresses
+observed unknown pose after SB-only relaunch; no new binary patch or geometry
+override. Built, not yet guest-validated.
+
+290da141 pose lifecycle runtime: closed/device1 and closed/device3 survive
+separate SB-only reconstructions with identical SBS readback. Final closed/
+device1 restored. Evidence in Guest/Evidence/iphone_duo_pose_replay_20261026.json.
+This acceptance is pose lifecycle only, not the remaining live display switch.
+
+Duo same-Main viewport: pair root scene displayConfiguration with
+sb_hostedDisplayConfiguration and frame, validating both native setter ABIs
+before mutation. Derived from the already verified UI migration path; no new
+identity or CADisplay mode. Runtime acceptance pending.
+
+cf557df1 paired-update test was blocked by an overly strict generated-object
+ABI check, not a native setter failure. Correct to semantic object-argument
+validation. Same-process dimension roundtrip verified, rendered cover still
+clipped; rerun required before evaluating the paired-update implementation.
+
+0cd9e242 live paired-configuration acceptance: root/Home bounds switch both
+ways,15 window frames update natively, SB PID unchanged. Rendering not accepted:
+scene family31 versus cached UIScreen/global32 during cover. Native family
+cache/re-evaluation and backing/capture/input viewport remain unresolved.
+
+Duo default-off viewport-family experiment: native context reclassification
+at exported SBH screen/global lookup boundaries, scoped to active same-Main
+cover lease. Preserves original paths otherwise, with recursion guard; no
+cache memory edits or hardcoded component layout. Runtime pending.
+
+0d172c0d runtime: screen lookup adapter accepted, global adapter safely
+refused Unrelocatable. Cover screen/scene31 versus global32; rendered layout
+still invalid. Same-process return to inner32 verified. Default-off experiment
+only, no global relocation guard bypass.
+
+MISFixDetour bounded B.cond support for the revealed global-family prologue:
+ordinary conditional branch relocates through inverse condition + absolute
+jump; overwritten-range destinations and AL/NV/BC.cond remain rejected.
+Native host taken/fallthrough and condition/destination tests passed. Shared
+helper affects future admitted detours; complete build/runtime checks pending.
+
+c75a6a9a global adapter experiment failed runtime acceptance: both hooks
+installed but pre-transition diagnostics/RPCs stalled. No new SB crash report.
+VM recovered after restart without the consumed experiment marker. Host
+relocation tests remain limited evidence; global experiment stays default-off
+pending hang diagnosis. Goal not achieved.
+
+Global-family hang diagnostic adds bounded raw entry/return/stack records to
+the existing default-off experiment; no behavioral bypass. Static slow path
+confirmed dispatch_once; actual blocking location remains unproven.
+
+7afd766f runtime: both global/per-screen native reclassification work; all
+families32->31->32 with unchanged SB PID293. Raw trace shows first24 calls
+return normally depth1. Prior hang not reproduced, cause unresolved. Visual
+layout still invalid, so family-query coherence alone is not sufficient.
+
+Duo controlled viewport now invokes the revealed native SBHIconManager
+screen-type/options setter after scene sizing, updating its retained layout
+provider and native downstream consumers. Scoped SB-main only, unchanged
+layout options, scene-derived family31/32, no icon-model reset. Runtime pending.
+
+afa31362 runtime: native SBHIconManager family32->31->32 and matching native
+providers, same SB PID292. Cover widgets/grid reflow, Dock no longer overlaps.
+Remaining physical-canvas black area/status/host viewport-input integration;
+not end-to-end panel switching acceptance. Inner restored.
+
+Duo geometry diagnostics: expose fresh SB main-queue configuration/coordinate
+bounds, scale, orientation and viewport generation through display.geometry.
+Avoid stale device.screen extent for forthcoming host viewport/input work.
+No rendering or input behavior changed by this diagnostic addition.
+
+Duo host automation viewport geometry separates active extent from physical
+HID backing; cropped screenshots and inverse input use the same four-angle
+transform. Two focused geometry tests pass. Native GUI integration and guest
+runtime acceptance pending; no new binary patch.
+
+ae8d0e56 live automation: cover screenshot1398x2034, inner restored2007x2853;
+four edge screenshot points map exactly to expected UIKit points. Native
+status pulse removes full-screen interception (three Home hits, one actual
+status-region hit). GUI/rotation/persistent status acceptance still pending.
+
+Duo persistent native Main status: actual GUI click confirms full-screen old
+status intercepts correct coordinates. Enable verified native profile at SB
+startup only for iPhone19,4, with bounded readiness retries and native refresh
+after logical viewport sizing. No hitTest override or arbitrary view frames.
+Build/runtime validation pending; this promotes the existing gated patch.
+
+2f446502 persistent status runtime: no pulse, real GUI Settings icon click
+hits SBIconView and opens verified Settings; further GUI About navigation
+works. Native ring/time visible. Inner portrait GUI interception fixed;
+outer/rotation/viewport integration still pending.
+
+Duo native window integration: clipped active viewport around fixed physical
+VM view, fresh logical-size polling and enclosing-rotation input mapping.
+Host-only change, pending live GUI acceptance. No physical VZ resize.
+
+22357146 native GUI viewport: cropped cover Home and real mouse Settings click
+accepted, plus Settings General navigation. Timed inner restore leaves existing
+app scene at cover size; app-scene transition propagation still required.
+Not complete runtime inner/outer usability. Explicit inner Home restored.
+
+Duo read-only workspace request preview added to investigate system-level
+foreground app resizing. Native factory + context/entity readback only; no
+transaction execution, no per-app frame patch. Runtime preview pending.
+
+Workspace preview correction: fresh unfinalized request has empty entities;
+no transaction run. Current layout must be read from scene.layoutStateProvider,
+not transition coordinator. Diagnostic corrected; runtime readback pending.
+
+c1ff6b18 live layout provider identifies the single primary Preferences scene.
+Unsubmitted preview now populates identical native previous/target entities
+and locally finalizes to verify preservation. No transaction submission.
+
+Native app-scene refresh experiment preserves current entity/role and native
+layout attributes, validates from/to identity and unchanged state, then uses
+executeTransitionRequest under explicit workspace.refresh notification only.
+Finalized preview identity preservation verified; submission runtime pending.
+
+a81fcd09 live workspace refresh: same Settings PID317/scene ID retained through
+cover narrow -> inner dual-column layouts; both native transactions accepted.
+Prior stale app size on return resolved in controlled trial. Persistent switch
+integration and rotation acceptance remain outstanding.
+
+Persistent Duo fold integration: native family/status default initialization,
+nonexpiring apply viewport controls, automatic guarded app transaction refresh,
+pose RPC fresh-bounds acknowledgement and boot/relaunch replay. Host always
+uses inner-sized physical backing and crops cover; old blackout chrome disabled.
+Build passed before UI-copy cleanup; full runtime acceptance pending.
+
+e4c3c421 formal Fold Posture GUI drives persistent cover/inner/Book without
+VM/SB/app restart: SB37, Settings306 stable; correct native dimensions and
+visible app layouts. Cover holds beyond45s. Open restored. Broader acceptance
+and research-path cleanup pending.
+
+Default Duo rotation still refuses with logical scene surface0. Added default-
+off one-shot native-size SB-main surface role adapter (inner2/cover1), preserving
+physical CADisplay/resolver identity and all unrelated scenes. Runtime pending.
+
+604ff90e role experiment not accepted: native mapping and masks update, but
+scene4 disagrees with legacy orientation and wallpaper/status transforms.
+Exited one-shot experiment and restored default inner. Keep default-off.
+
+Rotation diagnostic: retarget existing default-off native per-scene status
+policy to native669x951 for combination with now-verified native Axis profile.
+No default enablement or per-window angle assignment. Runtime pending.
+
+Combined rotation trial revealed scene.inner versus resolver default/unknown
+content mismatch. Default-off logical-role probe now updates the existing
+single Main proxy via native setter/resolution with matching size-derived role.
+No auxiliary-window hiding or touch interception override. Runtime pending.
+
+985fa8f7: coherent logical role restores primaryContent; landscape GUI Settings
+launch and rotation90 RPC succeed. Home wallpaper/time still missing, so no
+default promotion. Point trace expired and is not touch-coordinate acceptance.
+Recovered default persistent inner afterward.
+
+Read-only presentation diagnostic compares scene/embedded status data providers
+and native cloak flags plus wallpaper activation/window state. Targets remaining
+rotation time/wallpaper issue without forcing visibility or data. Pending live.
+
+Native presentation comparison finds separate servers for scene versus embedded
+bar, not an in-process cloak flag. Added bounded original-Main server binding
+probe with native setters and restoration, only within logical-role experiment.
+No default behavior change; build/runtime validation pending.
+
+f0609c2b data lease was refused before mutation, not a negative data-channel
+result. Add precise preflight reasons and semantic object-setter ABI checks;
+verify restore readback. No default enablement.
+
+c2f9d947 proves old embedded server has nil client, so proposed active-server
+handoff precondition is false. Removed that unused pulse path, retained richer
+read-only item/registration diagnostics. No default behavior change.
+
+4ce7a072 rules out homeItemsDisabled: visible scene client registered with
+normal flags; old embedded client hidden/unregistered. Add default-off native
+registration refresh plus data/parts diagnostic, no fabricated values.
+
+419bdab4 native re-registration did not restore missing time data. Added source
+aggregator/provider diagnostics and scoped native time subscription refresh.
+No fabricated clock value or visibility override; default path unchanged.
+
+750ccd86 upstream time differs normal versus experiment despite false cloak
+flags; native timer refresh ineffective. Add formatter/date observation and
+narrow constructor-only Main override to one query. No default enablement.
+
+Time diagnostic: identical normal/experimental date formats did not explain
+empty cache. Add bounded pass-through native update trace and formatter-output
+readback under existing one-shot role experiment. Default path unchanged.
+
+Native callback trace narrows time failure to empty callback input despite
+valid getter/formatter output. Add input type versus provider-current-date
+observation. No data substitution or callback behavior change.
+
+457e820d native minute callback carries NSDate with empty description versus
+valid current getter; type mismatch hypothesis excluded. Add numeric interval
+and underlying provider observation only. No date replacement.
+
+Native minute date +inf traced to detached reference view -> nil screen ->
+1/0 FPS. Scoped experiment selects existing native nil-reference scheduling
+branch during registration/tick, preserving weak-slot semantics/restoration.
+No timestamp substitution, cadence guess or default enablement. Pending live.
+
+4e40b3b6 actual installed clock fallback verified: detached wrapper/nil screen/
+FPS0 takes native nil-reference path, finite date notifications and visible
+minute time restored. Fixed missing constructor installation discovered via
+unchanged hash/unused warnings. Initial renderer data timing and wallpaper
+remain incomplete; no default role/scene-policy promotion.
+
+Native status initialization now requests existing native data as well as
+layout refresh; bounded retry for empty initial renderer data. Separate default-
+off wallpaper controller rotation pulse uses scene direction and native restore.
+No timestamp, wallpaper image or manual window-frame replacement.
+
+Wallpaper pulse exposed stale direction, not valid fix. Native legacy landscape
+gate is PF_IS_PAD_DEVICE; default-off Main-inner container scope now asks existing
+per-display capability API, preserving native result. No image/frame override.
+Runtime pending; production default restored.
+
+69f677e2 global/per-display wallpaper support bothfalse; removed ineffective
+adapter. Added one-process exact TraitsArbiterWallpaperTokyoDrift flag probe
+under separate once marker, leaving all other queries native. Default-off,
+no on-disk feature override. Runtime pending.
+
+7eda0424 feature override activates native traits path but wallpaper still
+fails, including bounded real-Main inner metadata comparison. Add read-only
+participant/delegate/remote-view evidence; no further default enablement.
+
+Wallpaper managed-role gap verified: allowed delegate, no participant. One-shot
+probe supplies the same native wallpaper role hint before visibility on exact
+Main-inner wallpaper subclass, leaving native registration/geometry in charge.
+No default enablement or manual wallpaper frame. Pending live.
+
+### 2026-10-27 Duo active-viewport input mapping
+
+The host VM view now derives its input geometry from the active Duo viewport (`activePanelPixels / screenScale`) and the bottom-left clipped viewport origin. Mouse, trackpad, and synthetic touch events therefore use the same visible outer/inner rectangle while the fixed backing framebuffer remains available for rendering and screenshot crop. This closes the path where outer-screen touches were normalized against the hidden 2007x2853 backing surface.
+
+> **Duo landscape integration (2026-10-27):** The previously one-shot logical-role and per-scene status policies are now enabled for the exact `iPhone19,4` Duo default path. They retain one physical Main and native framebuffer modes while allowing the native scene orientation/status arbitration to see the active inner role. Build/admission passed; runtime rotation and wallpaper acceptance remain under validation.
+
+> **Duo rotation arbitration refresh (2026-10-27):** `display.rotation` now publishes the native pose and immediately emits the existing mapping, input, arbitration, and actuation refresh notifications before waiting for SpringBoard's scene receipt. Without this sequence, the pose changed but `display.orientation` stayed portrait; with it, the running scene read back landscape bounds `951×669` and orientation 90 without restarting SpringBoard.
+
+> **Landscape presentation follow-up (2026-10-27):** The live rotation path exposed a delayed wallpaper rollback: `vpPulseNativeWallpaperOrientation` restored portrait after eight seconds, recreating the black landscape band. The rollback was removed for the normal Duo path; wallpaper now follows SpringBoard's current native arbitration, while clock refresh remains tied to the same orientation sequence.
+
+> **Duo Fold Posture titlebar control (2026-10-27):** Foldable VM windows now expose a Duo-only circular control beside Home. It cycles `closed → book → open → closed` through the existing `VPhoneGuestControl.setFoldPosition` / `display.posture` path, mirrors the same fold-position callback used by the Fold Posture panel, and updates its accessibility value/tool tip after each accepted reply.
+
+> **CoverSheet lock glyph scale (2026-10-27):** Runtime class enumeration identified `UICoverSheetButton` as the shared lock-screen action button class. The Duo path now wraps its native `layoutSubviews` and applies a 0.82 transform only to child `UIImageView` glyphs; the circular button container and action handling are unchanged. The hook installed successfully on `duotest-m5` (`cover sheet glyph scale: UICoverSheetButton UIImageView scale=0.82`).
+
+> **Host rotation authority correction (2026-10-27):** Duo `display.geometry.interfaceOrientation` can remain portrait while the authoritative `display.orientation` endpoint is already landscape because the inner panel uses an inverse native mounting map. The host orientation poll now prefers `display.orientation` and uses geometry only for active bounds, preventing a portrait host window with sideways notifications/status content.
+
+> **Glyph sizing correction (2026-10-27):** The initial `UICoverSheetButton` transform experiment did not produce a reliable layout callback/readback, so the guessed scale was removed. The current source retains only a recursive native layout probe; no arbitrary glyph scale is accepted until Duo's actual constraint/bounds metrics are observed.
+
+> **FoldDisplay source split (2026-10-27):** `libvphonefolddisplay.m` was reduced from the monolithic implementation by extracting the status-bar provider/profile section into `FoldDisplay/StatusProfile.inc` and the wallpaper traits section into `FoldDisplay/WallpaperTraitsExperiment.inc`. The files are include-only implementation fragments copied from the original source; no new runtime target or duplicate dylib is introduced. A full VPhone bundle build passed after restoring declaration-order bridges for the existing monitor/diagnostic helpers.
+
+> **Split recovery (2026-10-27):** After an interrupted edit temporarily left declaration-order bridges incomplete, the status and wallpaper include fragments were restored with explicit shared helper declarations. The source now builds cleanly again; the split remains source-only and the existing runtime bundle was not replaced by this maintenance pass.
+
+> **FoldDisplay module split (2026-10-28):** The two include fragments are gone. `libvphonefolddisplay.dylib` now builds from thirteen `FoldDisplay<Section>.m` translation units plus `libvphonefolddisplay.m`, which keeps only the constructor (backboardd probes, SpringBoard hooks, the `com.vphone.display.*` notification registry, then the display pipeline observation). State shared across files is declared in `FoldDisplayPrivate.h` under `#pragma GCC visibility push(hidden)`; everything else stays `static`. The export table is unchanged (only `VPhoneStatusScreenPreview`), no patch or hook changed, and on duotest-m5 the split and pre-split builds gave the same install log and the same rotation/fold results.
+
+> **QuickAction glyph scale made layout-proof (2026-10-28):** The button lays out its glyph with `setFrame:`, which undid the glyph transform whenever a layout pass followed the walk. Each `CSQuickActionImageGlyphView` now moves to a runtime subclass (`VPhoneQuickActionGlyphView`) whose `setFrame:` keeps the transform, and both glyphs take one factor, 0.70 of their native layout size (flashlight 14.2x25.7pt, camera 24.3x18.4pt, matching a real iPhone Duo screenshot), replacing the 16pt-long-side and 0.82 targets. The glyph class itself is still not modified.
+
+> **Duo inner display spike, Stage 0 (2026-10-28, branch spike/duo-virtual-inner, opt-in marker):** `libvphonefolddisplay.dylib` adds a 2853x2007 `CAWindowServerVirtualDisplay` in backboardd, tagged `unknown` (65536), and in SpringBoard reports it as CADisplay type 0 everywhere except inside `-[FBSDisplayConfiguration _initWithImmutableDisplay:originalDisplay:isMainDisplay:assertIfInvalid:]`, where it is type 4 (always-connected, not UIKit-main-like). BacklightServices and SpringBoard's embedded-scene gate both require type 0; FrontBoard's cloning source requires that only Main be main-like. Result on duospike-inner: always-connected `{Main, Unknown[7]}`, inner scenes on `Unknown[7]`, PosterKit `DISPLAY_TYPE_AUX` with dynamic rotation, SpringBoard stable. Details in `Research/Guest/iphone_duo_bringup.md`.
+
+> **CoverSheet native metrics probe (2026-10-27):** Static UIKit analysis of `UICoverSheetButton` identifies `_contentView` (`UIImageView`), `_image`, `_selectedImage`, `imageContentMode`, and `edgeInsets` as the real glyph layout inputs. Runtime inspection of `UIApplication.windows` while locked found no live `UICoverSheetButton` instances, so no scale was applied. The source now records the native metrics entry points and live hierarchy count; a guessed transform remains disabled.
+
+> **Native Duo quick-action metrics (2026-10-27):** The real lock-screen classes are `CSQuickActionImageGlyphView` and `CSQuickActionsButton`, not `UICoverSheetButton`. Runtime SpringBoard evidence captured native initializer values: button diameter 58pt; camera symbol scale 0.31648; flashlight symbol scale 0.368; button frame 84pt with icon image frame 48pt. Temporary lifecycle/metrics probes were removed from the source after capture; no guessed scale or transform is shipped.
+
+> **Duo quick-action profile evidence (2026-10-27):** The real initializer path supplies button diameter 58pt and per-symbol scales (questionmark 0.368, camera 0.31648, flashlight 0.368). `CSQuickActionsButton` reports iconContentScale=1, iconImageSize=48pt, and native iconImageFrame 48pt inside the 84pt button. These values are now the authoritative runtime baseline; all temporary probes were removed and no guessed scaling is shipped.
+
+> **QuickAction profile resolution (2026-10-27):** The native `CSQuickActionsButton` class method and glyph initializers were traced at runtime. The active Duo scene resolves `buttonDiameter=58`, `iconContentScale=1`, `iconImageSize=48`, camera `symbolScaleValue=0.31648`, and flashlight `symbolScaleValue=0.368`. These values originate in SpringBoard's profile path; no transform or replacement image was installed. The remaining icon-size discrepancy therefore belongs to profile selection/trait inputs, not a missing host scale conversion.
+
+> **QuickAction profile investigation (2026-10-27):** The live Duo profile path was confirmed to construct `CSQuickActionImageGlyphView` with native scales and button diameter, while `CSQuickActionsButton` computes a 48pt icon frame inside an 84pt button. Runtime source/profile searches found no external QuickActions plist override; the remaining discrepancy is the SpringBoard profile/trait selection that supplies those native values. No arbitrary scale has been added.
+
+> **Duo wallpaper admission startup correction (2026-10-27):** The round-16
+> caller-scoped `PF_IS_PAD_DEVICE` landscape wallpaper gate and traits
+> admission were previously armed only by a one-shot cache marker. Fresh boots
+> could therefore return to the two-band path. For `iPhone19,4`, startup now
+> installs the same gate unconditionally; the marker remains accepted for
+> older guests. This changes admission only for the known Duo model and keeps
+> the lock-screen wallpaper path unchanged.
+
+> **Poster compositor follower (2026-10-28):** `libvphoneposterprobe.dylib`
+> now coalesces orientation requests for hosted poster renderer processes and
+> leaves the PosterBoard wallpaper editor untouched. It reads the settled
+> daemon orientation notification before falling back to the map file and
+> asks SpringBoard to reconcile newly-created floating poster hosts. The
+> SpringBoard-side adapter preserves the editor's portrait bounds and centers
+> it inside the landscape presenter, avoiding the repeated-request loading
+> loop and the off-center sheet.
+
+> **Duo display: two displays only (2026-10-29):** `system-springboard-cfw-fold_display` (now titled "Foldable inner display") keeps only the two-display path, and it is always on for iPhone19,4: `libvphonefolddisplay.dylib` checks `hw.machine` in backboardd and SpringBoard instead of the `vphone-duo-inner-display` marker. backboardd: the 2853x2007 `CAWindowServerVirtualDisplay` added from `-[CAWindowServer _detectDisplays]` (server-ready fallback), tagged `unknown`; `DeviceSurfaceType` 1 for the primary and 2 for the inner display through `-[CAWindowServerDisplay extendedProperties]`; `BKHIDDirectTouchEventProcessor` digitizer routing and the 270° position turn while the inner display is lit. SpringBoard: the CADisplay type/pointScale/isExternal adapter with the FrontBoard classification scope, `mainLike` in the inner identity's XPC encoding, the inner screen's idiom, the shared scanout (`-[CADisplayStateControl transitionToDisplayState:withCompletion:]`), the compositor, the content mode resolver hand-over (the resolver is now recorded by a pass-through `-[SBFDisplayContentModeResolver _startResolvingContentModeOfDisplay:]`), and the per-screen `STUIStatusBarGetVisualProviderClassForScreen` detour. Removed hooks: the Main configuration transformer, monitor and identity observers, `SBWindowScene surfaceType`/`sbhScreenType`, `SBWindow _shouldResizeWithScene`, the scene geometry callback, the clock and time-item adapters, the scene status policy, the Main status lookup and status profile factories, `SBHScreenTypeFor*`, `_os_feature_enabled_impl` (`TraitsArbiterWallpaperTokyoDrift`), `PF_IS_PAD_DEVICE`, `_SBWallpaperSecureWindow setHidden:`, the quick-action glyph subclass, the `UIWindow` target-window fallback, the `SBSDeviceDeterminedConfiguration`/`CSProminentLayoutController` loggers, and every `com.vphone.display.*` notification. `libvphoneposterprobe.dylib` (the poster orientation follower) is no longer built, staged, listed in the guest environment, or loaded by SystemHook. Details in `Research/Guest/iphone_duo_bringup.md`.
+
+> **Duo display: flicker, capture and rotation (2026-10-29):** in `system-springboard-cfw-fold_display`, the compositor is now a layer at the top of Main's `UIRootSceneWindow` (points) instead of a display-level `CAContext` (pixels), its hosts sync from a main run loop observer before Core Animation's commit and change only when a value changes, and its per-frame damage alternates two clear colors. New SpringBoard hook: `+[CMMagicPoseManager orientationForMagicPose:deviceSurface:]` answers with `+[CMDeviceStateEvent propertyAForConfigType:propertyA:propertyB:propertyC:]` directly, because the guest has no `CMMagicPoseManager` shared manager and every panel read ambiguous, so neither panel rotated. vphoned's `display.rotation` on a foldable sets the pose orientation for the lit panel. Details in `Research/Guest/iphone_duo_bringup.md`.

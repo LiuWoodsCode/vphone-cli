@@ -42,7 +42,6 @@ class VPhoneMenuController {
     }
     var onHardwareKeyboardChange: ((Bool) async throws -> Void)?
     var onFrameRateDisplayChange: ((Bool) -> Void)?
-    var onShowInnerDisplay: (() -> Void)?
     /// Saves the unlock-at-startup setting to this machine's config.plist.
     var onUnlockAtStartupChange: ((Bool) throws -> Void)?
     var unlockAtStartupItem: NSMenuItem?
@@ -185,10 +184,6 @@ class VPhoneMenuController {
             keyEquivalent: "m",
         )
         windowMenu.addItem(NSMenuItem.separator())
-        if onShowInnerDisplay != nil {
-            let inner = windowMenu.addItem(withTitle: "Show Inner Display", action: #selector(showInnerDisplay), keyEquivalent: "")
-            inner.target = self
-        }
         windowMenu.addItem(
             withTitle: "Bring All to Front",
             action: #selector(NSApplication.arrangeInFront(_:)),
@@ -201,8 +196,6 @@ class VPhoneMenuController {
         VPhoneLocalization.menu(mainMenu)
         NSApp.mainMenu = mainMenu
     }
-
-    @objc private func showInnerDisplay() { onShowInnerDisplay?() }
 
     /// "2.3.2 (26, 735927f)": the bundle version, its build number and the
     /// commit `StageBundle.sh` stamped into the Info.plist. vphone-vm runs from

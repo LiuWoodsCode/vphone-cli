@@ -181,3 +181,19 @@ for machines launched with a window.
 
 When `guestEnvironmentBundle` differs from `bundle`, host and guest come from
 different builds; `cfw update-environment` brings the guest in line.
+
+`guest send <name> '{"t":"display.geometry"}'` reads the host's configured
+and captured pixel dimensions plus the live display-view bounds, rotation,
+aspect-fit drawing rect, and pointer/touch path. It does not change input or
+display state. Compare it with `device.screen`, `display.orientation` and
+actual guest event receipts when diagnosing rotated coordinate mismatches.
+
+Touch coordinates for `guest send` refer to the **full upright screenshot**
+returned by `t:screenshot`: after a quarter turn its width and height swap.
+The host converts that point into fixed-panel HID coordinates for both GUI
+and headless launches. `display.geometry.capture_pixels` is the raw host
+frame; `screenshot_pixels` and `input_orientation` describe input coordinates.
+A swipe keeps the geometry sampled at its start.
+
+Geometry changes across a screenshot cause an error rather than returning an
+image with ambiguous input coordinates.

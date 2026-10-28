@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import Dynamic
 import Virtualization
 import VPhoneCoreKit
 
@@ -11,10 +10,9 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     private weak var virtualMachineView: VPhoneVirtualMachineView?
     private(set) var homePodDisplayView: VPhoneHomePodDisplayView?
     private var homePodGuest = false
-    private var displayIndex = 0
-    private var nativeOrientation: VPhoneDisplayOrientation = .portrait
     private(set) var touchIDMonitor: VPhoneTouchIDMonitor?
     private var homeButton: NSButton?
+    private var foldButton: NSButton?
     /// An Apple TV's TV button: holding the titlebar button holds it in the
     /// guest, so a click goes Home and a hold opens Control Center.
     var homeButtonHoldsInGuest = false {
@@ -22,6 +20,10 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     }
     private var subtitleLabel: NSTextField?
     private var timers: [Timer] = []
+    /// A foldable guest persists its selected posture; the
+    /// machine directory beside config.plist, from `sceneIdentifier`.
+    private var foldableGuest = false
+    private var machineDirectory: URL?
     private var keyStateObservers: [NSObjectProtocol] = []
     private var frameRateTimer: Timer?
     private var frameRateSampledAt: CFTimeInterval = 0
@@ -45,22 +47,17 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         name: String,
         sceneIdentifier: String,
         homePodGuest: Bool = false,
-        displayIndex: Int = 0,
-        nativeOrientation: VPhoneDisplayOrientation = .portrait,
+        foldableGuest: Bool = false,
     ) {
         self.control = control
         self.homePodGuest = homePodGuest
-        self.displayIndex = displayIndex
-        self.nativeOrientation = nativeOrientation
+        self.foldableGuest = foldableGuest
+        machineDirectory = URL(fileURLWithPath: sceneIdentifier)
         homeButton = nil
+        foldButton = nil
 
         let view = VPhoneVirtualMachineView()
         view.virtualMachine = vm
-        view.displayIndex = displayIndex
-        view.hasMultipleDisplays = (vm.graphicsDevices.first?.displays.count ?? 0) > 1
-        if let displays = vm.graphicsDevices.first?.displays, displays.indices.contains(displayIndex) {
-            Dynamic(view)._setGraphicsDisplay(displays[displayIndex])
-        }
         view.hardwareKeyboardEnabled = hardwareKeyboardEnabled
         view.capturesSystemKeys = hardwareKeyboardEnabled && !homePodGuest
         view.keySender = keySender
@@ -69,6 +66,13 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         view.clipboardSync = VPhoneClipboardSync(control: control)
         virtualMachineView = view
         let scale = CGFloat(screenScale)
+        let duoWindowScale = 1 / CGFloat(sqrt(Double(screenScale)))
+        minimumDuoPanelSize = foldableGuest
+            ? CGSize(
+                width: CGFloat(VPhoneGuestDevice.iPhone19_4.screen.width) / scale * duoWindowScale,
+                height: CGFloat(VPhoneGuestDevice.iPhone19_4.screen.height) / scale * duoWindowScale,
+            )
+            : nil
         let windowSize = homePodGuest ? VPhoneHomePodDisplayView.defaultContentSize : NSSize(
             width: CGFloat(screenWidth) / scale,
             height: CGFloat(screenHeight) / scale,
@@ -97,6 +101,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         } else {
             let display = VPhoneDisplayContainerView(displayView: view)
             display.panelSize = windowSize
+            display.backingPanelSize = windowSize
             displayContainer = display
             homePodDisplayView = nil
             container = display
@@ -112,20 +117,22 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.level = .normal
-        if displayIndex == 0 { VPhoneAlert.hostWindow = window }
+        VPhoneAlert.hostWindow = window
         window.contentAspectRatio = windowSize
+        setMinimumContentSize(for: .portrait, on: window)
         window.title = name
         window.contentView = container
 
         // The scene belongs to the VM, not to the app: every VM directory keeps
         // its own window frame, and a newly created VM opens centered instead
         // of inheriting the last frame another VM saved.
-        let sceneName = "vphone-scene-\(sceneIdentifier)" + (displayIndex == 0 ? "" : "-inner")
+        let sceneName = "vphone-scene-\(sceneIdentifier)"
         window.identifier = NSUserInterfaceItemIdentifier(sceneName)
         if !window.setFrameUsingName(sceneName) {
             window.center()
         }
         window.setFrameAutosaveName(sceneName)
+        setMinimumContentSize(for: .portrait, on: window)
         observeKeyState(of: window)
 
         // An empty unified toolbar gives the title bar its full height. The Home
@@ -153,7 +160,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         // after the toolbar and actual screen are known, including a wide TV
         // panel whose saved frame may otherwise be clamped out of proportion.
         // The guest starts unturned; the orientation poll follows it later.
-        if !homePodGuest { applyOrientation(nativeOrientation, to: window, force: true) }
+        if !homePodGuest { applyOrientation(.portrait, to: window, force: true) }
 
         keySender.window = window
         NSApp.activate(ignoringOtherApps: true)
@@ -183,16 +190,46 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         if !homePodGuest {
             control.observeInterfaceOrientation { [weak self, weak window] orientation in
                 guard let self, let window else { return }
-                let degrees = (orientation ?? .portrait).rawValue + nativeOrientation.rawValue
-                applyOrientation(VPhoneDisplayOrientation(degrees: degrees) ?? nativeOrientation, to: window)
+                applyOrientation(orientation ?? .portrait, to: window)
             }
-            if displayIndex == 0 {
-                timers.append(Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                    Task { @MainActor in self?.pollOrientation() }
-                })
+            timers.append(Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.pollOrientation() }
+            })
+            // A Duo guest shows its lit panel itself, so it takes no fold
+            // chrome.
+            control.observeFoldAngle { [weak self] angle, duration in
+                guard let self, !self.foldableGuest else { return }
+                self.displayContainer?.setFold(angle: angle ?? 180, duration: duration)
+            }
+            if foldableGuest {
+                control.observeFoldPosition { [weak self] position in
+                    self?.updateFoldButton(position: position, connected: self?.control?.isConnected == true)
+                    self?.persistFoldPosition(position)
+                }
             }
         }
         setFrameRateDisplay(VPhoneFrameRateDisplay.isEnabled)
+    }
+
+    // MARK: - Fold Panel Persistence
+
+    /// Records the fold's position for the next start; nil (a disconnect)
+    /// leaves whatever is recorded alone — a reboot does not unfold the
+    /// guest's own persisted pose either.
+    private func persistFoldPosition(_ position: VPhoneFoldPosition?) {
+        guard let position, let machineDirectory else { return }
+        let url = machineDirectory.appendingPathComponent("display-posture.plist")
+        let record = ["position": position.rawValue]
+        guard let data = try? PropertyListSerialization.data(
+            fromPropertyList: record, format: .binary, options: 0
+        ) else { return }
+        do {
+            try data.write(to: url, options: .atomic)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o666], ofItemAtPath: url.path)
+            print("[fold] next start on the \(position.rawValue) panel")
+        } catch {
+            print("[fold] could not record the posture: \(error)")
+        }
     }
 
     // MARK: - HomePod Display
@@ -211,15 +248,9 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     /// same question as ⌘Q, with the window still up, instead of closing
     /// first. `closeForRestart` closes without asking.
     func windowShouldClose(_: NSWindow) -> Bool {
-        if displayIndex != 0 { return true }
         homePodDisplayView?.releaseControls()
         NSApp.terminate(nil)
         return false
-    }
-
-    func bringToFront() {
-        windowController?.showWindow(nil)
-        displayWindow?.makeKeyAndOrderFront(nil)
     }
 
     /// Disconnect the old display and input devices before rebuilding the VM.
@@ -248,6 +279,10 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
 
     private weak var displayContainer: VPhoneDisplayContainerView?
     private var panelSize: NSSize = .zero
+    /// The Duo's cover baseline after the host-window reduction. The inner
+    /// panel can grow the window when it is active, but must not make the
+    /// minimum larger than this compact physical-size baseline.
+    private var minimumDuoPanelSize: CGSize?
     private var orientationPollInFlight = false
 
     /// Asks vphoned for the interface orientation once a second. Guests
@@ -275,6 +310,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     /// full-screen one keeps the screen and letterboxes the turned panel.
     private func applyOrientation(_ orientation: VPhoneDisplayOrientation, to window: NSWindow, force: Bool = false) {
         guard let container = displayContainer, force || container.orientation != orientation else { return }
+        setMinimumContentSize(for: orientation, on: window)
         window.contentAspectRatio = orientation.displayedSize(panel: panelSize)
         var frame: NSRect?
         if !window.styleMask.contains(.fullScreen) {
@@ -286,6 +322,25 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
             }
         }
         container.turn(to: orientation, windowFrame: frame, animated: !force)
+    }
+
+    /// Keep a Duo window at least as large as the compact cover baseline. The
+    /// minimum follows the displayed orientation because AppKit's content
+    /// minimum is expressed in the window's current axes.
+    private func setMinimumContentSize(for orientation: VPhoneDisplayOrientation, on window: NSWindow) {
+        guard let minimumDuoPanelSize else { return }
+        let minimum = orientation.displayedSize(panel: minimumDuoPanelSize)
+        window.contentMinSize = minimum
+
+        let current = window.contentRect(forFrameRect: window.frame)
+        let target = CGSize(width: max(current.width, minimum.width), height: max(current.height, minimum.height))
+        guard target != current.size else { return }
+        let center = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        window.setContentSize(target)
+        window.setFrameOrigin(NSPoint(
+            x: center.x - window.frame.width / 2,
+            y: center.y - window.frame.height / 2,
+        ))
     }
 
     // MARK: - Mac Shortcuts
@@ -471,6 +526,33 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         accessibilityDescription: VPhoneLocalization.text("Home"),
     ) ?? NSImage()
 
+    /// The panel the guest shows in this posture: the cover alone when
+    /// closed, the inner panel otherwise.
+    private static func foldImage(for position: VPhoneFoldPosition?) -> NSImage {
+        NSImage(
+            systemSymbolName: position == .closed ? "rectangle.portrait" : "rectangle.split.2x1",
+            accessibilityDescription: VPhoneLocalization.text("Duo Fold Posture"),
+        ) ?? NSImage()
+    }
+
+    /// Both title bar buttons draw their symbol at one weight and size, and
+    /// sit in one square: a circle bezel otherwise grows to its symbol, so a
+    /// wide symbol made the fold button larger than Home.
+    private static let titlebarSymbol = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+
+    private func configureTitlebarButton(_ button: NSButton) {
+        if #available(macOS 26.0, *) {
+            button.bezelStyle = .glass
+            button.borderShape = .circle
+        } else {
+            button.bezelStyle = .toolbar
+        }
+        button.controlSize = .large
+        button.imagePosition = .imageOnly
+        button.symbolConfiguration = Self.titlebarSymbol
+        button.translatesAutoresizingMaskIntoConstraints = false
+    }
+
     /// `circle.circle` with a slash drawn across it; SF Symbols has no
     /// `circle.circle.slash`. The slash cuts a gap in the circles like the
     /// system's own slashed symbols.
@@ -498,15 +580,8 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
 
     private func makeHomeAccessory() -> NSTitlebarAccessoryViewController {
         let button = VPhoneHomeButton(image: Self.homeImage, target: self, action: #selector(homePressed))
-        if #available(macOS 26.0, *) {
-            button.bezelStyle = .glass
-            button.borderShape = .circle
-        } else {
-            button.bezelStyle = .toolbar
-        }
-        button.controlSize = .large
+        configureTitlebarButton(button)
         button.toolTip = VPhoneLocalization.text("Home Button")
-        button.translatesAutoresizingMaskIntoConstraints = false
         homeButton = button
         applyHomeButtonHold()
 
@@ -518,15 +593,34 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         let leadingInset: CGFloat = 6
         let trailingInset = Self.titlebarSpacing
         let container = NSView()
-        container.addSubview(button)
-        NSLayoutConstraint.activate([
-            button.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: leadingInset),
-            button.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -trailingInset),
-            button.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            button.widthAnchor.constraint(equalTo: button.heightAnchor),
-        ])
+        var buttons: [NSButton] = [button]
+        if foldableGuest {
+            let fold = NSButton(image: Self.foldImage(for: nil), target: self, action: #selector(foldPressed))
+            configureTitlebarButton(fold)
+            fold.toolTip = VPhoneLocalization.text("Duo Fold Posture")
+            fold.setAccessibilityLabel(VPhoneLocalization.text("Duo Fold Posture"))
+            foldButton = fold
+            buttons.append(fold)
+        }
+        // The square a large circle bezel takes around Home's square symbol.
         let side = button.fittingSize.height
-        container.frame.size = NSSize(width: leadingInset + side + trailingInset, height: side)
+        for each in buttons {
+            NSLayoutConstraint.activate([
+                each.widthAnchor.constraint(equalToConstant: side),
+                each.heightAnchor.constraint(equalToConstant: side),
+            ])
+        }
+        let stack = NSStackView(views: buttons)
+        stack.orientation = .horizontal
+        stack.spacing = 4
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: leadingInset),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -trailingInset),
+            stack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+        ])
+        container.frame.size = NSSize(width: leadingInset + CGFloat(buttons.count) * side + CGFloat(max(0, buttons.count - 1) * 4) + trailingInset, height: side)
 
         let accessory = NSTitlebarAccessoryViewController()
         accessory.view = container
@@ -540,6 +634,16 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         guard let homeButton else { return }
         homeButton.isEnabled = connected
         homeButton.image = connected ? Self.homeImage : Self.homeSlashImage
+        updateFoldButton(position: control?.foldPosition, connected: connected)
+    }
+
+    private func updateFoldButton(position: VPhoneFoldPosition?, connected: Bool) {
+        guard let foldButton else { return }
+        foldButton.isEnabled = connected
+        foldButton.image = Self.foldImage(for: position)
+        let title = position?.title ?? VPhoneLocalization.text("Duo Fold Posture")
+        foldButton.toolTip = VPhoneLocalization.format("Duo Fold Posture: %@", title)
+        foldButton.setAccessibilityValue(title)
     }
 
     // MARK: - Actions
@@ -548,6 +652,26 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         // A held button already sent its press and release.
         guard !homeButtonHoldsInGuest else { return }
         control?.sendHIDPress(page: 0x0C, usage: 0x40)
+    }
+
+    @objc private func foldPressed() {
+        guard let control, control.isConnected, foldableGuest else { return }
+        // The product's two stable endpoints. The transitional book posture
+        // stays reachable from the Fold panel; this button only toggles.
+        let next: VPhoneFoldPosition = control.foldPosition == .closed ? .open : .closed
+        foldButton?.isEnabled = false
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await control.setFoldPosition(next, duration: 0)
+            } catch {
+                VPhoneAlert.present(title: VPhoneLocalization.text("Duo Fold Posture"), message: error.localizedDescription, style: .warning)
+            }
+            // The posture can turn the interface; read it now rather than on
+            // the next poll.
+            self.pollOrientation()
+            self.updateFoldButton(position: control.foldPosition, connected: control.isConnected)
+        }
     }
 
     private func applyHomeButtonHold() {
