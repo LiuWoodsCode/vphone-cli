@@ -16,6 +16,11 @@ extension VPhoneBootCommand {
         print("[vphone] Loaded VM manifest from \(config.path)")
 
         let vmDir = config.deletingLastPathComponent()
+        let isFoldable = manifest.guestDevice.innerScreen != nil
+        let hasInnerDisplay = isFoldable && VPhoneGraphicsDisplaySupport.maximumDisplayPortCount >= 2
+        if isFoldable && !hasInnerDisplay {
+            print("[display] This host's Virtualization service permits one display. Starting the outer display; the inner display is unavailable. Hinge controls remain available.")
+        }
 
         return try VPhoneVirtualMachine.Options(
             configURL: config,
@@ -30,13 +35,14 @@ extension VPhoneBootCommand {
             screenHeight: manifest.screenConfig.height,
             screenPPI: manifest.screenConfig.pixelsPerInch,
             screenScale: manifest.screenConfig.scale,
-            innerScreen: manifest.guestDevice.innerScreen,
+            innerScreen: hasInnerDisplay ? manifest.guestDevice.innerScreen : nil,
             framebufferIdentifiers: manifest.guestDevice.framebufferIdentifiers,
             kernelDebugPort: kernelDebugPort,
             isPadGuest: manifest.guestDevice.isPad,
             isTVGuest: manifest.guestDevice.family == .appleTV,
             isHomePodGuest: manifest.guestDevice.family == .homePod,
             isWatchGuest: manifest.guestDevice.family == .watch,
+            isFoldableGuest: isFoldable,
         )
     }
 }

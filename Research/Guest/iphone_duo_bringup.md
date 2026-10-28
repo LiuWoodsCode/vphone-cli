@@ -46,6 +46,17 @@ exposes `_setDisplayIdentifier:`; `VZVirtualMachineView` exposes
 the guest framebuffer identifier: two USB touchscreens associate with the
 VZ UUIDs, and each view sends touches to its own associated device.
 
+On this retail macOS host, setting two displays without increasing the port
+count fails validation. Setting the port count alone also fails:
+`+[VZMacGraphicsDeviceConfiguration _maximumAllowedDisplayCount]` returns 1
+unless `os_variant_has_internal_content("com.apple.virtualization")` is true.
+The public `PGMaxDisplayPortCount()` reports 8 on the same host. Duo launches
+therefore replace only that process-local Objective-C capacity query with
+the requested count after checking it against the renderer maximum. The
+remaining VZ validation is preserved, and ordinary single-panel guests do
+not install the override. A host probe validates both display configurations
+with the renderer-backed limit; full-guest boot remains a separate check.
+
 Controls exposes Closed (0°), Partially Open (90°) and Open Flat (180°)
 through the existing `display.posture` test-automation path. It includes
 the current orientation. The API acknowledges an override without live

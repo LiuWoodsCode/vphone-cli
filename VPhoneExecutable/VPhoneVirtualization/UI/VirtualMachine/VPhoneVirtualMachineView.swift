@@ -16,6 +16,7 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     /// guest's points for a native scroll.
     var screenScale: CGFloat = 3
     var displayIndex = 0
+    var hasMultipleDisplays = false
 
     /// Whether trackpad scroll/pinch gestures are replayed as guest touches.
     var trackpadGesturesEnabled = VPhoneTrackpadGestures.isEnabled {
@@ -202,7 +203,7 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     }
 
     private var guestPointerFollowsMouse: Bool {
-        trackpadGesturesEnabled && control?.supportsPointerScroll == true
+        !hasMultipleDisplays && trackpadGesturesEnabled && control?.supportsPointerScroll == true
     }
 
     /// Only in the key window: over a window in the background the Mac's
@@ -407,7 +408,7 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
     /// Replay a trackpad scroll as a guest finger that presses under the pointer
     /// and follows the physical direction of the gesture.
     override func scrollWheel(with event: NSEvent) {
-        if trackpadGesturesEnabled, let control, control.supportsPointerScroll {
+        if !hasMultipleDisplays, trackpadGesturesEnabled, let control, control.supportsPointerScroll {
             scrollNatively(event, control: control)
             return
         }
@@ -1096,7 +1097,9 @@ class VPhoneVirtualMachineView: VZVirtualMachineView {
         // gesture) never begin. The choice is made on the down and kept until
         // the lift.
         if phase == 0 {
-            edgeTouchViaGuest = displayIndex == 0 && localPoints.count == 1 && swipeAim != 0
+            // Guest-side injection targets the active main display, which may
+            // be the other panel. Keep Duo gestures on the paired digitizer.
+            edgeTouchViaGuest = !hasMultipleDisplays && localPoints.count == 1 && swipeAim != 0
                 && control?.supportsEdgeTouch == true
         }
         defer {

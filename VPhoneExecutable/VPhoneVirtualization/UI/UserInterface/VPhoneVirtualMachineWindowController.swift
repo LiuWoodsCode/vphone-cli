@@ -57,6 +57,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         let view = VPhoneVirtualMachineView()
         view.virtualMachine = vm
         view.displayIndex = displayIndex
+        view.hasMultipleDisplays = (vm.graphicsDevices.first?.displays.count ?? 0) > 1
         if let displays = vm.graphicsDevices.first?.displays, displays.indices.contains(displayIndex) {
             Dynamic(view)._setGraphicsDisplay(displays[displayIndex])
         }

@@ -254,6 +254,7 @@ public enum FirmwarePatchSetCatalog {
         FirmwareGuestSystemPatchSet.prebootIdentityValues,
         "preboot-cfw-devicetree_iphone_product",
         "preboot-cfw-devicetree_foldable_vm_subtype",
+        FirmwareGuestSystemPatchSet.prebootFoldableDisplays,
         "preboot-cfw-devicetree_microphone_array",
         RestoreRamDiskSealPatcher.patchIdentifier,
         "system-apps-cfw-attitude",

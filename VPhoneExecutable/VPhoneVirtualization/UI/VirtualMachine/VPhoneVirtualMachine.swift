@@ -55,6 +55,7 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         /// The guest runs watchOS: its side button is a key of its own (consumer
         /// Help), apart from the crown (Home) and the power key.
         var isWatchGuest = false
+        var isFoldableGuest = false
     }
 
     private struct DeviceIdentity {
@@ -191,9 +192,11 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
                 heightInPixels: inner.height,
                 pixelsPerInch: inner.pixelsPerInch,
             ))
-            for (display, identifier) in zip(gfx.displays, options.framebufferIdentifiers) {
-                Dynamic(display)._setDisplayIdentifier(identifier)
-            }
+            // VZ defaults to one port even when two displays are supplied.
+            Dynamic(gfx)._setDisplayPortCount(gfx.displays.count)
+        }
+        for (display, identifier) in zip(gfx.displays, options.framebufferIdentifiers) {
+            Dynamic(display)._setDisplayIdentifier(identifier)
         }
         config.graphicsDevices = [gfx]
 

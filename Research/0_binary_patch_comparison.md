@@ -14,6 +14,10 @@
 > This is a device-tree data patch, with no new instruction rewrite. See
 > [Duo bring-up](Guest/iphone_duo_bringup.md#inner-display-and-hinge-controls-2026-10-27)
 > for evidence and live-validation status.
+> The host's retail-only one-display validation ceiling is handled by a
+> process-local Objective-C capacity override, gated to Duo and checked
+> against `PGMaxDisplayPortCount()`, plus `_setDisplayPortCount:2`. This does
+> not alter framework executable bytes or guest instruction patches.
 
 > **Interrupted X1 cache installation (2026-10-27).** A first-boot
 > `initproc failed to start -- exit reason namespace 3 subcode 0x2`
