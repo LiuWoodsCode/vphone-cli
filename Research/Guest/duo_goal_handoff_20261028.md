@@ -130,7 +130,7 @@ print('RESULT', '$VER', 'configBounds=', m.group(1) if m else 'no-snapshot', '| 
 ### 3.3 QuickAction 图标(用户验收项 K)—— 现在不生效,原因明确
 用户已视觉验收 0.68 因子(实测:glyph 视图 20.33×36.67pt → 渲染 13.8×24.9pt,
 按钮 84pt 圆不变;用户说"icon 偏大"即指原生 1.0 状态)。现状:生效机制是
-`com.vphone.display.quickaction.glyphscale` 通知 + 
+`com.vphone.display.quickaction.glyphscale` 通知 +
 `/var/mobile/Library/Caches/vphone-duo-buttonscale.override` 文件(0.5–1.0),
 **事故恢复时 override 被清 → 现在渲染原生 1.0 → 用户看到"还是不对"**。
 固化方案(验收项 G/K):SB 启动后延时重试(参考 status profile 的 1..12s 模式)
