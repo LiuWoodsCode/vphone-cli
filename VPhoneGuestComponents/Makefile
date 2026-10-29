@@ -460,6 +460,9 @@ test-homepod-setup:
 	xcrun --sdk macosx clang -fobjc-arc -Wall -Wextra -Werror -IHomePodSetup \
 		-o $(OUT)/HomePodSetupProcessTests Tests/HomePodSetupProcessTests.m HomePodSetup/HomePodSetupProcesses.m -framework Foundation
 	@$(OUT)/HomePodSetupProcessTests
+	xcrun --sdk macosx clang -fobjc-arc -Wall -Wextra -Werror -IHomePodSetup \
+		-o $(OUT)/HomePodAirPlayTests Tests/HomePodAirPlayTests.m HomePodSetup/HomePodSetupState.m HomePodSetup/HomePodSetupProcesses.m -framework Foundation
+	@$(OUT)/HomePodAirPlayTests
 
 .PHONY: test-attitude
 test-attitude:

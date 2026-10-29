@@ -229,6 +229,9 @@ struct VPhoneCustomFirmwareInstaller {
         if effectiveEnabled.contains(FirmwareGuestSystemPatchSet.homePodSetupBypass), device.family != .homePod {
             throw ValidationError("The HomePod setup-completion patch is supported only for a HomePod guest.")
         }
+        if effectiveEnabled.contains(FirmwareGuestSystemPatchSet.homePodAirPlayVM), device.family != .homePod {
+            throw ValidationError("The HomePod AirPlay patch is supported only for a HomePod guest.")
+        }
         if effectiveEnabled.contains(FirmwareGuestSystemPatchSet.homePodAudioProduct), device.family != .homePod {
             throw ValidationError("The HomePod audio-product patch is supported only for a HomePod guest.")
         }
@@ -886,7 +889,10 @@ struct VPhoneCustomFirmwareInstaller {
             ?? VPhoneVirtualMachinePatchSelection()
         let plan = readPatchPlan(in: bundleDirectory)
         if let pristine = try firmwareOriginalsKernelcache(in: bundleDirectory),
-           let preset = VPhonePatchPresetStore.preset(named: selection.presetIdentifier),
+           let preset = VPhonePatchPresetStore.preset(
+               named: selection.presetIdentifier,
+               vmCopy: try? bundleDirectory.readData(VPhonePatchPresetStore.vmPresetFileName),
+           ),
            !preset.patchSets.contains(where: {
                if case .external = $0 {
                    true
@@ -1442,6 +1448,23 @@ struct VPhoneCustomFirmwareInstaller {
             try requireX1Bootstrap()
         }
 
+        // CIBarcode is a standalone Core Image plug-in, outside the shared cache.
+        // Lower it ahead of time rather than relying on an application's inherited
+        // exception handler to translate these instructions at runtime.
+        // The normal Mach-O path keeps a pristine backup and re-seals the bundle;
+        // deselecting the declaration restores it on the next environment update.
+        if version.hasPrefix("27.1.") || version == "27.1"
+            || priorGuest.contains(FirmwareGuestSystemPatchSet.arm64eX1CIBarcode)
+        {
+            machO(
+                FirmwareGuestSystemPatchSet.arm64eX1CIBarcode,
+                path: FirmwareGuestSystemPatchSet.ciBarcodeExecutablePath,
+                verbs: ["patch-arm64e-x1"],
+                preserveEntitlements: true,
+                bundle: FirmwareGuestSystemPatchSet.ciBarcodeBundlePath,
+            )
+        }
+
         // 0. A cache whose span alone overruns the guest kernel's shared region
         //    maps at no slide, and the guest panics on first boot. Refuse before
         //    the redeploy and the cache patches. A header this check cannot read
@@ -1577,6 +1600,21 @@ struct VPhoneCustomFirmwareInstaller {
             live.insert(setup)
         } else {
             try system.removeItem(setupPath)
+        }
+        // The same helper sets AirPlay's VM override as mobile and restarts the
+        // AirPlay daemons when the value changed; removing the marker restores it.
+        let airPlay = FirmwareGuestSystemPatchSet.homePodAirPlayVM
+        let airPlayPath = String(FirmwareGuestSystemPatchSet.homePodAirPlayVMPath.dropFirst())
+        if plan?.isEnabled(airPlay) == true {
+            guard guestDevice.family == .homePod else {
+                throw ValidationError("HomePod AirPlay on a VM requires a HomePod guest.")
+            }
+            _ = try system.directory("usr/share/vphone", create: true, mode: 0o755)
+            let policy = try PropertyListSerialization.data(fromPropertyList: ["Enabled": true], format: .binary, options: 0)
+            try system.writeFile(airPlayPath, contents: policy, mode: 0o644, owner: Self.guestOwner)
+            live.insert(airPlay)
+        } else {
+            try system.removeItem(airPlayPath)
         }
         let speech = FirmwareGuestSystemPatchSet.homePodSiriSpeech
         let speechPath = String(FirmwareGuestSystemPatchSet.homePodSiriSpeechPath.dropFirst())
@@ -2347,7 +2385,10 @@ struct VPhoneCustomFirmwareInstaller {
             .flatMap { try? PropertyListDecoder().decode(VPhoneVirtualMachinePatchSelection.self, from: $0) }
             ?? VPhoneVirtualMachinePatchSelection()
         guard
-            let preset = VPhonePatchPresetStore.preset(named: plan.presetIdentifier),
+            let preset = VPhonePatchPresetStore.preset(
+                named: plan.presetIdentifier,
+                vmCopy: try? bundleDirectory.readData(VPhonePatchPresetStore.vmPresetFileName),
+            ),
             let resolved = try? VPhonePatchPlan.resolve(
                 preset: preset,
                 patchSets: FirmwarePatchSetCatalog.bundled,

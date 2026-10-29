@@ -17,6 +17,26 @@ import VPhonePatchKit
 
 @Suite("Bundled patch set catalogue")
 struct FirmwarePatchSetCatalogTests {
+    @Test func `CIBarcode lowering is scoped to the measured base and can be disabled`() throws {
+        let identifier = FirmwareGuestSystemPatchSet.arm64eX1CIBarcode
+        for base in ["26.4", "27.0.1", "27.1", "27.1.1", "27.2", "28.0"] {
+            for blocked in [false, true] {
+                var preset = FirmwarePatchSetCatalog.standardPreset
+                if blocked {
+                    preset.selection = preset.selection.blocking([identifier])
+                }
+                let plan = try VPhonePatchPlan.resolve(
+                    preset: preset,
+                    patchSets: FirmwarePatchSetCatalog.bundled,
+                    iOSBase: VPhoneVersion(base),
+                    cloudOS: VPhoneVersion("26.4"),
+                )
+                let supported = base == "27.1" || base.hasPrefix("27.1.")
+                #expect(plan.isEnabled(identifier) == (supported && !blocked))
+            }
+        }
+    }
+
     @Test(arguments: [FirmwareGuestSystemPatchSet.gyroscope, FirmwareGuestSystemPatchSet.accelerometer, FirmwareGuestSystemPatchSet.attitude])
     func `Motion sensors follow selection and their deployment target`(identifier: String) throws {
         for base in ["18.6.2", "26.4", "27.0.1"] {

@@ -42,6 +42,9 @@ public enum FirmwareGuestSystemPatchSet {
     public static let arm64eX1LaunchdBootstrap = "system-launchd-boot-arm64e_x1_bootstrap"
     public static let arm64eX1FsckBootstrap = "system-fsck-boot-arm64e_x1_bootstrap"
     public static let arm64eX1MountBootstrap = "system-mount-boot-arm64e_x1_bootstrap"
+    public static let arm64eX1CIBarcode = "system-cibarcode-cfw-arm64e_x1"
+    public static let ciBarcodeBundlePath = "System/Library/CoreImage/CIBarcode.cifilter"
+    public static let ciBarcodeExecutablePath = ciBarcodeBundlePath + "/CIBarcode"
 
     public static let paravirtGPUIndexOffset = "system-paravirt_gpu-cfw-heap_index_offset"
     public static let paravirtGPUDriverPath =
@@ -315,6 +318,17 @@ public enum FirmwareGuestSystemPatchSet {
                 applicability: ios27,
                 bootEssential: true,
             ),
+            VPhonePatchDeclaration(
+                identifier: arm64eX1CIBarcode,
+                title: "ARM64E_X1 barcode filters",
+                summary: """
+                Lowers the standalone CIBarcode plug-in before apps load its barcode filters. \
+                This image is outside the shared cache, so whole-cache lowering cannot prevent \
+                its remaining X1 instruction faults.
+                """,
+                target: .guestExecutable(path: "/" + ciBarcodeExecutablePath),
+                applicability: VPhonePatchApplicability(iOSBase: .release(major: 27, minor: 1)),
+            ),
 
             VPhonePatchDeclaration(
                 identifier: "system-seputil-boot-gigalocker_uuid",
@@ -429,7 +443,16 @@ public enum FirmwareGuestSystemPatchSet {
                 title: "HomePod setup completion",
                 summary: "Completes the donor's local AudioAccessory setup state as mobile, prepares SetupAssistant's native launch sentinel and lets SoundBoard initialize its post-setup services. Turning it off restores the prior completion flags at the next boot. Does not provision accounts, activation or a HomeKit home.",
                 target: .guestFile(path: homePodSetupPath),
-                applicability: VPhonePatchApplicability(iOSBase: .major(27)),
+                // 26.5 has the same AudioAccessory gate and SetupAssistant
+                // exports; the helper refuses if one is missing.
+                applicability: VPhonePatchApplicability(iOSBase: .atLeast(major: 26, minor: 5)),
+            ),
+            VPhonePatchDeclaration(
+                identifier: homePodAirPlayVM,
+                title: "HomePod AirPlay on a VM",
+                summary: "Sets AirPlay's own virtual-machine override (useWiFiAndAWDLOnVirtualMachine in mobile's com.apple.airplay) through the HomePod helper, so AirPlay keeps discovery and its own endpoint and a Mac or iPhone can play to the guest. Turning it off restores the prior value at the next boot.",
+                target: .guestFile(path: homePodAirPlayVMPath),
+                applicability: VPhonePatchApplicability(iOSBase: .release(major: 26, minor: 5)),
             ),
             VPhonePatchDeclaration(
                 identifier: homePodSiriSpeech,
@@ -827,6 +850,8 @@ public enum FirmwareGuestSystemPatchSet {
     public static let homePodDisplayPath = "/usr/share/vphone/HomePodDisplay.plist"
     public static let homePodSetupBypass = "system-homepod-exp-setup_bypass"
     public static let homePodSetupPath = "/usr/share/vphone/HomePodSetup.plist"
+    public static let homePodAirPlayVM = "system-homepod-exp-airplay_vm"
+    public static let homePodAirPlayVMPath = "/usr/share/vphone/HomePodAirPlay.plist"
     public static let homePodWelcome = "system-homepod-exp-welcome"
     public static let homePodWelcomePath = "/usr/share/vphone/HomePodWelcome.plist"
     public static let homePodSiriSpeech = "system-homepod-exp-siri_speech"

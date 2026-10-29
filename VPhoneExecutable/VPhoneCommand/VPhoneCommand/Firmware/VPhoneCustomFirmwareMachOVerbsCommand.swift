@@ -45,8 +45,11 @@ private let machOVerbLog: @Sendable (String) -> Void = { print($0) }
 struct VPhoneCustomFirmwarePatchArm64eX1Command: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "patch-arm64e-x1",
-        abstract: "Lower X1 instructions in a boot-critical executable",
-        discussion: "Supports dyld, launchd, fsck and mount. Later userland instructions are handled on demand. Re-attests modified code pages.",
+        abstract: "Lower X1 instructions in a supported standalone executable",
+        discussion: """
+        Supports dyld, launchd, fsck, mount and CIBarcode. Other standalone userland \
+        instructions are handled on demand. Re-attests modified code pages.
+        """,
     )
     @Argument(transform: URL.init(fileURLWithPath:)) var binary: URL
     func run() throws {
@@ -57,8 +60,9 @@ struct VPhoneCustomFirmwarePatchArm64eX1Command: ParsableCommand {
         case "launchd": identifier = FirmwareGuestSystemPatchSet.arm64eX1LaunchdBootstrap
         case "fsck": identifier = FirmwareGuestSystemPatchSet.arm64eX1FsckBootstrap
         case "mount": identifier = FirmwareGuestSystemPatchSet.arm64eX1MountBootstrap
+        case "CIBarcode": identifier = FirmwareGuestSystemPatchSet.arm64eX1CIBarcode
         default:
-            throw ValidationError("X1 static lowering is limited to the measured boot roots: dyld, launchd, fsck and mount")
+            throw ValidationError("X1 static lowering supports only dyld, launchd, fsck, mount and CIBarcode")
         }
         try CustomFirmwareArm64eX1.patch(
             fileAt: binary,

@@ -115,6 +115,10 @@ void vp_hid_touch_edge(int phase, double x, double y, int edge);
 /// Turn the display on without pressing a button. False when
 /// SpringBoardServices has no SBSUndimScreen.
 bool vp_screen_undim(void);
+/// Call `touched` on a private queue when a finger lands on the screen while
+/// SpringBoard has it blanked, at most every half second: the tap a phone's
+/// touch controller reports as a wake gesture.
+void vp_tap_to_wake_start(void (* _Nonnull touched)(void));
 bool vp_device_pose_set(int deviceOrientation, int hingeState, int tabletopPose);
 
 /// Ask launchd to shut the guest down and halt. Returns 0 once the request is

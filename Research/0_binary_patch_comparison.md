@@ -466,6 +466,36 @@
 > presentation/reconnection. Opt-out restored absent keys and setup behavior.
 > See [implementation, live evidence, and service boundaries](Firmware/homepod_soundboard_controls.md).
 
+> **HomePod setup completion on 26.5 (2026-10-26).** The gate of
+> `system-homepod-exp-setup_bypass` is now 26.5 or later (`.atLeast(26, 5)`
+> instead of `.major(27)`); the helper is unchanged. Under `homepod-mini` on the
+> 26.5 kernelcache mix (`homepod-std`, HomePod Software 26.5, 23L471), an
+> environment update reported the patch "on in the current selection, newer
+> than this VM's patch plan" and staged the marker. On the next boot the helper
+> journalled both keys as absent, found all four SetupAssistant exports, and
+> reported `NeedsSetup=false`, `CompletedInitialRun=true`, `Succeeded=true`
+> with a fresh `lastPrepareLaunchSentinel`; HPSetup ended. Setting the two keys
+> with vphoned's `setup.skip` alone, as before, skips that sentinel, so
+> SoundBoard never runs its setup-gated initialization. No new instruction patch.
+
+> **HomePod AirPlay on a VM (2026-10-27).** New `system-homepod-exp-airplay_vm`
+> is HomePod-only, restricted to 26.5, and selected only by `homepod-mini`. It
+> installs the System marker `/usr/share/vphone/HomePodAirPlay.plist`; the
+> existing setup helper then sets AirPlay's own VM override,
+> `useWiFiAndAWDLOnVirtualMachine = 1` in mobile's `com.apple.airplay`,
+> through CFPreferences. Without it `APSIsVirtualMachine()` is true and
+> airplayd forces discovery mode none ("customer VM build"), so the HomePod has
+> no local endpoint and a Mac's Music fails with -15016. The helper journals the
+> original value the same way as the setup keys (absent included) and, only when
+> the value changed, sends SIGTERM to mobile's exact `airplayd`, `tvairplayd`
+> and `mediaremoted` so they reread it. Opt-out restores the journal at the next
+> boot. Live on `homepod-std` with bundle `2.13.5-local.47579029` after removing
+> the manually written pref: the status reported `Changed=true`, `Restarted=3`,
+> the journal recorded the key as absent, and the Mac's Music played to the
+> HomePod (selected, active, playing). Playback also needs the gPTP recipe
+> change in the HomePod kernelcache section. No new instruction patch. See
+> [Guest/homepod_airplay.md](Guest/homepod_airplay.md).
+
 > **HomePod top cap (2026-10-22).** `system-homepod-exp-top_cap` installs
 > `/usr/share/vphone/HomePodDisplay.plist`, extracted from the selected board's
 > `/arm-io/dockchannel-rtp/rtp-transport/display` node. It preserves the donor's
@@ -528,6 +558,29 @@
 > actuator wait at once (a no-op on this guest — the wait loop is never
 > reached, because the manager's construction needs haptics hardware a
 > VM does not have). See the full section below.
+
+> **CIBarcode standalone X1 lowering (2026-10-29, local validation):**
+> `system-cibarcode-cfw-arm64e_x1` applies the existing static X1 planner to
+> `/System/Library/CoreImage/CIBarcode.cifilter/CIBarcode`, outside the shared
+> cache. It is gated to iOS 27.1, enabled in `standard`, and blocked in the TV
+> and HomePod presets. The measured 24A94425 image UUID is
+> `807AC7DC-7FE2-3E60-BA1B-0E879FF70012`. After whole-cache lowering, an app
+> reached its normal main run loop but faulted on a utility queue in this
+> image at relative address 5960 with `EXC_BAD_INSTRUCTION` / `0xDAC1A7FE`,
+> called by `+[CIFilter(CIFilterRegistryPrivate) filterWithName:setDefaults:]`.
+> This offset is evidence only; the patch discovers reachable instructions
+> through the existing planner, not a fixed offset. The installer stages from
+> `.bak`, re-attests/signs and seals the filter bundle, and restores the backup
+> when deselected. On the pulled stock image, the planner lowered 425
+> instructions, re-attested 19 slots, and left zero unvisited candidates;
+> the recorded fault site was lowered and a second pass was byte-identical.
+> The X1 and catalogue suites passed (39 tests). An environment update on an
+> existing M3 Max Duo preserved a byte-identical original `.bak` and recorded
+> the new patch in its Guest receipt. The previously crashing app reached its
+> home screen in both open and closed postures without a new CIBarcode crash.
+> App-specific environment-risk checks remain active; login and transactions
+> were not tested. The build used local Xcode 26 compatibility adjustments
+> outside this patch. A full multi-firmware golden corpus was not available.
 
 > **ARM64E_X1 whole-cache lowering (2026-10-23):** `dyld-cfw-arm64e_x1_cache`
 > (guest system set, iOS 27, on in `standard`, blocked in `tvos` and
@@ -4503,6 +4556,81 @@ feature plists omit the entry, which the existing plist patcher can add.
 This enables transport testing; HomePod onboarding, Apple TV companion setup
 and Home/AirPlay pairing have not been validated. Existing machines need the
 updated Core Bundle and `cfw update-environment` while stopped, then a boot.
+
+## HomePod mini on the research board (2026-10-26)
+
+HomePod Software 26.5 (23L471, AudioAccessory5,1) on cloudOS 26.5 (23F75), which
+has no vphone600 components: the 26.5 research board kernel (`26.5_23F77`)
+rebuilt with the HomePod's own kexts, as the watch is. `homepod-mini` keeps its
+kernel and TXM patches and links this kernelcache. The firmware catalog
+pairs HomePod Software 26.5 with this cloudOS, so Launchpad offers it; 27.x
+keeps cloudOS 26.4.
+
+### The HomePod kernelcache
+
+`kernel-boot-vresearch101_kext_mix` with the recipe `homepod_26.5_23L471`
+(`guest: homePod`; `KernelCacheRecipes.ownRecipeGuests` now names it, so a
+HomePod no longer falls back to the iPhone recipe of the same kernel).
+
+| Source | Kexts |
+| --- | --- |
+| `b520_26.5_23L471`: `kernelcache.release.b520` of the HomePod IPSW, from the guest restore tree | 91: the kexts of the vresearch101 target built with `OSPRODUCT=AppleTVOS` (`b520.mk` includes `sub.AppleTV.mk`; the method reproduces 179 of the 180 shipped b520 bundles, the miss being AppleUSBHostDeviceSupport as on the watch) |
+| base: 23F75 `kernelcache.release.vresearch101` | 26: the kernel and its 7 KPI bundles, the virtual platform kexts (ARMGIC, PVPanic, ParavirtGPU, VPIOP, VirtIO, VirtualPlatform, ParavirtIOSurface, VirtIOStorage, the XHCI stack, M68Buttons, CallbackPowerSource, TypeCPhy, usb.cdc), and AMFI, corecrypto and AppleImage4 |
+| `vphone600_26.4_23E5207q` | 6: VideoToolboxParavirtualization, AvpFairPlayDriver, driverkit.serial, usb.cdc.acm, usb.serial, VirtIONeuralEngineDevice |
+
+AMFI, corecrypto and AppleImage4 are pinned to the base with the new recipe key
+`kextOverrides`: b520 ships them too, but the T8006 kernel has a PPL
+(`__PPLTEXT`, `__PPLDATA`) and their HomePod builds call into it; the
+VRESEARCH1 kernel is SPTM/TXM (`__DATA_SPTM`) and has none. The seven KPI
+symbol sets of the two kernels (xnu-12377.123.3 and .122.4) are identical.
+
+gPTP (2026-10-27): `kextOverrides` also takes `IOTimeSyncFamily` from the base
+and `IOgPTPPlugin` from `vphone600_26.4_23E5207q`, the pair of the iPhone 26.5
+mix (now 89 kexts from b520, 7 from vphone600). The b520 plugin's
+`IOTimeSyncgPTPManager` requires the PMU temperature sensor `PMU tdev1` and
+fails to start on a VM, which left `audioclocksyncd` waiting and AirPlay 2's
+PTP clock (`CM8021ASClockCreate`) hung. With Apple's VM build the manager
+starts and the HomePod plays AirPlay 2 from the Mac. The vphone600 family
+does not link against the 26.5 kernel (it imports an `IOPlatformExpert`
+private function the base lacks). No instruction patch. See
+[HomePod AirPlay](Guest/homepod_airplay.md).
+
+Both maps are research results: the b520 kernelcache symbolicated with BinDiff
+against the 23E5207i KDK, and the 26.5 recipe map with additions. The fixes
+(`HomePod/mix` in the research workspace, rebuilt by its `pipeline.sh`):
+
+- Kernel imports of the HomePod kexts, through the kernel alignment: 54 fixed,
+  15 kept after disassembly. One-instruction stubs (`mov w0,#k; ret`) lie
+  8 bytes apart in both kernels, so names drift there and identical-code folding
+  gives one stub many names: a `_kc.` placeholder binds to a byte-identical
+  base stub; a real name stays a name bind (checked against Apple's names in
+  macOS 25F80: `_t6000dart_vo_tte` and `_pmap_has_iofilter_protected_write`
+  sit on the wrong base stub, the config-specific `_ml_page_protection_type`,
+  `_secure_channel_shared_page` and `_ecc_log_memory_error_ce` stay the base's).
+  The base map has `_ml_set_reset_time` inside `_ml_get_conttime_offset`, as
+  23E244 had; the import binds to the `ret` the base PMGR calls.
+- Family names the base VM kexts import from b520 builds: PAC-diversity vtable
+  slots (`IOMobileFramebufferLegacy` slot 344 and
+  `IOGPUEventMachine::incrementStampNoRelease`, as on the watch;
+  `IOUSBHostPipe` slot 32), `kext_xfer_names`, and eleven IOSurface getters
+  whose b520 labels sat 0x14 (two 0x2c) before their entry, on the previous
+  function's `retab`, which fails PAC on return.
+- Class data labels of both maps from `ipsw kernel cpp`; none of the 40 the
+  donor kexts import moves.
+
+Checked on 2026-10-26: bindcheck reports no unresolved bind for the HomePod,
+base VM and donor kexts; the entry checks find no bind after a prologue (110
+family, 1052 kernel, 2 donor family binds); `vphone-cli`'s native staging of
+the recipe is byte-identical to the research mix (the kernel and all 119 kext
+executables). Relinking the HomePod's own extraction reproduces the shipped
+b520 kernelcache: the same size, and apart from the prelink `InfoPlistDigest`
+entries only two words of the shared `__LINKEDIT` differ, as on the watch.
+
+Checked on 2026-10-26 and 2026-10-27: `homepod-std` (Launchpad `vm create` with
+the HomePod 26.5 IPSW, cloudOS 26.5 23F75 and `--preset homepod-mini`; `fw
+kernelcache` staged as the user and linked as root) restores, boots, takes
+`cfw install` and answers vphoned as `AudioAccessory5,1`, iOS 26.5. Its plan
+holds `kernel-boot-vresearch101_kext_mix` beside `homepod-mini`'s kernel patches.
 
 ## iOS 18 guests on the research board (2026-10-21)
 

@@ -329,6 +329,7 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
                 mc?.updateManagementAvailability(available: caps.contains("management_manipulation"))
                 mc?.updateShutDownAvailability(available: caps.contains("system_shutdown"))
                 mc?.updateUDIDAvailability(available: caps.contains("udid_override"))
+                mc?.updateSoftwareKeyboardAvailability(available: true)
                 mc?.updatePanelAvailability(capabilities: caps)
                 if caps.contains("location") {
                     mc?.updateLocationCapability(available: true)
@@ -356,6 +357,7 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
             }
             control.onDisconnect = { [weak mc, weak provider = locationProvider, weak timeZoneSync, weak clockSync, weak hostAudioLatencySync] in
                 mc?.updateConnectAvailability(available: false)
+                mc?.updateSoftwareKeyboardAvailability(available: false)
                 mc?.updateInstallAvailability(available: false)
                 mc?.updateBootstrapAvailability(available: false)
                 mc?.updateBootstrapUninstallAvailability(available: false)

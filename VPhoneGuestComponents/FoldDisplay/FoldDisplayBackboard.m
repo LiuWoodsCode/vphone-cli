@@ -35,6 +35,29 @@ static void vpTagUnknownDisplay(id display) {
     vpFoldDisplayLog([NSString stringWithFormat:@"inner display: tag %@ (%lu)", describe(unknown), (unsigned long)unknown]);
 }
 
+// The inner panel is a 120 Hz ProMotion panel. A virtual display's mode is
+// 60 Hz whatever kCAVirtualDisplayUpdateRate says, and every client reads
+// its refresh rate, heartbeat and UIScreen.maximumFramesPerSecond from that
+// mode, so apps on the inner display drew at 60. The display takes digital
+// modes in the framebuffer's timing format instead: one timing at the
+// panel's size with a 16.16 PreciseSyncRate of 120, and one 8-bit RGB color
+// mode (Colorimetry 1, as the primary's RGB_8bit). Only a mode scoring above
+// 0 can be preferred, and plain RGB adds nothing, hence Score 1. A mode set
+// replaces the current mode it does not contain, so this one becomes current.
+static void vpSetInnerDisplayProMotionMode(id display) {
+    SEL setModes = sel_registerName("setDigitalModes:withTimings:");
+    Method method = class_getInstanceMethod(object_getClass(display), setModes);
+    if (!method || strcmp(method_getTypeEncoding(method), "B32@0:8@16@24") != 0) {
+        vpFoldDisplayLog(@"inner display: digital modes ABI unavailable, staying at 60 Hz");
+        return;
+    }
+    NSArray *colors = @[@{@"ID": @1, @"PixelEncoding": @0, @"Depth": @8, @"Colorimetry": @1, @"EOTF": @0, @"DynamicRange": @0}];
+    NSArray *timings = @[@{@"ID": @1, @"Score": @1, @"HorizontalAttributes": @{@"Active": @2853},
+        @"VerticalAttributes": @{@"Active": @2007, @"PreciseSyncRate": @(120 << 16)}}];
+    BOOL set = ((BOOL (*)(id, SEL, id, id))objc_msgSend)(display, setModes, colors, timings);
+    vpFoldDisplayLog([NSString stringWithFormat:@"inner display: 120 Hz mode %@", set ? @"set" : @"refused"]);
+}
+
 // Adds the inner panel's render display to a render server, once. It is
 // never removed: FrontBoard keeps identities for the life of the monitor.
 static BOOL vpAddInnerRenderDisplayToServer(id server) {
@@ -52,6 +75,7 @@ static BOOL vpAddInnerRenderDisplayToServer(id server) {
             @"kCAVirtualDisplayUpdateRate": @60, @"kCAVirtualDisplayName": vpInnerDisplayName,
         }];
         if (!display) { vpFoldDisplayLog(@"inner display: initializer returned nil"); return NO; }
+        vpSetInnerDisplayProMotionMode(display);
         ((void (*)(id, SEL, id))objc_msgSend)(server, sel_registerName("addDisplay:"), display);
         SEL setEnabled = sel_registerName("setEnabled:");
         Method enable = class_getInstanceMethod(object_getClass(display), setEnabled);
@@ -134,8 +158,20 @@ static BOOL vpInnerPanelLit(void) {
     return inner && [[inner valueForKey:@"enabled"] boolValue] && ![[inner valueForKey:@"isBlanked"] boolValue];
 }
 
+// Whether a render display of this backboardd has the UUID. A digitizer can
+// come back from a backboardd restart still bound to an earlier run's inner
+// display, a UUID no display has now: the CoreDevice touchscreen that icli and
+// vphoned inject through did, and every injected touch then hit nothing.
+static BOOL vpLiveDisplayUUID(id uuid) {
+    id server = ((id (*)(id, SEL))objc_msgSend)(objc_getClass("CAWindowServer"), sel_registerName("serverIfRunning"));
+    for (id display in vpReadObject(server, "displays") ?: @[])
+        if ([[display valueForKey:@"uniqueId"] isEqual:uuid]) return YES;
+    return NO;
+}
+
 static id vpInnerDigitizerDisplayUUID(id self, SEL selector, id service) {
     id uuid = ((id (*)(id, SEL, id))vpOriginalDigitizerDisplayUUID)(self, selector, service);
+    if ([uuid length] && !vpLiveDisplayUUID(uuid)) uuid = nil;
     if ([uuid length] || !vpInnerPanelLit()) return uuid;
     id inner = [vpInnerRenderDisplay valueForKey:@"uniqueId"];
     return [inner length] ? inner : uuid;

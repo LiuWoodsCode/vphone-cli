@@ -4602,3 +4602,237 @@ portrait, as on any iPhone.
 
 Open: in landscape on the cover, the `AxisAlignableSplitV68Cover` status bar
 draws its time and battery over Safari's address field.
+
+## 2026-10-29: the fold owns the panel; hidden windows hosted
+
+Reported after manual testing on duospike-inner: the fold control sometimes
+left the screen on the inner display or black instead of the cover, the inner
+Dock did not respond, and the screen still flickered.
+
+**Fold control.** The shared panel used to follow SpringBoard's power
+requests alone (lit while either panel wanted it, the cover winning). Those
+requests do not follow the fold:
+
+- With the inner display asleep (the 60 s auto-lock), closing made SpringBoard
+  light the inner display for about three seconds and then turn it off; the
+  cover was never asked on. The panel showed the folded-away inner display,
+  then went black.
+- In a long-running SpringBoard, a close resolved FullyClosed (SpringBoard's
+  log said so at the next open) without any power request: the panel kept
+  showing the inner display.
+
+The panel now belongs to whichever display holds the primary content,
+`-[SBDisplayContentModeCoordinator primaryWindowScene]`, and is lit while
+that display wants to be; the other panel's requests are applied but not
+shown. Ownership is re-read on every power request and after each
+`performDisplayContentModeTransitionWithCoordinator:`, so a fold without a
+power request still hands the panel over. With that, SpringBoard's own
+requests land on the right panel: closing awake, closing after the auto-lock,
+closing after the sleep button, and opening asleep each light the arriving
+panel (the cover's lock screen or home screen, the inner lock screen). An
+extra wake on a fold, tried first, was not needed.
+(`_displayContentModeChangedWithContext:continuationLockProvider:` appears in
+the symbols only through its blocks; the runtime has no such method.)
+
+**Flicker.** A 120 Hz capture with a per-tile transient detector (a 24×24
+grid, a tile that jumps and comes back within two frames) found one frame left:
+going home from an app, the first frame of the shrinking app sat on black.
+The compositor hosted only visible windows; the home screen's windows came
+back with new `CALayerHost`s, and a host draws nothing for its first frame.
+Hidden windows are now hosted too (they draw nothing); the frame shows the
+dimmed home screen blur instead (backdrop 0.22 instead of 0.12, brightening
+over the next frames).
+
+**Touch.** Automation taps and guest-injected touches with and without edge
+flags land at the expected points on all four edges and corners, in every
+orientation (`locationInView:` equals the screenshot point divided by 3),
+and the Dock launches its apps after folds, rotations, sleep/wake and app
+switching. The user's dead Dock was in a SpringBoard that had been running
+for hours and was not reproduced; once, right after a SpringBoard restart and
+a fold, the Dock ignored taps until the next restart while the home screen's
+own icons kept working. Not yet explained; the next occurrence should be
+caught with `logs.syslog` for SpringBoard during a Dock tap ("Sending UIEvent
+... to window" and "Allowing tap for icon view").
+
+## 2026-10-29: host zombification against app-launch black frames
+
+**Symptom.** After the fixes above the user still saw an occasional flicker.
+A 120 Hz ScreenCaptureKit capture of the VM window, with per-frame luma,
+found it: one or two frames in which the whole panel is black (luma 0, the
+compositor root's own black), sometimes alternating with a frame in which an
+app is only partly drawn, about 0.4 to 0.6 s after an app launch or on the
+way home. Same rate in portrait and landscape; never on the cover (no
+compositing there). Sequence used: launch Safari, home, Settings, home,
+Safari by `apps.launch`, 2.5 s apart; it flashed in about 18 of 26 runs.
+
+**Ruled out, each by the same measurement:**
+- Host layer changes: a trace of every `CALayerHost` add, remove, frame and
+  zPosition change logged nothing during a flash.
+- SpringBoard fences: `CAFenceHandle` / `-[CAContext addFence:]` bursts
+  (logged with a calibration mark, a one-frame white layer, to align the
+  guest clock with the capture) do not coincide with the flashes.
+- GPU load of the inner virtual display: with SpringBoard keeping the inner
+  display powered off while it owned the panel, content kept updating and the
+  flashes stayed (3 of 5 runs). The inner display's update rate does move the
+  rate (30 Hz 1/5, 60 Hz ~5/7, 120 Hz 5/5), which follows how often apps
+  commit, not load.
+- `copyDisplayTimingsFromDisplay:` (inner timed by Main): no change.
+- `rendersAsynchronously` with an `asynchronousRenderPeriod` of 1/120: the
+  hosts draw nothing at all, as before.
+- A render-server probe in SpringBoard (`CARenderServerRenderDisplay` of
+  both displays) sees Main and the inner display change together, but costs
+  15 to 80 ms a sample and misses one- and two-frame events.
+
+**Fix.** `CALayerHost.zombificationMode = kCALayerHostZombificationModeAlways`
+on the compositor's hosts: a host whose context the render server briefly
+finds nothing to draw for keeps that context's last frame. The same
+sequence then flashed in 3 of 19 runs (one event each). Setting it on every
+`CALayerHost` SpringBoard makes (its scene hosts too) was no better (4 of
+10), so only the compositor's hosts get it. Going home, the app switcher,
+rotation and folding show no stale content (the switcher's blank snapshot
+cards are the same without it).
+
+**Left.** The remaining flash is still a fully black frame at an app launch.
+Likely, but not shown, it is SpringBoard's new scene host for the launching
+app drawing nothing for its first frame when the primary display renders
+it, the same first-frame blank the compositor's own hosts have; there is
+nothing to keep for a new host.
+
+## 2026-10-29 afternoon: the panel shows the inner display's own frames
+
+Zombification (above) hid most black frames; the user wanted the cause gone,
+and then also saw small red blocks beside a launching app's icon and ghosting
+Liquid Glass behind Notification Center (both with an intermediate portal
+build). The cause, found from data rather than screenshots:
+
+**A context has one host.** `CA::Render::LayerHost::retain_hosted_context`
+looks the hosted context up and, when it already has a host (its `+0x1d8`),
+detaches that host (clears its `+0x58`/`+0x60`, flags the old hosting
+context `0x2000` for re-resolution), takes the context, and rebinds it to the
+new host's display (`Context::set_display_mask`/`set_display_id` from the
+hosting context's `+0x2a8`/`+0x2ac`; `set_display_mask` also sends the owning
+client a Mach message). Every window of an inner scene is already hosted in
+the inner display's root scene window, so one `CALayerHost` per window on the
+primary display meant two hosts per context taking it from each other: on
+SpringBoard's commits during transitions the inner root took the windows
+back, and the panel showed those windows empty for a frame or two. A
+diagnostic build with a red compositor root showed exactly that: the holes
+were red and per window (only the Dock left, or icons without the wallpaper
+and widget contents), never SpringBoard's own layers of a window still held.
+It also explains why re-setting a host's frame or zPosition blanked hosted
+windows for a frame (the host commit re-ran the takeover).
+
+**Ruled out on the way:** host layer changes (traced: none at the flashes);
+SpringBoard fences (bursts do not align with flashes once both clocks are
+aligned by a white calibration frame); GPU load of the inner display (powered
+off, flashes stayed); `copyDisplayTimingsFromDisplay:`; asynchronous hosts.
+The inner display's update rate did move the rate (30 Hz 1/5 runs, 60 Hz ~5/7,
+120 Hz 5/5) because it paces the commits that trigger the takeovers. A
+cross-display `CAPortalLayer` of the inner root scene window takes nothing
+over and removed the window holes, but everything that depends on the display
+it is drawn for broke instead: SpringBoard's own portals (app zoom, switcher)
+left holes and a black first frame going home (setting `crossDisplay` on them
+helped only from `init`, which aborts SpringBoard when a portal is made off
+the main thread: `CA_ABORT_ON_NON_MAIN_THREAD_TRANSACTION_PUSH`; five aborts
+sent the next boot into Device Recovery), and backdrops sampled the primary
+display (ghosting glass). The render server's clone (`addClone:options:`, every
+option combination, with the LCD forced on) puts only black frames on this
+paravirtual panel; `CARenderServerCaptureDisplay` of the virtual display
+returns nothing.
+
+**The fix:** on each primary frame SpringBoard has the render server draw the
+inner display into a surface (`CARenderServerRenderDisplay(0, "VPhone Duo
+Inner", surface, 0, 0)` on a serial queue, about 3.5 ms) and shows it in a
+layer at the top of Main's root scene window, turned -90 degrees; three
+surfaces rotate so the render server never draws into the one shown or the
+one shown before. The panel shows the inner display's own frame, one primary
+frame late, with its backdrops, portals and hosts as the inner display draws
+them; nothing is hosted twice, so nothing is rebound. Measured over 12 launch
+sequences and 3 home/Dock runs: no black or partial frames, 0-6 transient
+tiles per run against 12-23 with the portal; scrolling updates at the same
+rate; taps on the inner display and the guest screenshot are unchanged.
+
+**Test trap, not a display bug:** after a SpringBoard or backboardd restart,
+touches vphoned injects (`input.touch`/`input.tap`, and so the host's clicks
+within 32 points of an edge: swipe home, Control Center, Notification Center,
+and the Dock at the usual window size) no longer reach SpringBoard until the
+guest reboots; the host's VZ taps keep working. Seen with the bundle's own
+build as well. Not yet explained.
+
+## 2026-10-29 evening: the panel is the cover's
+
+Main (the paravirtual panel) had been sized for the inner display,
+2007×2853 (669×951 points), since the single-display design, where SpringBoard
+laid the inner content out on Main itself (`VPhoneBootCommand` replaced the
+machine's 1398×2034 screen with `iPhone19_4InnerScreen` on every boot). With
+the two-display path that reason is gone: the inner display is its own
+2853×2007 virtual display, and Main is the cover. A cover laid out on
+669×951 points looked like a second inner display, not the Duo's outer one.
+
+vphone-vm now boots the machine's own screen, 1398×2034 at 3x: the cover is
+466×678 points with its native layout (the right-side Dock and status column
+are the Duo's outer-display design). Open, the compositor turns the inner
+display upright and fills the panel with it: 0.697 across and 0.713 along,
+about 2% tighter across than along. A first version kept the proportions and
+left 23 px black bars along the long sides, which the user did not want; with
+the fill, the digitizer (which spans the panel) maps onto the whole inner
+display, so backboardd's touch turn needs no rectangle of its own.
+
+Measured on the test VM (bundle built from this change):
+
+- Taps logged in SpringBoard land at the expected points: inner, panel pixel
+  (X, Y) of the landscape screenshot at (X × 951 / 2034, Y × 669 / 1398) points
+  for the centre and four corners (no bars); cover, at (X / 3, Y / 3).
+- Guest screenshots match the VM window at offset (0, 0) in all four inner and
+  three cover orientations (cover tested with Safari, which rotates on iPhone).
+- Three launch-sequence captures: no black frames, 2-5 transient tiles.
+
+## 2026-10-29 night: the inner display at 120 Hz
+
+Open, the VM window counted 60 fps while the cover (the paravirtual panel,
+with the ProMotion patch) runs at 120. Two caps, one in each process:
+
+- **backboardd.** A `CAWindowServerVirtualDisplay` gets one 60 Hz mode whatever
+  `kCAVirtualDisplayUpdateRate` says. `VirtualDisplay::refresh_rate()` uses the
+  update rate only while the display has no current mode; with one, it takes
+  the mode's 16.16 rate. `heartbeat_rate()` is that mode's period divided by
+  the integer `kCAVirtualDisplayMinimumFrameDuration` (default 1). Clients read
+  `CADisplay.refreshRate` (the mode), and `UIScreen.maximumFramesPerSecond`
+  is its inverse, so every app on the inner display was capped at 60
+  (UpdateRate 120: the display ticked faster, apps still saw 60; UpdateRate
+  60 + MinimumFrameDuration 2: heartbeat 1/120, refresh still 1/60).
+  The display's modes can be replaced with `-[CAWindowServerDisplay
+  setDigitalModes:withTimings:]` (`VirtualDisplay::set_digital_modes`), which
+  takes the framebuffer timing format: timings with `HorizontalAttributes` /
+  `VerticalAttributes` `{Active}` and `VerticalAttributes.PreciseSyncRate`
+  (16.16, default `0x3c0000` = 60), optional `Score`, and color modes
+  (`PixelEncoding` 0, `Depth` ≤ 8, `Colorimetry` 1/10/16, `EOTF` 0,
+  `DynamicRange` 0). A mode is preferred only when its score is above 0
+  (Colorimetry 16 adds 2, plain RGB nothing); with no preferred mode the
+  display comes up 0×0 and SpringBoard aborts in
+  `-[SBMainDisplayConfigurationTransformer transformDisplayConfiguration:]`.
+  FoldDisplay now sets one timing, 2853×2007 at 120, with Colorimetry 1 and
+  Score 1: the inner mode reads `RGB_8bit` like the panel's.
+- **SpringBoard.** The compositor's display link asks for the panel's
+  `maximumFramesPerSecond` (120 with the ProMotion patch, else 60).
+
+backboardd cannot read the panel's rate while it adds the inner display: the
+primary's rate is not set yet during display detection, and asking
+`CADisplay` there blocks backboardd (the inner display never appeared).
+
+Measured on duospike-inner (iOS 27.1, Settings open, 3 s windows):
+
+| | panel (LCD) | inner |
+|---|---|---|
+| `UIScreen.maximumFramesPerSecond` | 120 | 120 (was 60) |
+| `CADisplay.refreshRate` / heartbeat | 1/120 / 1/120 | 1/120 / 1/120 (was 1/60) |
+| default `CADisplayLink`, ticks in 3 s | 377 | 377 |
+| compositor renders in 3 s | | 375-378 |
+
+Idle CPU on the home screen, three 10 s samples each: 60 Hz build SpringBoard
+6.9-7.9%, backboardd 37.8-45.6%; 120 Hz build 9.3-10.4% and 50.3-51.3%.
+
+Window captures (ScreenCaptureKit) cannot judge 120 Hz here: the cover, which
+is natively 120, measures the same 40-55 changes per second as the inner
+display, because the host composites the window at its own rate. Use guest
+display links, or the host's `lastSubmittedTime` poller from the vGPU notes.
